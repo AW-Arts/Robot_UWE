@@ -81,3 +81,5 @@ workflows aligned.
   your individual servos.
 - The UI sends commands immediately when the target changes.  Consider slowing
   the command rate or batching updates if your hardware requires it.
+- When a manual servo adjustment reaches a configured limit the controller logs
+  a warning but still re-sends the command so the hardware stays in sync.

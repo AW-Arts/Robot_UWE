@@ -342,7 +342,17 @@ class InteractiveArm:
             return
 
         updated = list(self.current_joints)
-        new_angle = config.clamp_angle(updated[index] + delta)
+        old_angle = updated[index]
+        new_angle = config.clamp_angle(old_angle + delta)
+        if math.isclose(new_angle, old_angle, abs_tol=1e-6):
+            name, model, _ = self._SERVO_METADATA[index]
+            _LOGGER.warning(
+                "%s (%s) servo adjustment hit the configured limit (%.1f° to %.1f°).",
+                name,
+                model,
+                math.degrees(config.min_angle),
+                math.degrees(config.max_angle),
+            )
         updated[index] = new_angle
 
         if index == 4:
