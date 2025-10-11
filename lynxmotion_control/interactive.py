@@ -112,12 +112,25 @@ class InteractiveArm:
 
         # ``contains`` on ``scatter`` can be unreliable depending on the backend,
         # so fall back to a simple distance based check in data coordinates. This
-        # makes grabbing the red target dot consistent across platforms.
-        tolerance = 0.01  # metres
+        # makes grabbing the red target dot consistent across platforms. A
+        # slightly larger tolerance keeps the dot easy to grab while still
+        # preventing accidental drags from distant clicks.
+        tolerance = 0.02  # metres
         distance = math.hypot(event.xdata - self.target[0], event.ydata - self.target[1])
         if distance <= tolerance:
             self.drag_state.dragging = True
             self.drag_state.last_event = event
+            return
+
+        # If the click is outside the tolerance treat it as a request to jump
+        # the target to the clicked location.  This provides an easy way to
+        # reposition the end-effector even if the user misses the dot on the
+        # first try, after which standard dragging takes over.
+        self.target[0] = event.xdata
+        self.target[1] = event.ydata
+        self.drag_state.dragging = True
+        self.drag_state.last_event = event
+        self.update_robot()
 
     def _on_release(self, event) -> None:
         self.drag_state.dragging = False
