@@ -1,13 +1,57 @@
 """Interactive matplotlib UI for commanding the Lynxmotion AL5A."""
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass
 
-import matplotlib.pyplot as plt
+import matplotlib
 import numpy as np
 
 from .al5a_kinematics import AL5AKinematics
+
+
+_LOGGER = logging.getLogger(__name__)
+
+
+def _ensure_interactive_backend() -> None:
+    """Ensure Matplotlib is using a backend that supports mouse interaction."""
+
+    interactive_backends = {
+        "gtk3agg",
+        "macosx",
+        "nbagg",
+        "qtagg",
+        "qt5agg",
+        "tkagg",
+        "wxagg",
+    }
+    backend = matplotlib.get_backend()
+    backend_normalised = backend.lower()
+    if backend_normalised.startswith("module://"):
+        backend_normalised = backend_normalised.split("module://", 1)[1]
+
+    if backend_normalised in interactive_backends:
+        return
+
+    for candidate in ("qtagg", "qt5agg", "tkagg", "nbagg", "gtk3agg", "wxagg"):
+        try:
+            matplotlib.use(candidate, force=True)
+        except Exception:  # pragma: no cover - backend availability varies
+            continue
+        else:
+            _LOGGER.info("Switched Matplotlib backend to %s for interactivity", candidate)
+            return
+
+    raise RuntimeError(
+        "No interactive Matplotlib backend available. Install PyQt, Tk, or another "
+        "GUI toolkit to enable dragging the target in the controller UI."
+    )
+
+
+_ensure_interactive_backend()
+
+import matplotlib.pyplot as plt  # noqa: E402  (import after backend selection)
 
 
 @dataclass
