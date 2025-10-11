@@ -105,8 +105,17 @@ class InteractiveArm:
     def _on_press(self, event) -> None:
         if event.inaxes != self.ax:
             return
-        contains, _ = self.target_artist.contains(event)
-        if contains and event.button == 1:
+        if event.button != 1:
+            return
+        if event.xdata is None or event.ydata is None:
+            return
+
+        # ``contains`` on ``scatter`` can be unreliable depending on the backend,
+        # so fall back to a simple distance based check in data coordinates. This
+        # makes grabbing the red target dot consistent across platforms.
+        tolerance = 0.01  # metres
+        distance = math.hypot(event.xdata - self.target[0], event.ydata - self.target[1])
+        if distance <= tolerance:
             self.drag_state.dragging = True
             self.drag_state.last_event = event
 
