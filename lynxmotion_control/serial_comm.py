@@ -49,7 +49,18 @@ class AL5ASerialController:
             raise RuntimeError(
                 "pyserial is not available. Install it or run in simulation mode."
             )
-        self._serial = serial.Serial(self.port_name, self.baudrate, timeout=1)
+        try:
+            self._serial = serial.Serial(self.port_name, self.baudrate, timeout=1)
+        except Exception as exc:  # pragma: no cover - depends on hardware state
+            serial_exception = getattr(serial, "SerialException", Exception)
+            if isinstance(exc, serial_exception):
+                raise RuntimeError(
+                    "Unable to open serial port "
+                    f"{self.port_name!r}. Ensure the controller is connected, "
+                    "the correct port is selected, and no other program is using "
+                    "the device."
+                ) from exc
+            raise
 
     def disconnect(self) -> None:
         if self._serial is not None:
