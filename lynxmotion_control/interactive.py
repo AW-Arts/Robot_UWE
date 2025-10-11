@@ -83,20 +83,30 @@ class InteractiveArm:
         self.target = np.array([0.18, 0.0, 0.18])
         self.drag_state = DragState()
         self.figure = plt.figure("Lynxmotion AL5A Controller")
-        self.ax = self.figure.add_subplot(111)
+        self.ax = self.figure.add_subplot(111, projection="3d")
         self.ax.set_position([0.08, 0.1, 0.65, 0.8])
         self.ax.set_xlabel("X (m)")
         self.ax.set_ylabel("Y (m)")
-        self.ax.set_aspect("equal")
+        self.ax.set_zlabel("Z (m)")
         self.ax.set_xlim(-0.25, 0.25)
         self.ax.set_ylim(-0.25, 0.25)
-        self.ax.grid(True)
+        self.ax.set_zlim(0.0, 0.35)
+        try:
+            self.ax.set_box_aspect((1.0, 1.0, 0.6))
+        except AttributeError:  # Matplotlib < 3.4
+            pass
+        self.ax.view_init(elev=25, azim=-60)
 
-        (self.base_line,) = self.ax.plot([], [], "-o", lw=3)
+        (self.base_line,) = self.ax.plot([], [], [], "-o", lw=3)
         self.target_artist = self.ax.scatter(
-            [self.target[0]], [self.target[1]], c="red", s=100, label="Target"
+            [self.target[0]],
+            [self.target[1]],
+            [self.target[2]],
+            c="red",
+            s=100,
+            label="Target",
         )
-        self.text = self.ax.text(
+        self.text = self.ax.text2D(
             0.02,
             0.95,
             "",
@@ -115,36 +125,78 @@ class InteractiveArm:
         joints = self.kin.inverse(self.target[[0, 1, 2]], self.wrist_pitch)
         shoulder = joints[1]
         elbow = joints[2]
+        wrist = joints[3]
 
-        # Compute planar geometry for display (top-down view of XY plane)
         base = joints[0]
-        base_point = np.array([0.0, 0.0])
-        shoulder_point = np.array(
+        links = self.kin.links
+
+        base_origin = np.array([0.0, 0.0, 0.0])
+        shoulder_pivot = np.array([0.0, 0.0, links.base_height])
+
+        base_cos = math.cos(base)
+        base_sin = math.sin(base)
+
+        shoulder_horizontal = links.shoulder * math.cos(shoulder)
+        shoulder_vertical = links.shoulder * math.sin(shoulder)
+        elbow_joint = shoulder_pivot + np.array(
             [
-                math.cos(base) * self.kin.links.shoulder * math.cos(shoulder),
-                math.sin(base) * self.kin.links.shoulder * math.cos(shoulder),
+                base_cos * shoulder_horizontal,
+                base_sin * shoulder_horizontal,
+                shoulder_vertical,
             ]
         )
+
         elbow_angle = shoulder + elbow
-        elbow_point = shoulder_point + np.array(
+        elbow_horizontal = links.elbow * math.cos(elbow_angle)
+        elbow_vertical = links.elbow * math.sin(elbow_angle)
+        wrist_joint = elbow_joint + np.array(
             [
-                math.cos(base) * self.kin.links.elbow * math.cos(elbow_angle),
-                math.sin(base) * self.kin.links.elbow * math.cos(elbow_angle),
-            ]
-        )
-        wrist_angle = elbow_angle + joints[3]
-        wrist_point = elbow_point + np.array(
-            [
-                math.cos(base) * self.kin.links.wrist * math.cos(wrist_angle),
-                math.sin(base) * self.kin.links.wrist * math.cos(wrist_angle),
+                base_cos * elbow_horizontal,
+                base_sin * elbow_horizontal,
+                elbow_vertical,
             ]
         )
 
-        xs = [base_point[0], shoulder_point[0], elbow_point[0], wrist_point[0]]
-        ys = [base_point[1], shoulder_point[1], elbow_point[1], wrist_point[1]]
+        wrist_angle = elbow_angle + wrist
+        wrist_horizontal = links.wrist * math.cos(wrist_angle)
+        wrist_vertical = links.wrist * math.sin(wrist_angle)
+        tool_tip = wrist_joint + np.array(
+            [
+                base_cos * wrist_horizontal,
+                base_sin * wrist_horizontal,
+                wrist_vertical,
+            ]
+        )
+
+        xs = [
+            base_origin[0],
+            shoulder_pivot[0],
+            elbow_joint[0],
+            wrist_joint[0],
+            tool_tip[0],
+        ]
+        ys = [
+            base_origin[1],
+            shoulder_pivot[1],
+            elbow_joint[1],
+            wrist_joint[1],
+            tool_tip[1],
+        ]
+        zs = [
+            base_origin[2],
+            shoulder_pivot[2],
+            elbow_joint[2],
+            wrist_joint[2],
+            tool_tip[2],
+        ]
         self.base_line.set_data(xs, ys)
+        self.base_line.set_3d_properties(zs)
 
-        self.target_artist.set_offsets([[self.target[0], self.target[1]]])
+        self.target_artist._offsets3d = (
+            [self.target[0]],
+            [self.target[1]],
+            [self.target[2]],
+        )
         self.text.set_text(
             f"Target: x={self.target[0]:.3f} m, y={self.target[1]:.3f} m, z={self.target[2]:.3f} m\n"
             + f"Wrist pitch: {math.degrees(self.wrist_pitch):.1f}°"
