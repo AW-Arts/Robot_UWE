@@ -9,7 +9,7 @@ import matplotlib
 import numpy as np
 from matplotlib.widgets import Button
 
-from .al5a_kinematics import AL5AKinematics
+from .al5a_kinematics import AL5AKinematics, DEFAULT_SERVO_CONFIGS
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -64,6 +64,14 @@ class DragState:
 class InteractiveArm:
     """Matplotlib based interactive controller."""
 
+    _SERVO_METADATA = [
+        ("Base rotation", "HS-755HB", "lower servo, inside the base"),
+        ("Shoulder pitch", "HS-645MG", "mounted between ASB-06 and ASB-10"),
+        ("Elbow pitch", "HS-422", "mid-arm servo"),
+        ("Wrist pitch", "HS-422", "near wrist"),
+        ("Gripper", "HS-422/HS-225MG", "gripper open/close"),
+    ]
+
     def __init__(
         self,
         controller,
@@ -79,6 +87,8 @@ class InteractiveArm:
         self.move_time_ms = move_time_ms
         self.step_xy = step_xy
         self.step_z = step_z
+        self.gripper_angle = 0.0
+        self.current_joints: list[float] = [0.0] * 5
 
         self.target = np.array([0.18, 0.0, 0.18])
         self.drag_state = DragState()
@@ -123,86 +133,12 @@ class InteractiveArm:
 
     def update_robot(self) -> None:
         joints = self.kin.inverse(self.target[[0, 1, 2]], self.wrist_pitch)
-        shoulder = joints[1]
-        elbow = joints[2]
-        wrist = joints[3]
-
-        base = joints[0]
-        links = self.kin.links
-
-        base_origin = np.array([0.0, 0.0, 0.0])
-        shoulder_pivot = np.array([0.0, 0.0, links.base_height])
-
-        base_cos = math.cos(base)
-        base_sin = math.sin(base)
-
-        shoulder_horizontal = links.shoulder * math.cos(shoulder)
-        shoulder_vertical = links.shoulder * math.sin(shoulder)
-        elbow_joint = shoulder_pivot + np.array(
-            [
-                base_cos * shoulder_horizontal,
-                base_sin * shoulder_horizontal,
-                shoulder_vertical,
-            ]
-        )
-
-        elbow_angle = shoulder + elbow
-        elbow_horizontal = links.elbow * math.cos(elbow_angle)
-        elbow_vertical = links.elbow * math.sin(elbow_angle)
-        wrist_joint = elbow_joint + np.array(
-            [
-                base_cos * elbow_horizontal,
-                base_sin * elbow_horizontal,
-                elbow_vertical,
-            ]
-        )
-
-        wrist_angle = elbow_angle + wrist
-        wrist_horizontal = links.wrist * math.cos(wrist_angle)
-        wrist_vertical = links.wrist * math.sin(wrist_angle)
-        tool_tip = wrist_joint + np.array(
-            [
-                base_cos * wrist_horizontal,
-                base_sin * wrist_horizontal,
-                wrist_vertical,
-            ]
-        )
-
-        xs = [
-            base_origin[0],
-            shoulder_pivot[0],
-            elbow_joint[0],
-            wrist_joint[0],
-            tool_tip[0],
-        ]
-        ys = [
-            base_origin[1],
-            shoulder_pivot[1],
-            elbow_joint[1],
-            wrist_joint[1],
-            tool_tip[1],
-        ]
-        zs = [
-            base_origin[2],
-            shoulder_pivot[2],
-            elbow_joint[2],
-            wrist_joint[2],
-            tool_tip[2],
-        ]
-        self.base_line.set_data(xs, ys)
-        self.base_line.set_3d_properties(zs)
-
-        self.target_artist._offsets3d = (
-            [self.target[0]],
-            [self.target[1]],
-            [self.target[2]],
-        )
-        self.text.set_text(
-            f"Target: x={self.target[0]:.3f} m, y={self.target[1]:.3f} m, z={self.target[2]:.3f} m\n"
-            + f"Wrist pitch: {math.degrees(self.wrist_pitch):.1f}°"
-        )
-
-        self.controller.move_joints(joints, move_time_ms=self.move_time_ms)
+        self.wrist_pitch = joints[1] + joints[2] + joints[3]
+        full_joints = list(joints) + [self.gripper_angle]
+        self.current_joints = full_joints
+        self._update_visuals(joints)
+        self._update_servo_readouts()
+        self.controller.move_joints(full_joints, move_time_ms=self.move_time_ms)
         self.figure.canvas.draw_idle()
 
     def _on_press(self, event) -> None:
@@ -328,9 +264,58 @@ class InteractiveArm:
             transform=centre_ax.transAxes,
         )
 
+        self.servo_value_texts: list = []
+        self.servo_buttons: list[Button] = []
+
+        servo_value_left = 0.72
+        servo_value_width = 0.14
+        servo_button_width = 0.05
+        servo_row_height = 0.055
+        servo_gap = 0.01
+        servo_top = 0.9
+
+        for index, (name, model, location) in enumerate(self._SERVO_METADATA):
+            row_bottom = servo_top - servo_row_height - index * (servo_row_height + servo_gap)
+
+            value_ax = self.figure.add_axes(
+                [servo_value_left, row_bottom, servo_value_width, servo_row_height]
+            )
+            value_ax.axis("off")
+            text = value_ax.text(
+                0.0,
+                0.5,
+                f"{name} ({model})\n{location}\nAngle: 0.0°",
+                va="center",
+                ha="left",
+                fontsize=8,
+                transform=value_ax.transAxes,
+            )
+            self.servo_value_texts.append(text)
+
+            minus_left = servo_value_left + servo_value_width + 0.01
+            plus_left = minus_left + servo_button_width + 0.01
+
+            minus_ax = self.figure.add_axes([minus_left, row_bottom, servo_button_width, servo_row_height])
+            plus_ax = self.figure.add_axes([plus_left, row_bottom, servo_button_width, servo_row_height])
+
+            minus_button = Button(minus_ax, "-", hovercolor="0.975")
+            plus_button = Button(plus_ax, "+", hovercolor="0.975")
+
+            minus_button.on_clicked(self._make_servo_adjust_callback(index, -math.radians(5)))
+            plus_button.on_clicked(self._make_servo_adjust_callback(index, math.radians(5)))
+
+            self.servo_buttons.extend([minus_button, plus_button])
+
+
     def _make_move_callback(self, delta: tuple[float, float, float]):
         def _callback(event) -> None:  # pragma: no cover - UI interaction
             self._nudge_target(*delta)
+
+        return _callback
+
+    def _make_servo_adjust_callback(self, index: int, delta: float):
+        def _callback(event) -> None:  # pragma: no cover - UI interaction
+            self._adjust_servo(index, delta)
 
         return _callback
 
@@ -350,6 +335,119 @@ class InteractiveArm:
         self.target[1] = np.clip(self.target[1] + dy, *limits[1])
         self.target[2] = np.clip(self.target[2] + dz, *limits[2])
         self.update_robot()
+
+    def _adjust_servo(self, index: int, delta: float) -> None:
+        config = DEFAULT_SERVO_CONFIGS.get(index)
+        if config is None:
+            return
+
+        updated = list(self.current_joints)
+        new_angle = config.clamp_angle(updated[index] + delta)
+        updated[index] = new_angle
+
+        if index == 4:
+            self.gripper_angle = new_angle
+            self.current_joints = updated
+            self._update_servo_readouts()
+            self.controller.move_joints(updated, move_time_ms=self.move_time_ms)
+            return
+
+        self.current_joints = updated
+        forward_pose = self.kin.forward(self.current_joints)
+        self.target = forward_pose[:3, 3]
+        self.wrist_pitch = sum(self.current_joints[1:4])
+        self._update_visuals(self.current_joints[:4])
+        self._update_servo_readouts()
+        self.controller.move_joints(self.current_joints, move_time_ms=self.move_time_ms)
+
+    def _update_visuals(self, joints: list[float]) -> None:
+        shoulder = joints[1]
+        elbow = joints[2]
+        wrist = joints[3]
+
+        base = joints[0]
+        links = self.kin.links
+
+        base_origin = np.array([0.0, 0.0, 0.0])
+        shoulder_pivot = np.array([0.0, 0.0, links.base_height])
+
+        base_cos = math.cos(base)
+        base_sin = math.sin(base)
+
+        shoulder_horizontal = links.shoulder * math.cos(shoulder)
+        shoulder_vertical = links.shoulder * math.sin(shoulder)
+        elbow_joint = shoulder_pivot + np.array(
+            [
+                base_cos * shoulder_horizontal,
+                base_sin * shoulder_horizontal,
+                shoulder_vertical,
+            ]
+        )
+
+        elbow_angle = shoulder + elbow
+        elbow_horizontal = links.elbow * math.cos(elbow_angle)
+        elbow_vertical = links.elbow * math.sin(elbow_angle)
+        wrist_joint = elbow_joint + np.array(
+            [
+                base_cos * elbow_horizontal,
+                base_sin * elbow_horizontal,
+                elbow_vertical,
+            ]
+        )
+
+        wrist_angle = elbow_angle + wrist
+        wrist_horizontal = links.wrist * math.cos(wrist_angle)
+        wrist_vertical = links.wrist * math.sin(wrist_angle)
+        tool_tip = wrist_joint + np.array(
+            [
+                base_cos * wrist_horizontal,
+                base_sin * wrist_horizontal,
+                wrist_vertical,
+            ]
+        )
+
+        xs = [
+            base_origin[0],
+            shoulder_pivot[0],
+            elbow_joint[0],
+            wrist_joint[0],
+            tool_tip[0],
+        ]
+        ys = [
+            base_origin[1],
+            shoulder_pivot[1],
+            elbow_joint[1],
+            wrist_joint[1],
+            tool_tip[1],
+        ]
+        zs = [
+            base_origin[2],
+            shoulder_pivot[2],
+            elbow_joint[2],
+            wrist_joint[2],
+            tool_tip[2],
+        ]
+        self.base_line.set_data(xs, ys)
+        self.base_line.set_3d_properties(zs)
+
+        self.target_artist._offsets3d = (
+            [self.target[0]],
+            [self.target[1]],
+            [self.target[2]],
+        )
+        self.text.set_text(
+            f"Target: x={self.target[0]:.3f} m, y={self.target[1]:.3f} m, z={self.target[2]:.3f} m\n"
+            + f"Wrist pitch: {math.degrees(self.wrist_pitch):.1f}°"
+        )
+
+    def _update_servo_readouts(self) -> None:
+        for idx, text in enumerate(self.servo_value_texts):
+            name, model, location = self._SERVO_METADATA[idx]
+            angle_deg = math.degrees(self.current_joints[idx])
+            text.set_text(
+                f"{name} ({model})\n{location}\nAngle: {angle_deg:.1f}°"
+            )
+        self.figure.canvas.draw_idle()
 
 
 def run_demo(controller, move_time_ms: int = 1000) -> None:
