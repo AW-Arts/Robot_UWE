@@ -8,6 +8,9 @@ from typing import Iterable, Sequence
 import numpy as np
 
 
+INCH_TO_METRES = 0.0254
+
+
 @dataclass(frozen=True)
 class ServoConfig:
     """Conversion between joint angles (radians) and servo pulses."""
@@ -41,9 +44,11 @@ class ServoConfig:
 
 @dataclass(frozen=True)
 class AL5ALinkLengths:
-    base_height: float = 0.070  # metres
-    shoulder: float = 0.105
-    elbow: float = 0.105
+    """Physical link dimensions for the AL5A arm (metres)."""
+
+    base_height: float = 0.070  # base rotation to shoulder pivot
+    shoulder: float = 3.75 * INCH_TO_METRES  # base-to-elbow axis length
+    elbow: float = 4.25 * INCH_TO_METRES  # elbow-to-wrist axis length
     wrist: float = 0.082
 
 
