@@ -163,7 +163,8 @@ DEFAULT_SERVO_CONFIGS = {
     1: ServoConfig(min_angle=-0.35, max_angle=2.0, min_pulse=500, max_pulse=2500),
     2: ServoConfig(min_angle=-2.4, max_angle=0.35, min_pulse=500, max_pulse=2500),
     3: ServoConfig(min_angle=-2.0, max_angle=2.0, min_pulse=500, max_pulse=2500),
-    4: ServoConfig(min_angle=-1.0, max_angle=1.0, min_pulse=800, max_pulse=2200),
+    4: ServoConfig(min_angle=-np.pi, max_angle=np.pi, min_pulse=500, max_pulse=2500),
+    5: ServoConfig(min_angle=-1.0, max_angle=1.0, min_pulse=800, max_pulse=2200),
 }
 
 

@@ -71,6 +71,7 @@ class InteractiveArm:
         ("Shoulder pitch", "HS-645MG", "mounted between ASB-06 and ASB-10"),
         ("Elbow pitch", "HS-422", "mid-arm servo"),
         ("Wrist pitch", "HS-422", "near wrist"),
+        ("Wrist rotation", "HS-85BB", "wrist roll servo"),
         ("Gripper", "HS-422/HS-225MG", "gripper open/close"),
     ]
 
@@ -89,8 +90,9 @@ class InteractiveArm:
         self.move_time_ms = move_time_ms
         self.step_xy = step_xy
         self.step_z = step_z
+        self.wrist_rotation = 0.0
         self.gripper_angle = 0.0
-        self.current_joints: list[float] = [0.0] * 5
+        self.current_joints: list[float] = [0.0] * len(self._SERVO_METADATA)
 
         # Serial writes can block when the controller is busy. Offload them to a
         # dedicated worker so the Matplotlib event loop stays responsive.
@@ -146,7 +148,7 @@ class InteractiveArm:
     def update_robot(self) -> None:
         joints = self.kin.inverse(self.target[[0, 1, 2]], self.wrist_pitch)
         self.wrist_pitch = joints[1] + joints[2] + joints[3]
-        full_joints = list(joints) + [self.gripper_angle]
+        full_joints = list(joints) + [self.wrist_rotation, self.gripper_angle]
         self.current_joints = full_joints
         self._update_visuals(joints)
         self._update_servo_readouts()
@@ -367,8 +369,11 @@ class InteractiveArm:
             )
         updated[index] = new_angle
 
-        if index == 4:
-            self.gripper_angle = new_angle
+        if index >= 4:
+            if index == 4:
+                self.wrist_rotation = new_angle
+            else:
+                self.gripper_angle = new_angle
             self.current_joints = updated
             self._update_servo_readouts()
             self._send_move_command(updated, move_time_ms=self.move_time_ms)
