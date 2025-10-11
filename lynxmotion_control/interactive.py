@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 import matplotlib
 import numpy as np
+from matplotlib.widgets import Button
 
 from .al5a_kinematics import AL5AKinematics
 
@@ -69,16 +70,21 @@ class InteractiveArm:
         kinematics: AL5AKinematics | None = None,
         wrist_pitch: float = math.radians(30),
         move_time_ms: int = 1000,
+        step_xy: float = 0.01,
+        step_z: float = 0.01,
     ) -> None:
         self.controller = controller
         self.kin = kinematics or AL5AKinematics()
         self.wrist_pitch = wrist_pitch
         self.move_time_ms = move_time_ms
+        self.step_xy = step_xy
+        self.step_z = step_z
 
         self.target = np.array([0.18, 0.0, 0.18])
         self.drag_state = DragState()
         self.figure = plt.figure("Lynxmotion AL5A Controller")
         self.ax = self.figure.add_subplot(111)
+        self.ax.set_position([0.08, 0.1, 0.65, 0.8])
         self.ax.set_xlabel("X (m)")
         self.ax.set_ylabel("Y (m)")
         self.ax.set_aspect("equal")
@@ -102,6 +108,7 @@ class InteractiveArm:
         self.figure.canvas.mpl_connect("motion_notify_event", self._on_motion)
         self.figure.canvas.mpl_connect("scroll_event", self._on_scroll)
 
+        self._create_controls()
         self.update_robot()
 
     def update_robot(self) -> None:
@@ -198,6 +205,98 @@ class InteractiveArm:
             self.kin.links.base_height + 0.02,
             self.kin.links.base_height + self.kin.links.shoulder + self.kin.links.elbow,
         )
+        self.update_robot()
+
+    # ------------------------------------------------------------------
+    # UI helpers
+    def _create_controls(self) -> None:
+        """Create on-figure UI elements such as the D-pad."""
+
+        pad_left = 0.78
+        pad_bottom = 0.18
+        pad_size = 0.07
+        pad_gap = 0.005
+
+        button_defs = {
+            "up": (
+                pad_left,
+                pad_bottom + pad_size + pad_gap,
+                "▲",
+                (0.0, self.step_xy, 0.0),
+            ),
+            "down": (
+                pad_left,
+                pad_bottom - pad_size - pad_gap,
+                "▼",
+                (0.0, -self.step_xy, 0.0),
+            ),
+            "left": (
+                pad_left - pad_size - pad_gap,
+                pad_bottom,
+                "◀",
+                (-self.step_xy, 0.0, 0.0),
+            ),
+            "right": (
+                pad_left + pad_size + pad_gap,
+                pad_bottom,
+                "▶",
+                (self.step_xy, 0.0, 0.0),
+            ),
+            "raise": (
+                pad_left + 2 * (pad_size + pad_gap),
+                pad_bottom + pad_size + pad_gap,
+                "Z+",
+                (0.0, 0.0, self.step_z),
+            ),
+            "lower": (
+                pad_left + 2 * (pad_size + pad_gap),
+                pad_bottom - pad_size - pad_gap,
+                "Z-",
+                (0.0, 0.0, -self.step_z),
+            ),
+        }
+
+        self.buttons: dict[str, Button] = {}
+
+        for name, (x, y, label, delta) in button_defs.items():
+            axes = self.figure.add_axes([x, y, pad_size, pad_size])
+            button = Button(axes, label)
+            button.on_clicked(self._make_move_callback(delta))
+            self.buttons[name] = button
+
+        centre_ax = self.figure.add_axes([pad_left, pad_bottom, pad_size, pad_size])
+        centre_ax.axis("off")
+        centre_ax.text(
+            0.5,
+            0.5,
+            "XY",
+            ha="center",
+            va="center",
+            fontsize=10,
+            transform=centre_ax.transAxes,
+        )
+
+    def _make_move_callback(self, delta: tuple[float, float, float]):
+        def _callback(event) -> None:  # pragma: no cover - UI interaction
+            self._nudge_target(*delta)
+
+        return _callback
+
+    def _nudge_target(self, dx: float, dy: float, dz: float) -> None:
+        limits = (
+            (-0.25, 0.25),
+            (-0.25, 0.25),
+            (
+                self.kin.links.base_height + 0.02,
+                self.kin.links.base_height
+                + self.kin.links.shoulder
+                + self.kin.links.elbow,
+            ),
+        )
+
+        self.target[0] = np.clip(self.target[0] + dx, *limits[0])
+        self.target[1] = np.clip(self.target[1] + dy, *limits[1])
+        self.target[2] = np.clip(self.target[2] + dz, *limits[2])
         self.update_robot()
 
 
