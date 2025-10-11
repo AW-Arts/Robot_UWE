@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import logging
 import math
+import queue
+import threading
 from dataclasses import dataclass
 
 import matplotlib
@@ -90,6 +92,16 @@ class InteractiveArm:
         self.gripper_angle = 0.0
         self.current_joints: list[float] = [0.0] * 5
 
+        # Serial writes can block when the controller is busy. Offload them to a
+        # dedicated worker so the Matplotlib event loop stays responsive.
+        self._command_queue: queue.Queue[tuple[tuple[float, ...], int | None]] = (
+            queue.Queue(maxsize=1)
+        )
+        self._command_thread = threading.Thread(
+            target=self._command_worker, name="al5a-command-worker", daemon=True
+        )
+        self._command_thread.start()
+
         self.target = np.array([0.18, 0.0, 0.18])
         self.drag_state = DragState()
         self.figure = plt.figure("Lynxmotion AL5A Controller")
@@ -138,7 +150,7 @@ class InteractiveArm:
         self.current_joints = full_joints
         self._update_visuals(joints)
         self._update_servo_readouts()
-        self.controller.move_joints(full_joints, move_time_ms=self.move_time_ms)
+        self._send_move_command(full_joints, move_time_ms=self.move_time_ms)
         self.figure.canvas.draw_idle()
 
     def _on_press(self, event) -> None:
@@ -359,7 +371,7 @@ class InteractiveArm:
             self.gripper_angle = new_angle
             self.current_joints = updated
             self._update_servo_readouts()
-            self.controller.move_joints(updated, move_time_ms=self.move_time_ms)
+            self._send_move_command(updated, move_time_ms=self.move_time_ms)
             return
 
         self.current_joints = updated
@@ -368,7 +380,7 @@ class InteractiveArm:
         self.wrist_pitch = sum(self.current_joints[1:4])
         self._update_visuals(self.current_joints[:4])
         self._update_servo_readouts()
-        self.controller.move_joints(self.current_joints, move_time_ms=self.move_time_ms)
+        self._send_move_command(self.current_joints, move_time_ms=self.move_time_ms)
 
     def _update_visuals(self, joints: list[float]) -> None:
         shoulder = joints[1]
@@ -458,6 +470,30 @@ class InteractiveArm:
                 f"{name} ({model})\n{location}\nAngle: {angle_deg:.1f}°"
             )
         self.figure.canvas.draw_idle()
+
+    def _command_worker(self) -> None:
+        while True:
+            joints, move_time = self._command_queue.get()
+            try:
+                self.controller.move_joints(joints, move_time_ms=move_time)
+            except Exception:  # pragma: no cover - runtime safety net
+                _LOGGER.exception("Failed to send move command to controller")
+            finally:
+                self._command_queue.task_done()
+
+    def _send_move_command(
+        self, joints: list[float] | tuple[float, ...], move_time_ms: int | None
+    ) -> None:
+        command = (tuple(joints), move_time_ms)
+        try:
+            self._command_queue.put_nowait(command)
+        except queue.Full:
+            try:
+                self._command_queue.get_nowait()
+                self._command_queue.task_done()
+            except queue.Empty:  # pragma: no cover - defensive
+                pass
+            self._command_queue.put_nowait(command)
 
 
 def run_demo(controller, move_time_ms: int = 1000) -> None:
