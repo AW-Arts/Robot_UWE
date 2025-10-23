@@ -4,7 +4,13 @@ import math
 
 import numpy as np
 
-from lynxmotion_control.al5a_kinematics import AL5AKinematics, AL5ALinkLengths, INCH_TO_METRES, joints_to_pulses
+from lynxmotion_control.al5a_kinematics import (
+    AL5AKinematics,
+    AL5ALinkLengths,
+    DEFAULT_SERVO_CONFIGS,
+    INCH_TO_METRES,
+    joints_to_pulses,
+)
 
 
 def test_forward_inverse_roundtrip():
@@ -20,6 +26,14 @@ def test_joints_to_pulses_monotonic():
     assert pulses[0] > 500
     assert pulses[1] > 500
     assert pulses[2] < 2000
+
+
+def test_wrist_and_gripper_channels_swapped():
+    wrist_angle = 0.3
+    gripper_angle = 0.4
+    pulses = joints_to_pulses([0.0, 0.0, 0.0, 0.0, wrist_angle, gripper_angle])
+    assert pulses[4] == DEFAULT_SERVO_CONFIGS[5].angle_to_pulse(gripper_angle)
+    assert pulses[5] == DEFAULT_SERVO_CONFIGS[4].angle_to_pulse(wrist_angle)
 
 
 def test_inverse_limits_reachable():

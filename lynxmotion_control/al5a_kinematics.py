@@ -157,8 +157,8 @@ class AL5AKinematics:
         return [base, shoulder, elbow, wrist]
 
 
-DEFAULT_SERVO_CONFIGS = {
-    # Channel: ServoConfig(min_angle, max_angle, min_pulse, max_pulse)
+DEFAULT_SERVO_CONFIGS: dict[int, ServoConfig] = {
+    # Servo index: ServoConfig(min_angle, max_angle, min_pulse, max_pulse)
     0: ServoConfig(min_angle=-np.pi / 2, max_angle=np.pi / 2, min_pulse=500, max_pulse=2500),
     1: ServoConfig(min_angle=-0.35, max_angle=2.0, min_pulse=500, max_pulse=2500),
     2: ServoConfig(min_angle=-2.4, max_angle=0.35, min_pulse=500, max_pulse=2500),
@@ -168,24 +168,70 @@ DEFAULT_SERVO_CONFIGS = {
 }
 
 
-def joints_to_pulses(joints: Sequence[float], servo_configs: dict[int, ServoConfig] | None = None) -> list[int]:
+# Mapping from logical servo index to SSC-32 controller channel
+DEFAULT_SERVO_CHANNELS: dict[int, int] = {
+    0: 0,
+    1: 1,
+    2: 2,
+    3: 3,
+    4: 5,  # Wrist rotation plugged into channel 5
+    5: 4,  # Gripper plugged into channel 4
+}
+
+
+def joints_to_pulses(
+    joints: Sequence[float],
+    servo_configs: dict[int, ServoConfig] | None = None,
+    servo_channels: dict[int, int] | None = None,
+) -> list[int | None]:
     configs = servo_configs or DEFAULT_SERVO_CONFIGS
-    pulses: list[int] = []
-    for channel, angle in enumerate(joints):
-        if channel not in configs:
-            raise KeyError(f"No servo configuration for channel {channel}")
-        pulses.append(configs[channel].angle_to_pulse(angle))
+    channels = servo_channels or DEFAULT_SERVO_CHANNELS
+    if not joints:
+        return []
+
+    channel_indices: list[int] = []
+    for index in range(len(joints)):
+        if index not in channels:
+            raise KeyError(f"No channel mapping for servo index {index}")
+        channel_indices.append(channels[index])
+
+    max_channel = max(channel_indices)
+    pulses: list[int | None] = [None] * (max_channel + 1)
+
+    for index, angle in enumerate(joints):
+        if index not in configs:
+            raise KeyError(f"No servo configuration for servo index {index}")
+        channel = channels[index]
+        pulses[channel] = configs[index].angle_to_pulse(angle)
+
     return pulses
 
 
-def pulses_to_joints(pulses: Sequence[int], servo_configs: dict[int, ServoConfig] | None = None) -> list[float]:
+def pulses_to_joints(
+    pulses: Sequence[int],
+    servo_configs: dict[int, ServoConfig] | None = None,
+    servo_channels: dict[int, int] | None = None,
+) -> list[float]:
     configs = servo_configs or DEFAULT_SERVO_CONFIGS
-    joints: list[float] = []
+    channels = servo_channels or DEFAULT_SERVO_CHANNELS
+    if not pulses:
+        return []
+
+    inverse_channels = {channel: index for index, channel in channels.items()}
+    joints_map: dict[int, float] = {}
+
     for channel, pulse in enumerate(pulses):
-        if channel not in configs:
-            raise KeyError(f"No servo configuration for channel {channel}")
-        joints.append(configs[channel].pulse_to_angle(pulse))
-    return joints
+        index = inverse_channels.get(channel)
+        if index is None:
+            continue
+        if index not in configs:
+            raise KeyError(f"No servo configuration for servo index {index}")
+        joints_map[index] = configs[index].pulse_to_angle(pulse)
+
+    if not joints_map:
+        return []
+
+    return [joints_map[i] for i in sorted(joints_map)]
 
 
 __all__ = [
@@ -193,6 +239,7 @@ __all__ = [
     "AL5ALinkLengths",
     "ServoConfig",
     "DEFAULT_SERVO_CONFIGS",
+    "DEFAULT_SERVO_CHANNELS",
     "joints_to_pulses",
     "pulses_to_joints",
 ]
