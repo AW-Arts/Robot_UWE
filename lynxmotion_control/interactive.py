@@ -5,13 +5,14 @@ import logging
 import math
 import queue
 import threading
+from copy import deepcopy
 from dataclasses import dataclass
 
 import matplotlib
 import numpy as np
 from matplotlib.widgets import Button
 
-from .al5a_kinematics import AL5AKinematics, DEFAULT_SERVO_CONFIGS
+from .al5a_kinematics import AL5AKinematics, DEFAULT_SERVO_CONFIGS, ServoConfig
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -93,6 +94,11 @@ class InteractiveArm:
         self.wrist_rotation = 0.0
         self.gripper_angle = 0.0
         self.current_joints: list[float] = [0.0] * len(self._SERVO_METADATA)
+        self._base_servo_configs = deepcopy(DEFAULT_SERVO_CONFIGS)
+        self.servo_configs: dict[int, ServoConfig] = dict(self._base_servo_configs)
+        self.servo_inversions: list[bool] = [False] * len(self._SERVO_METADATA)
+        self._invert_button_inactive_color = "0.85"
+        self._invert_button_active_color = "#90ee90"
 
         # Serial writes can block when the controller is busy. Offload them to a
         # dedicated worker so the Matplotlib event loop stays responsive.
@@ -280,6 +286,7 @@ class InteractiveArm:
 
         self.servo_value_texts: list = []
         self.servo_buttons: list[Button] = []
+        self.servo_invert_buttons: list[Button] = []
 
         servo_value_left = 0.72
         servo_value_width = 0.14
@@ -308,17 +315,23 @@ class InteractiveArm:
 
             minus_left = servo_value_left + servo_value_width + 0.01
             plus_left = minus_left + servo_button_width + 0.01
+            invert_left = plus_left + servo_button_width + 0.01
 
             minus_ax = self.figure.add_axes([minus_left, row_bottom, servo_button_width, servo_row_height])
             plus_ax = self.figure.add_axes([plus_left, row_bottom, servo_button_width, servo_row_height])
+            invert_ax = self.figure.add_axes([invert_left, row_bottom, servo_button_width, servo_row_height])
 
             minus_button = Button(minus_ax, "-", hovercolor="0.975")
             plus_button = Button(plus_ax, "+", hovercolor="0.975")
+            invert_button = Button(invert_ax, "Inv", hovercolor="0.975")
 
             minus_button.on_clicked(self._make_servo_adjust_callback(index, -math.radians(5)))
             plus_button.on_clicked(self._make_servo_adjust_callback(index, math.radians(5)))
+            invert_button.on_clicked(self._make_inversion_toggle_callback(index))
 
             self.servo_buttons.extend([minus_button, plus_button])
+            self.servo_invert_buttons.append(invert_button)
+            self._update_inversion_button_visual(index)
 
 
     def _make_move_callback(self, delta: tuple[float, float, float]):
@@ -330,6 +343,12 @@ class InteractiveArm:
     def _make_servo_adjust_callback(self, index: int, delta: float):
         def _callback(event) -> None:  # pragma: no cover - UI interaction
             self._adjust_servo(index, delta)
+
+        return _callback
+
+    def _make_inversion_toggle_callback(self, index: int):
+        def _callback(event) -> None:  # pragma: no cover - UI interaction
+            self._toggle_servo_inversion(index)
 
         return _callback
 
@@ -351,7 +370,7 @@ class InteractiveArm:
         self.update_robot()
 
     def _adjust_servo(self, index: int, delta: float) -> None:
-        config = DEFAULT_SERVO_CONFIGS.get(index)
+        config = self.servo_configs.get(index)
         if config is None:
             return
 
@@ -386,6 +405,51 @@ class InteractiveArm:
         self._update_visuals(self.current_joints[:4])
         self._update_servo_readouts()
         self._send_move_command(self.current_joints, move_time_ms=self.move_time_ms)
+
+    def _toggle_servo_inversion(self, index: int) -> None:
+        if index >= len(self.servo_inversions):
+            return
+
+        self.servo_inversions[index] = not self.servo_inversions[index]
+        self._apply_servo_inversion(index)
+        self._update_inversion_button_visual(index)
+
+        name, model, _ = self._SERVO_METADATA[index]
+        state = "enabled" if self.servo_inversions[index] else "disabled"
+        _LOGGER.info("%s (%s) servo inversion %s", name, model, state)
+        self._send_move_command(self.current_joints, move_time_ms=self.move_time_ms)
+
+    def _apply_servo_inversion(self, index: int) -> None:
+        base_config = self._base_servo_configs.get(index)
+        if base_config is None:
+            return
+
+        if self.servo_inversions[index]:
+            self.servo_configs[index] = ServoConfig(
+                min_angle=base_config.min_angle,
+                max_angle=base_config.max_angle,
+                min_pulse=base_config.max_pulse,
+                max_pulse=base_config.min_pulse,
+            )
+        else:
+            self.servo_configs[index] = base_config
+
+    def _update_inversion_button_visual(self, index: int) -> None:
+        if index >= len(self.servo_invert_buttons):
+            return
+
+        button = self.servo_invert_buttons[index]
+        inverted = self.servo_inversions[index]
+        if inverted:
+            button.color = self._invert_button_active_color
+            button.hovercolor = "#b9f6b9"
+            button.label.set_text("Inv✓")
+        else:
+            button.color = self._invert_button_inactive_color
+            button.hovercolor = "0.95"
+            button.label.set_text("Inv")
+        button.ax.set_facecolor(button.color)
+        self.figure.canvas.draw_idle()
 
     def _update_visuals(self, joints: list[float]) -> None:
         shoulder = joints[1]
@@ -471,8 +535,9 @@ class InteractiveArm:
         for idx, text in enumerate(self.servo_value_texts):
             name, model, location = self._SERVO_METADATA[idx]
             angle_deg = math.degrees(self.current_joints[idx])
+            inversion_note = " (inv)" if self.servo_inversions[idx] else ""
             text.set_text(
-                f"{name} ({model})\n{location}\nAngle: {angle_deg:.1f}°"
+                f"{name} ({model})\n{location}\nAngle: {angle_deg:.1f}°{inversion_note}"
             )
         self.figure.canvas.draw_idle()
 
@@ -480,7 +545,11 @@ class InteractiveArm:
         while True:
             joints, move_time = self._command_queue.get()
             try:
-                self.controller.move_joints(joints, move_time_ms=move_time)
+                self.controller.move_joints(
+                    joints,
+                    move_time_ms=move_time,
+                    servo_configs=self._get_servo_configs_for_controller(),
+                )
             except Exception:  # pragma: no cover - runtime safety net
                 _LOGGER.exception("Failed to send move command to controller")
             finally:
@@ -499,6 +568,9 @@ class InteractiveArm:
             except queue.Empty:  # pragma: no cover - defensive
                 pass
             self._command_queue.put_nowait(command)
+
+    def _get_servo_configs_for_controller(self) -> dict[int, ServoConfig]:
+        return dict(self.servo_configs)
 
 
 def run_demo(controller, move_time_ms: int = 1000) -> None:
