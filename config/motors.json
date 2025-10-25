@@ -1,0 +1,10 @@
+{
+  "motors": [
+    {"id": "base", "label": "Base rotation", "inverted": false},
+    {"id": "shoulder", "label": "Shoulder joint", "inverted": false},
+    {"id": "elbow", "label": "Elbow joint", "inverted": false},
+    {"id": "wrist_pitch", "label": "Wrist pitch", "inverted": false},
+    {"id": "wrist_roll", "label": "Wrist roll", "inverted": false},
+    {"id": "gripper", "label": "Gripper", "inverted": false}
+  ]
+}

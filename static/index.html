@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Motor Inversion Control</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <header>
+        <h1>Motor Inversion Control</h1>
+        <p>
+          Use the toggles below to invert the direction of any motor. Changes
+          are applied globally so that the hardware and visualisation remain in
+          sync.
+        </p>
+      </header>
+      <section id="motor-grid" aria-live="polite"></section>
+    </main>
+    <template id="motor-template">
+      <article class="motor-card">
+        <div class="motor-header">
+          <h2 class="motor-name"></h2>
+          <span class="motor-id"></span>
+        </div>
+        <p class="motor-state"></p>
+        <button type="button" class="toggle-btn"></button>
+      </article>
+    </template>
+    <script src="/static/script.js" type="module"></script>
+  </body>
+</html>
