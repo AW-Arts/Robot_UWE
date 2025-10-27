@@ -46,10 +46,11 @@ cleanup = [];
 if strlength(serialPort) > 0
     serialObj = serialport(serialPort, opts.BaudRate);
     configureTerminator(serialObj, "CR");
+    serialObj.Timeout = 0.5;
     cleanup = onCleanup(@()close_serial(serialObj));
 end
 
-callback = @(~, q)teach_callback(q, serialObj, opts.TravelTime);
+callback = @(~, q)teach_callback(robot, q, serialObj, opts.TravelTime);
 fig = robot.teach(q0, 'deg', false, 'callback', callback, ...
     'qmin', robot.qlim(:,1)', 'qmax', robot.qlim(:,2)');
 
@@ -106,13 +107,62 @@ function lengths = al5a_link_lengths()
     );
 end
 
-function teach_callback(q, serialObj, travelTime)
+function teach_callback(robot, q, serialObj, travelTime)
     if isempty(serialObj) || ~isvalid(serialObj)
         return;
     end
     pulses = joints_to_pulses(q(:));
     cmd = format_ssc32_command(pulses, travelTime);
     writeline(serialObj, cmd);
+
+    feedbackAngles = read_feedback_angles(serialObj);
+    if ~isempty(feedbackAngles)
+        robot.animate(feedbackAngles(:)');
+    end
+end
+
+function angles = read_feedback_angles(serialObj)
+    persistent feedbackWarned
+    angles = [];
+    if isempty(serialObj) || ~isvalid(serialObj)
+        return;
+    end
+
+    try
+        writeline(serialObj, "QP");
+        response = strtrim(readline(serialObj));
+    catch err
+        if isempty(feedbackWarned) || ~feedbackWarned
+            warning('al5a_teach:feedback', ...
+                'Unable to read servo feedback: %s', err.message);
+            feedbackWarned = true;
+        end
+        return;
+    end
+
+    if strlength(response) == 0
+        if isempty(feedbackWarned) || ~feedbackWarned
+            warning('al5a_teach:feedback', ...
+                'Controller did not return servo feedback data.');
+            feedbackWarned = true;
+        end
+        return;
+    end
+
+    values = str2double(split(response));
+    if any(isnan(values))
+        if isempty(feedbackWarned) || ~feedbackWarned
+            warning('al5a_teach:feedback', ...
+                'Unexpected servo feedback payload: %s', response);
+            feedbackWarned = true;
+        end
+        return;
+    end
+
+    angles = pulses_to_joints(values(:)');
+    if ~isempty(angles)
+        feedbackWarned = false;
+    end
 end
 
 function pulses = joints_to_pulses(q)
@@ -127,6 +177,26 @@ function pulses = joints_to_pulses(q)
     end
 end
 
+function angles = pulses_to_joints(pulses)
+    configs = servo_configs();
+    channels = servo_channels();
+    numServos = min(numel(configs), numel(channels));
+    if numel(pulses) < max(channels(1:numServos)) + 1
+        angles = [];
+        return;
+    end
+
+    angles = zeros(numServos, 1);
+    for i = 1:numServos
+        cfg = configs(i);
+        channel = channels(i) + 1; % MATLAB uses 1-based indexing
+        pulse = pulses(channel);
+        proportion = (pulse - cfg.min_pulse) / (cfg.max_pulse - cfg.min_pulse);
+        angle = cfg.min_angle + proportion * (cfg.max_angle - cfg.min_angle);
+        angles(i) = max(cfg.min_angle, min(cfg.max_angle, angle));
+    end
+end
+
 function cfgs = servo_configs()
     cfgs = struct('min_angle', {}, 'max_angle', {}, 'min_pulse', {}, 'max_pulse', {});
     cfgs(1) = struct('min_angle', -pi/2, 'max_angle', pi/2, 'min_pulse', 500, 'max_pulse', 2500);
@@ -134,6 +204,10 @@ function cfgs = servo_configs()
     cfgs(3) = struct('min_angle', -2.4, 'max_angle', 0.35, 'min_pulse', 500, 'max_pulse', 2500);
     cfgs(4) = struct('min_angle', -2.0, 'max_angle', 2.0, 'min_pulse', 500, 'max_pulse', 2500);
     cfgs(5) = struct('min_angle', -1.0, 'max_angle', 1.0, 'min_pulse', 800, 'max_pulse', 2200);
+end
+
+function channels = servo_channels()
+    channels = [0, 1, 2, 3, 4];
 end
 
 function cmd = format_ssc32_command(pulses, travelTime)

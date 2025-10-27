@@ -12,7 +12,12 @@ import matplotlib
 import numpy as np
 from matplotlib.widgets import Button
 
-from .al5a_kinematics import AL5AKinematics, DEFAULT_SERVO_CONFIGS, ServoConfig
+from .al5a_kinematics import (
+    AL5AKinematics,
+    DEFAULT_SERVO_CHANNELS,
+    DEFAULT_SERVO_CONFIGS,
+    ServoConfig,
+)
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -550,6 +555,26 @@ class InteractiveArm:
                     move_time_ms=move_time,
                     servo_configs=self._get_servo_configs_for_controller(),
                 )
+                feedback: list[float] | None = None
+                read_positions = getattr(self.controller, "read_positions", None)
+                if callable(read_positions):
+                    try:
+                        feedback = read_positions(
+                            servo_configs=self._get_servo_configs_for_controller(),
+                            servo_channels=DEFAULT_SERVO_CHANNELS,
+                        )
+                    except Exception:  # pragma: no cover - runtime safety net
+                        _LOGGER.warning(
+                            "Failed to obtain feedback from controller", exc_info=True
+                        )
+
+                if feedback:
+                    for idx, angle in enumerate(feedback):
+                        if idx < len(self.current_joints):
+                            self.current_joints[idx] = angle
+                        else:
+                            self.current_joints.append(angle)
+                    self._update_servo_readouts()
             except Exception:  # pragma: no cover - runtime safety net
                 _LOGGER.exception("Failed to send move command to controller")
             finally:

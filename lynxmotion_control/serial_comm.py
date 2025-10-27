@@ -1,6 +1,7 @@
 """Serial communication helpers for the Lynxmotion AL5A arm."""
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Protocol, Sequence
 
@@ -8,6 +9,7 @@ from .al5a_kinematics import (
     DEFAULT_SERVO_CHANNELS,
     DEFAULT_SERVO_CONFIGS,
     joints_to_pulses,
+    pulses_to_joints,
 )
 
 try:
@@ -16,8 +18,13 @@ except ModuleNotFoundError:  # pragma: no cover - optional dependency at runtime
     serial = None
 
 
+_LOGGER = logging.getLogger(__name__)
+
+
 class SerialLike(Protocol):
     def write(self, data: bytes) -> int: ...
+
+    def read_until(self, terminator: bytes = b"\n") -> bytes: ...
 
     def close(self) -> None: ...
 
@@ -45,6 +52,7 @@ class AL5ASerialController:
         self.port_name = port
         self.baudrate = baudrate
         self._serial: SerialLike | None = None
+        self._feedback_warning_logged = False
 
     def connect(self) -> None:
         if self._serial is not None:
@@ -96,6 +104,74 @@ class AL5ASerialController:
         command = SSC32Command(pulses, move_time_ms)
         serial_port.write(command.to_bytes())
 
+    def read_positions(
+        self,
+        servo_configs: dict[int, object] | None = None,
+        servo_channels: dict[int, int] | None = None,
+    ) -> list[float] | None:
+        """Query servo positions and convert the response to joint angles.
+
+        Returns ``None`` if the controller fails to provide feedback (for
+        example because the firmware does not support the ``QP`` command).
+        """
+
+        serial_port = self.ensure_connection()
+        try:
+            serial_port.write(b"QP\r")
+            response = serial_port.read_until(b"\r")
+        except AttributeError:  # pragma: no cover - depends on serial backend
+            self._log_feedback_warning(
+                "Serial implementation does not support read_until; feedback disabled."
+            )
+            return None
+        except Exception:  # pragma: no cover - runtime protection
+            _LOGGER.exception("Failed to request servo positions from controller")
+            return None
+
+        if not response:
+            self._log_feedback_warning(
+                "Controller did not return any data for the QP feedback query."
+            )
+            return None
+
+        response_text = response.decode("ascii", errors="ignore").strip()
+        if not response_text:
+            self._log_feedback_warning(
+                "Received empty feedback payload from the controller."
+            )
+            return None
+
+        try:
+            pulses = [int(part) for part in response_text.split()]
+        except ValueError:
+            _LOGGER.warning(
+                "Unexpected feedback payload from controller: %s", response_text
+            )
+            return None
+
+        if not pulses:
+            self._log_feedback_warning(
+                "Controller feedback did not contain any pulse data."
+            )
+            return None
+
+        try:
+            joints = pulses_to_joints(
+                pulses,
+                servo_configs=servo_configs or DEFAULT_SERVO_CONFIGS,
+                servo_channels=servo_channels or DEFAULT_SERVO_CHANNELS,
+            )
+            self._feedback_warning_logged = False
+            return joints
+        except Exception:  # pragma: no cover - defensive
+            _LOGGER.exception("Failed to convert controller pulses to joint angles")
+            return None
+
+    def _log_feedback_warning(self, message: str) -> None:
+        if not self._feedback_warning_logged:
+            _LOGGER.warning(message)
+            self._feedback_warning_logged = True
+
 
 class PrintController:
     """Fallback controller that prints commands instead of sending them."""
@@ -114,6 +190,14 @@ class PrintController:
         )
         command = SSC32Command(pulses, move_time_ms)
         print(command.to_bytes().decode("ascii").strip())
+
+    def read_positions(
+        self,
+        servo_configs: dict[int, object] | None = None,
+        servo_channels: dict[int, int] | None = None,
+    ) -> list[float] | None:  # pragma: no cover - simple print controller
+        _LOGGER.info("PrintController does not support feedback queries")
+        return None
 
 
 __all__ = ["AL5ASerialController", "PrintController", "SSC32Command"]
