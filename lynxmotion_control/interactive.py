@@ -102,6 +102,9 @@ class InteractiveArm:
         self.current_joints: list[float] = [0.0] * len(self._SERVO_METADATA)
         self.commanded_joints: list[float] = list(self.current_joints)
         self.feedback_joints: list[float] | None = None
+        self._initial_feedback_move_pending = False
+        self._initial_feedback_move_time_ms = 10_000
+        self._skip_next_command = False
         self._base_servo_configs = deepcopy(DEFAULT_SERVO_CONFIGS)
         self.servo_configs: dict[int, ServoConfig] = dict(self._base_servo_configs)
         self.servo_inversions: list[bool] = [False] * len(self._SERVO_METADATA)
@@ -169,7 +172,63 @@ class InteractiveArm:
         self.figure.canvas.mpl_connect("scroll_event", self._on_scroll)
 
         self._create_controls()
+        self._initialise_from_feedback()
         self.update_robot()
+
+    def _initialise_from_feedback(self) -> None:
+        read_positions = getattr(self.controller, "read_positions", None)
+        if not callable(read_positions):
+            return
+
+        try:
+            feedback = read_positions(
+                servo_configs=self._get_servo_configs_for_controller(),
+                servo_channels=DEFAULT_SERVO_CHANNELS,
+            )
+        except Exception:  # pragma: no cover - runtime safety net
+            _LOGGER.warning(
+                "Failed to obtain initial feedback from controller", exc_info=True
+            )
+            self._skip_next_command = True
+            return
+
+        if not feedback:
+            return
+
+        joints = list(feedback)
+        for idx, angle in enumerate(joints):
+            if idx < len(self.current_joints):
+                self.current_joints[idx] = angle
+            else:
+                self.current_joints.append(angle)
+
+        self.commanded_joints = list(self.current_joints)
+        self.feedback_joints = list(self.current_joints)
+        self._last_commanded_joints = tuple(self.current_joints)
+
+        if len(self.current_joints) >= 5:
+            self.wrist_rotation = self.current_joints[4]
+        if len(self.current_joints) >= 6:
+            self.gripper_angle = self.current_joints[5]
+
+        if len(self.current_joints) >= 4:
+            try:
+                pose = self.kin.forward(self.current_joints)
+            except Exception:  # pragma: no cover - safety net
+                _LOGGER.warning(
+                    "Failed to compute pose from controller feedback", exc_info=True
+                )
+            else:
+                self.target[:3] = pose[:3, 3]
+                self.wrist_pitch = (
+                    self.current_joints[1]
+                    + self.current_joints[2]
+                    + self.current_joints[3]
+                )
+                self._update_visuals(self.current_joints)
+
+        self._update_servo_readouts()
+        self._initial_feedback_move_pending = True
 
     def update_robot(self) -> None:
         joints = self.kin.inverse(self.target[[0, 1, 2]], self.wrist_pitch)
@@ -756,10 +815,25 @@ class InteractiveArm:
     def _send_move_command(
         self, joints: list[float] | tuple[float, ...], move_time_ms: int | None
     ) -> None:
-        command = (tuple(joints), move_time_ms)
+        adjusted_move_time = move_time_ms
+        if self._initial_feedback_move_pending:
+            if adjusted_move_time is None:
+                adjusted_move_time = self._initial_feedback_move_time_ms
+            else:
+                adjusted_move_time = max(
+                    adjusted_move_time, self._initial_feedback_move_time_ms
+                )
+            self._initial_feedback_move_pending = False
+
         self.commanded_joints = list(joints)
         self.feedback_joints = None
         self._update_servo_readouts()
+
+        if self._skip_next_command:
+            self._skip_next_command = False
+            return
+
+        command = (tuple(joints), adjusted_move_time)
         try:
             self._command_queue.put_nowait(command)
         except queue.Full:
