@@ -996,9 +996,22 @@ class InteractiveArm:
             joints_raw, move_time = self._command_queue.get()
             try:
                 interrupted = False
+                aborted_for_calibration = False
                 for segment_raw, segment_time in self._generate_smooth_segments(
                     self._last_commanded_raw, joints_raw, move_time
                 ):
+                    if self._calibration_active:
+                        relax = getattr(self.controller, "relax_servos", None)
+                        if callable(relax):
+                            try:
+                                relax()
+                            except Exception:  # pragma: no cover - runtime safety net
+                                _LOGGER.warning(
+                                    "Failed to relax servos when calibration became active",
+                                    exc_info=True,
+                                )
+                        aborted_for_calibration = True
+                        break
                     corrected_segment = self._apply_offsets(
                         segment_raw, direction="correct"
                     )
@@ -1023,6 +1036,15 @@ class InteractiveArm:
 
                 if interrupted:
                     self.feedback_joints = None
+                    continue
+
+                if aborted_for_calibration:
+                    self.feedback_joints = None
+                    self.commanded_joints = list(self.current_joints)
+                    self._last_commanded_raw = tuple(
+                        self._apply_offsets(self.current_joints, direction="raw")
+                    )
+                    self._update_servo_readouts()
                     continue
 
                 feedback_raw = self._read_feedback_from_controller()

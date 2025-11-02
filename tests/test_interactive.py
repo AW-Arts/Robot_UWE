@@ -77,6 +77,18 @@ class _CalibrationController:
         self._feedback = feedback
 
 
+class _RecordingController:
+    def __init__(self) -> None:
+        self.moves: list[tuple[tuple[float, ...], int | None]] = []
+        self.relax_calls = 0
+
+    def move_joints(self, joints, **kwargs) -> None:  # pragma: no cover - simple recording
+        self.moves.append((tuple(joints), kwargs.get("move_time_ms")))
+
+    def relax_servos(self, *_args, **_kwargs) -> None:
+        self.relax_calls += 1
+
+
 @contextlib.contextmanager
 def _prepare_arm(monkeypatch, interactive_module, controller, *, move_time_ms: int = 1234):
     class FakeQueue:
@@ -92,8 +104,10 @@ def _prepare_arm(monkeypatch, interactive_module, controller, *, move_time_ms: i
         def task_done(self) -> None:  # pragma: no cover - compatibility stub
             return
 
-        def get(self, *_args, **_kwargs):  # pragma: no cover - compatibility stub
-            raise AssertionError("Unexpected blocking get on fake queue")
+        def get(self, *_args, **_kwargs):
+            if not self.commands:
+                raise AssertionError("Unexpected blocking get on fake queue")
+            return self.commands.pop(0)
 
         def empty(self) -> bool:
             return not self.commands
@@ -187,3 +201,45 @@ def test_set_vertical_persists_offsets(monkeypatch, interactive_module, tmp_path
             arm.servo_offsets.get(1, 0.0), expected_shoulder, rel_tol=1e-6
         )
         assert math.isclose(arm.servo_offsets.get(2, 0.0), expected_elbow, rel_tol=1e-6)
+
+
+def test_command_worker_aborts_when_calibration_activates(
+    monkeypatch, interactive_module
+) -> None:
+    controller = _RecordingController()
+    with _prepare_arm(monkeypatch, interactive_module, controller) as arm:
+        arm._command_queue.commands.clear()  # type: ignore[attr-defined]
+        baseline_current = list(arm.current_joints)
+        baseline_last_raw = arm._last_commanded_raw
+
+        target = [angle + 0.1 for angle in baseline_current]
+        arm._send_move_command(target, move_time_ms=250)
+
+        assert arm._command_queue.commands  # type: ignore[attr-defined]
+        assert controller.moves == []
+
+        arm._calibration_active = True
+
+        original_get = arm._command_queue.get  # type: ignore[attr-defined]
+
+        def single_use_get(*args, **kwargs):
+            if single_use_get.calls == 0:
+                single_use_get.calls += 1
+                return original_get(*args, **kwargs)
+            raise KeyboardInterrupt
+
+        single_use_get.calls = 0
+
+        arm._command_queue.get = single_use_get  # type: ignore[attr-defined]
+
+        with pytest.raises(KeyboardInterrupt):
+            arm._command_worker()
+
+        arm._command_queue.get = original_get  # type: ignore[attr-defined]
+
+        assert controller.moves == []
+        assert controller.relax_calls == 1
+        assert arm._last_commanded_raw == baseline_last_raw
+        assert arm.commanded_joints == baseline_current
+        assert arm.current_joints == baseline_current
+        assert arm.feedback_joints is None
