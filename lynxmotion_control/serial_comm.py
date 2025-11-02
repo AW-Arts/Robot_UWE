@@ -120,9 +120,14 @@ class AL5ASerialController:
             channels = [channels_map[index] for index in indices]
         except KeyError as exc:  # pragma: no cover - defensive programming
             raise KeyError(f"Unknown servo index: {exc.args[0]}") from exc
-        command = ("".join(f"#{channel}L" for channel in channels) + "\r").encode(
-            "ascii"
-        )
+        # ``#<channel>PO`` disables the PWM output for a servo channel on the
+        # SSC-32/SSC-32U controller which removes holding torque from the
+        # connected servo. ``#<channel>L`` only changes a digital output state
+        # and has no effect on active servo channels, so use ``PO`` instead of
+        # ``L`` when relaxing servos.
+        command = (
+            "".join(f"#{channel}PO" for channel in channels) + "\r"
+        ).encode("ascii")
         serial_port.write(command)
 
     def read_positions(
@@ -232,7 +237,7 @@ class PrintController:
             else list(servo_indices)
         )
         channels = [channels_map[index] for index in indices]
-        command = "".join(f"#{channel}L" for channel in channels)
+        command = "".join(f"#{channel}PO" for channel in channels)
         print(command)
 
 
