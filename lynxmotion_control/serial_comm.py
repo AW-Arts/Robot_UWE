@@ -104,6 +104,27 @@ class AL5ASerialController:
         command = SSC32Command(pulses, move_time_ms)
         serial_port.write(command.to_bytes())
 
+    def relax_servos(
+        self,
+        servo_indices: Sequence[int] | None = None,
+        servo_channels: dict[int, int] | None = None,
+    ) -> None:
+        serial_port = self.ensure_connection()
+        channels_map = servo_channels or DEFAULT_SERVO_CHANNELS
+        indices = (
+            sorted(channels_map)
+            if servo_indices is None
+            else list(servo_indices)
+        )
+        try:
+            channels = [channels_map[index] for index in indices]
+        except KeyError as exc:  # pragma: no cover - defensive programming
+            raise KeyError(f"Unknown servo index: {exc.args[0]}") from exc
+        command = ("".join(f"#{channel}L" for channel in channels) + "\r").encode(
+            "ascii"
+        )
+        serial_port.write(command)
+
     def read_positions(
         self,
         servo_configs: dict[int, object] | None = None,
@@ -198,6 +219,21 @@ class PrintController:
     ) -> list[float] | None:  # pragma: no cover - simple print controller
         _LOGGER.info("PrintController does not support feedback queries")
         return None
+
+    def relax_servos(
+        self,
+        servo_indices: Sequence[int] | None = None,
+        servo_channels: dict[int, int] | None = None,
+    ) -> None:
+        channels_map = servo_channels or DEFAULT_SERVO_CHANNELS
+        indices = (
+            sorted(channels_map)
+            if servo_indices is None
+            else list(servo_indices)
+        )
+        channels = [channels_map[index] for index in indices]
+        command = "".join(f"#{channel}L" for channel in channels)
+        print(command)
 
 
 __all__ = ["AL5ASerialController", "PrintController", "SSC32Command"]
