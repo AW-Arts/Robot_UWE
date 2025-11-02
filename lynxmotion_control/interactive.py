@@ -5,12 +5,13 @@ import logging
 import math
 import queue
 import threading
+import time
 from copy import deepcopy
 from dataclasses import dataclass
 
 import matplotlib
 import numpy as np
-from matplotlib.widgets import Button
+from matplotlib.widgets import Button, TextBox
 
 from .al5a_kinematics import (
     AL5AKinematics,
@@ -99,11 +100,16 @@ class InteractiveArm:
         self.wrist_rotation = 0.0
         self.gripper_angle = 0.0
         self.current_joints: list[float] = [0.0] * len(self._SERVO_METADATA)
+        self.commanded_joints: list[float] = list(self.current_joints)
+        self.feedback_joints: list[float] | None = None
         self._base_servo_configs = deepcopy(DEFAULT_SERVO_CONFIGS)
         self.servo_configs: dict[int, ServoConfig] = dict(self._base_servo_configs)
         self.servo_inversions: list[bool] = [False] * len(self._SERVO_METADATA)
         self._invert_button_inactive_color = "0.85"
         self._invert_button_active_color = "#90ee90"
+        self._last_commanded_joints: tuple[float, ...] | None = tuple(self.current_joints)
+        self._smoothing_step_ms = 60
+        self._min_smoothing_segments = 5
 
         # Serial writes can block when the controller is busy. Offload them to a
         # dedicated worker so the Matplotlib event loop stays responsive.
@@ -119,7 +125,7 @@ class InteractiveArm:
         self.drag_state = DragState()
         self.figure = plt.figure("Lynxmotion AL5A Controller")
         self.ax = self.figure.add_subplot(111, projection="3d")
-        self.ax.set_position([0.08, 0.1, 0.65, 0.8])
+        self.ax.set_position([0.05, 0.12, 0.5, 0.78])
         self.ax.set_xlabel("X (m)")
         self.ax.set_ylabel("Y (m)")
         self.ax.set_zlabel("Z (m)")
@@ -161,6 +167,7 @@ class InteractiveArm:
         self.wrist_pitch = joints[1] + joints[2] + joints[3]
         full_joints = list(joints) + [self.wrist_rotation, self.gripper_angle]
         self.current_joints = full_joints
+        self.commanded_joints = list(full_joints)
         self._update_visuals(joints)
         self._update_servo_readouts()
         self._send_move_command(full_joints, move_time_ms=self.move_time_ms)
@@ -225,7 +232,7 @@ class InteractiveArm:
     def _create_controls(self) -> None:
         """Create on-figure UI elements such as the D-pad."""
 
-        pad_left = 0.78
+        pad_left = 0.56
         pad_bottom = 0.18
         pad_size = 0.07
         pad_gap = 0.005
@@ -292,10 +299,12 @@ class InteractiveArm:
         self.servo_value_texts: list = []
         self.servo_buttons: list[Button] = []
         self.servo_invert_buttons: list[Button] = []
+        self.servo_limit_boxes_min: list[TextBox] = []
+        self.servo_limit_boxes_max: list[TextBox] = []
 
-        servo_value_left = 0.72
-        servo_value_width = 0.14
-        servo_button_width = 0.05
+        servo_value_left = 0.56
+        servo_value_width = 0.16
+        servo_button_width = 0.04
         servo_row_height = 0.055
         servo_gap = 0.01
         servo_top = 0.9
@@ -318,24 +327,49 @@ class InteractiveArm:
             )
             self.servo_value_texts.append(text)
 
-            minus_left = servo_value_left + servo_value_width + 0.01
-            plus_left = minus_left + servo_button_width + 0.01
-            invert_left = plus_left + servo_button_width + 0.01
+            minus_left = servo_value_left + servo_value_width + 0.008
+            plus_left = minus_left + servo_button_width + 0.008
+            invert_left = plus_left + servo_button_width + 0.008
+            limit_left = invert_left + servo_button_width + 0.012
+            limit_width = 0.05
+            max_left = limit_left + limit_width + 0.008
 
-            minus_ax = self.figure.add_axes([minus_left, row_bottom, servo_button_width, servo_row_height])
-            plus_ax = self.figure.add_axes([plus_left, row_bottom, servo_button_width, servo_row_height])
-            invert_ax = self.figure.add_axes([invert_left, row_bottom, servo_button_width, servo_row_height])
+            minus_ax = self.figure.add_axes(
+                [minus_left, row_bottom, servo_button_width, servo_row_height]
+            )
+            plus_ax = self.figure.add_axes(
+                [plus_left, row_bottom, servo_button_width, servo_row_height]
+            )
+            invert_ax = self.figure.add_axes(
+                [invert_left, row_bottom, servo_button_width, servo_row_height]
+            )
+            min_ax = self.figure.add_axes([limit_left, row_bottom, limit_width, servo_row_height])
+            max_ax = self.figure.add_axes([max_left, row_bottom, limit_width, servo_row_height])
 
             minus_button = Button(minus_ax, "-", hovercolor="0.975")
             plus_button = Button(plus_ax, "+", hovercolor="0.975")
             invert_button = Button(invert_ax, "Inv", hovercolor="0.975")
+            min_box = TextBox(
+                min_ax,
+                "Min°",
+                initial=f"{math.degrees(self.servo_configs[index].min_angle):.0f}",
+            )
+            max_box = TextBox(
+                max_ax,
+                "Max°",
+                initial=f"{math.degrees(self.servo_configs[index].max_angle):.0f}",
+            )
 
             minus_button.on_clicked(self._make_servo_adjust_callback(index, -math.radians(5)))
             plus_button.on_clicked(self._make_servo_adjust_callback(index, math.radians(5)))
             invert_button.on_clicked(self._make_inversion_toggle_callback(index))
+            min_box.on_submit(self._make_limit_submit_callback(index, "min"))
+            max_box.on_submit(self._make_limit_submit_callback(index, "max"))
 
             self.servo_buttons.extend([minus_button, plus_button])
             self.servo_invert_buttons.append(invert_button)
+            self.servo_limit_boxes_min.append(min_box)
+            self.servo_limit_boxes_max.append(max_box)
             self._update_inversion_button_visual(index)
 
 
@@ -354,6 +388,24 @@ class InteractiveArm:
     def _make_inversion_toggle_callback(self, index: int):
         def _callback(event) -> None:  # pragma: no cover - UI interaction
             self._toggle_servo_inversion(index)
+
+        return _callback
+
+    def _make_limit_submit_callback(self, index: int, bound: str):
+        def _callback(text: str) -> None:  # pragma: no cover - UI interaction
+            try:
+                value = float(text)
+            except ValueError:
+                name, model, _ = self._SERVO_METADATA[index]
+                _LOGGER.warning("Ignoring invalid %s limit for %s (%s)", bound, name, model)
+                self._update_limit_box_display(index)
+                return
+
+            radians_value = math.radians(value)
+            if bound == "min":
+                self._update_servo_limit(index, min_angle=radians_value)
+            else:
+                self._update_servo_limit(index, max_angle=radians_value)
 
         return _callback
 
@@ -399,11 +451,13 @@ class InteractiveArm:
             else:
                 self.gripper_angle = new_angle
             self.current_joints = updated
+            self.commanded_joints = list(updated)
             self._update_servo_readouts()
             self._send_move_command(updated, move_time_ms=self.move_time_ms)
             return
 
         self.current_joints = updated
+        self.commanded_joints = list(updated)
         forward_pose = self.kin.forward(self.current_joints)
         self.target = forward_pose[:3, 3]
         self.wrist_pitch = sum(self.current_joints[1:4])
@@ -438,6 +492,30 @@ class InteractiveArm:
             )
         else:
             self.servo_configs[index] = base_config
+        self._update_limit_box_display(index)
+
+    def _update_limit_box_display(self, index: int) -> None:
+        if not hasattr(self, "servo_limit_boxes_min"):
+            return
+        if index >= len(self.servo_limit_boxes_min):
+            return
+        base_config = self._base_servo_configs.get(index)
+        if base_config is None:
+            return
+        min_box = self.servo_limit_boxes_min[index]
+        max_box = self.servo_limit_boxes_max[index]
+        try:
+            min_box.eventson = False
+            max_box.eventson = False
+        except AttributeError:  # pragma: no cover - depends on Matplotlib
+            pass
+        min_box.set_val(f"{math.degrees(base_config.min_angle):.1f}")
+        max_box.set_val(f"{math.degrees(base_config.max_angle):.1f}")
+        try:
+            min_box.eventson = True
+            max_box.eventson = True
+        except AttributeError:  # pragma: no cover - depends on Matplotlib
+            pass
 
     def _update_inversion_button_visual(self, index: int) -> None:
         if index >= len(self.servo_invert_buttons):
@@ -539,22 +617,93 @@ class InteractiveArm:
     def _update_servo_readouts(self) -> None:
         for idx, text in enumerate(self.servo_value_texts):
             name, model, location = self._SERVO_METADATA[idx]
-            angle_deg = math.degrees(self.current_joints[idx])
+            commanded_deg = math.degrees(self.commanded_joints[idx])
+            if self.feedback_joints and idx < len(self.feedback_joints):
+                actual_deg = math.degrees(self.feedback_joints[idx])
+            else:
+                actual_deg = math.degrees(self.current_joints[idx])
             inversion_note = " (inv)" if self.servo_inversions[idx] else ""
+            config = self._base_servo_configs.get(idx)
+            limits_text = ""
+            if config is not None:
+                limits_text = (
+                    f"Limits: {math.degrees(config.min_angle):.0f}° to "
+                    f"{math.degrees(config.max_angle):.0f}°"
+                )
             text.set_text(
-                f"{name} ({model})\n{location}\nAngle: {angle_deg:.1f}°{inversion_note}"
+                f"{name} ({model})\n{location}\nCmd: {commanded_deg:.1f}°"
+                f" | Actual: {actual_deg:.1f}°{inversion_note}\n{limits_text}"
             )
         self.figure.canvas.draw_idle()
+
+    def _update_servo_limit(
+        self,
+        index: int,
+        *,
+        min_angle: float | None = None,
+        max_angle: float | None = None,
+    ) -> None:
+        base_config = self._base_servo_configs.get(index)
+        if base_config is None:
+            return
+
+        new_min = base_config.min_angle if min_angle is None else min_angle
+        new_max = base_config.max_angle if max_angle is None else max_angle
+        if new_min >= new_max:
+            name, model, _ = self._SERVO_METADATA[index]
+            _LOGGER.warning(
+                "Ignored invalid limit update for %s (%s): min %.1f° >= max %.1f°",
+                name,
+                model,
+                math.degrees(new_min),
+                math.degrees(new_max),
+            )
+            self._update_limit_box_display(index)
+            return
+
+        updated_base = ServoConfig(
+            min_angle=new_min,
+            max_angle=new_max,
+            min_pulse=base_config.min_pulse,
+            max_pulse=base_config.max_pulse,
+        )
+        self._base_servo_configs[index] = updated_base
+        self._apply_servo_inversion(index)
+        self.servo_configs[index] = (
+            self.servo_configs.get(index) or updated_base
+        )
+
+        def _clamp_list(values: list[float] | None) -> None:
+            if values is None:
+                return
+            if index >= len(values):
+                return
+            values[index] = self.servo_configs[index].clamp_angle(values[index])
+
+        _clamp_list(self.current_joints)
+        _clamp_list(self.commanded_joints)
+        _clamp_list(self.feedback_joints)
+        self._last_commanded_joints = tuple(self.commanded_joints)
+        self._update_servo_readouts()
+        self._update_limit_box_display(index)
 
     def _command_worker(self) -> None:
         while True:
             joints, move_time = self._command_queue.get()
             try:
-                self.controller.move_joints(
-                    joints,
-                    move_time_ms=move_time,
-                    servo_configs=self._get_servo_configs_for_controller(),
-                )
+                for segment_joints, segment_time in self._generate_smooth_segments(
+                    self._last_commanded_joints, joints, move_time
+                ):
+                    self.commanded_joints = list(segment_joints)
+                    self.controller.move_joints(
+                        segment_joints,
+                        move_time_ms=segment_time,
+                        servo_configs=self._get_servo_configs_for_controller(),
+                    )
+                    self._last_commanded_joints = tuple(segment_joints)
+                    self._update_servo_readouts()
+                    if segment_time and segment_time > 0:
+                        time.sleep(segment_time / 1000.0)
                 feedback: list[float] | None = None
                 read_positions = getattr(self.controller, "read_positions", None)
                 if callable(read_positions):
@@ -569,12 +718,15 @@ class InteractiveArm:
                         )
 
                 if feedback:
+                    self.feedback_joints = list(feedback)
                     for idx, angle in enumerate(feedback):
                         if idx < len(self.current_joints):
                             self.current_joints[idx] = angle
                         else:
                             self.current_joints.append(angle)
                     self._update_servo_readouts()
+                else:
+                    self.feedback_joints = None
             except Exception:  # pragma: no cover - runtime safety net
                 _LOGGER.exception("Failed to send move command to controller")
             finally:
@@ -584,6 +736,9 @@ class InteractiveArm:
         self, joints: list[float] | tuple[float, ...], move_time_ms: int | None
     ) -> None:
         command = (tuple(joints), move_time_ms)
+        self.commanded_joints = list(joints)
+        self.feedback_joints = None
+        self._update_servo_readouts()
         try:
             self._command_queue.put_nowait(command)
         except queue.Full:
@@ -596,6 +751,35 @@ class InteractiveArm:
 
     def _get_servo_configs_for_controller(self) -> dict[int, ServoConfig]:
         return dict(self.servo_configs)
+
+    def _generate_smooth_segments(
+        self,
+        start: tuple[float, ...] | None,
+        target: tuple[float, ...],
+        move_time_ms: int | None,
+    ) -> list[tuple[tuple[float, ...], int | None]]:
+        if start is None or len(start) != len(target):
+            return [(target, move_time_ms)]
+        if move_time_ms is None or move_time_ms <= self._smoothing_step_ms:
+            return [(target, move_time_ms)]
+
+        segments = max(self._min_smoothing_segments, int(move_time_ms // self._smoothing_step_ms))
+        step_time = move_time_ms / segments
+        result: list[tuple[tuple[float, ...], int | None]] = []
+        accumulated = 0
+        for step in range(1, segments + 1):
+            t = step / segments
+            eased = t * t * (3 - 2 * t)
+            values = tuple(
+                start[idx] + (target[idx] - start[idx]) * eased for idx in range(len(target))
+            )
+            if step < segments:
+                segment_time = int(round(step_time))
+                accumulated += segment_time
+            else:
+                segment_time = max(0, move_time_ms - accumulated)
+            result.append((values, segment_time if segment_time > 0 else None))
+        return result
 
 
 def run_demo(controller, move_time_ms: int = 1000) -> None:
