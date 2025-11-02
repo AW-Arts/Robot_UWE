@@ -110,6 +110,15 @@ class InteractiveArm:
         self._last_commanded_joints: tuple[float, ...] | None = tuple(self.current_joints)
         self._smoothing_step_ms = 60
         self._min_smoothing_segments = 5
+        self._default_max_joint_speed = math.radians(60.0) / 0.2  # ~300°/s
+        self._joint_max_speeds: dict[int, float] = {
+            0: math.radians(60.0) / 0.23,  # HS-755HB
+            1: math.radians(60.0) / 0.20,  # HS-645MG
+            2: math.radians(60.0) / 0.16,  # HS-422
+            3: math.radians(60.0) / 0.16,  # HS-422
+            4: math.radians(60.0) / 0.16,  # HS-85BB
+            5: math.radians(60.0) / 0.14,  # HS-422/HS-225MG
+        }
 
         # Serial writes can block when the controller is busy. Offload them to a
         # dedicated worker so the Matplotlib event loop stays responsive.
@@ -166,7 +175,6 @@ class InteractiveArm:
         joints = self.kin.inverse(self.target[[0, 1, 2]], self.wrist_pitch)
         self.wrist_pitch = joints[1] + joints[2] + joints[3]
         full_joints = list(joints) + [self.wrist_rotation, self.gripper_angle]
-        self.current_joints = full_joints
         self.commanded_joints = list(full_joints)
         self._update_visuals(joints)
         self._update_servo_readouts()
@@ -431,7 +439,10 @@ class InteractiveArm:
         if config is None:
             return
 
-        updated = list(self.current_joints)
+        source = self.feedback_joints or self.commanded_joints
+        if not source:
+            source = self.current_joints
+        updated = list(source)
         old_angle = updated[index]
         new_angle = config.clamp_angle(old_angle + delta)
         if math.isclose(new_angle, old_angle, abs_tol=1e-6):
@@ -450,20 +461,18 @@ class InteractiveArm:
                 self.wrist_rotation = new_angle
             else:
                 self.gripper_angle = new_angle
-            self.current_joints = updated
             self.commanded_joints = list(updated)
             self._update_servo_readouts()
             self._send_move_command(updated, move_time_ms=self.move_time_ms)
             return
 
-        self.current_joints = updated
         self.commanded_joints = list(updated)
-        forward_pose = self.kin.forward(self.current_joints)
+        forward_pose = self.kin.forward(self.commanded_joints)
         self.target = forward_pose[:3, 3]
-        self.wrist_pitch = sum(self.current_joints[1:4])
-        self._update_visuals(self.current_joints[:4])
+        self.wrist_pitch = sum(self.commanded_joints[1:4])
+        self._update_visuals(self.commanded_joints[:4])
         self._update_servo_readouts()
-        self._send_move_command(self.current_joints, move_time_ms=self.move_time_ms)
+        self._send_move_command(self.commanded_joints, move_time_ms=self.move_time_ms)
 
     def _toggle_servo_inversion(self, index: int) -> None:
         if index >= len(self.servo_inversions):
@@ -476,7 +485,7 @@ class InteractiveArm:
         name, model, _ = self._SERVO_METADATA[index]
         state = "enabled" if self.servo_inversions[index] else "disabled"
         _LOGGER.info("%s (%s) servo inversion %s", name, model, state)
-        self._send_move_command(self.current_joints, move_time_ms=self.move_time_ms)
+        self._send_move_command(self.commanded_joints, move_time_ms=self.move_time_ms)
 
     def _apply_servo_inversion(self, index: int) -> None:
         base_config = self._base_servo_configs.get(index)
@@ -691,6 +700,7 @@ class InteractiveArm:
         while True:
             joints, move_time = self._command_queue.get()
             try:
+                interrupted = False
                 for segment_joints, segment_time in self._generate_smooth_segments(
                     self._last_commanded_joints, joints, move_time
                 ):
@@ -702,8 +712,19 @@ class InteractiveArm:
                     )
                     self._last_commanded_joints = tuple(segment_joints)
                     self._update_servo_readouts()
+                    interrupted = False
                     if segment_time and segment_time > 0:
-                        time.sleep(segment_time / 1000.0)
+                        interrupted = self._wait_for_segment(segment_time / 1000.0)
+                    if not interrupted:
+                        self.current_joints = list(segment_joints)
+                        self._update_servo_readouts()
+                    if interrupted:
+                        break
+
+                if interrupted:
+                    self.feedback_joints = None
+                    continue
+
                 feedback: list[float] | None = None
                 read_positions = getattr(self.controller, "read_positions", None)
                 if callable(read_positions):
@@ -760,10 +781,25 @@ class InteractiveArm:
     ) -> list[tuple[tuple[float, ...], int | None]]:
         if start is None or len(start) != len(target):
             return [(target, move_time_ms)]
-        if move_time_ms is None or move_time_ms <= self._smoothing_step_ms:
-            return [(target, move_time_ms)]
 
-        segments = max(self._min_smoothing_segments, int(move_time_ms // self._smoothing_step_ms))
+        required_time_s = 0.0
+        for idx, (start_angle, target_angle) in enumerate(zip(start, target)):
+            speed = self._joint_max_speeds.get(idx, self._default_max_joint_speed)
+            if speed <= 0:
+                continue
+            delta = abs(target_angle - start_angle)
+            required_time_s = max(required_time_s, delta / speed)
+
+        requested_time_s = 0.0 if move_time_ms is None else max(0.0, move_time_ms / 1000.0)
+        total_time_s = max(requested_time_s, required_time_s)
+        if total_time_s <= 0:
+            return [(target, None)]
+
+        move_time_ms = int(round(total_time_s * 1000))
+        segments = max(
+            self._min_smoothing_segments,
+            int(math.ceil(max(move_time_ms, self._smoothing_step_ms) / self._smoothing_step_ms)),
+        )
         step_time = move_time_ms / segments
         result: list[tuple[tuple[float, ...], int | None]] = []
         accumulated = 0
@@ -780,6 +816,17 @@ class InteractiveArm:
                 segment_time = max(0, move_time_ms - accumulated)
             result.append((values, segment_time if segment_time > 0 else None))
         return result
+
+    def _wait_for_segment(self, duration_s: float) -> bool:
+        end_time = time.monotonic() + duration_s
+        poll_interval = max(0.01, self._smoothing_step_ms / 1000.0)
+        while True:
+            if not self._command_queue.empty():
+                return True
+            remaining = end_time - time.monotonic()
+            if remaining <= 0:
+                return False
+            time.sleep(min(remaining, poll_interval))
 
 
 def run_demo(controller, move_time_ms: int = 1000) -> None:
