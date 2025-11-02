@@ -87,6 +87,15 @@ class InteractiveArm:
         ("Gripper", "HS-422/HS-225MG", "gripper open/close"),
     ]
 
+    DEFAULT_HOME_PULSES: dict[int, int] = {
+        0: 1500,
+        1: 1580,
+        2: 950,
+        3: 1400,
+        4: 500,
+        5: 1500,
+    }
+
     def __init__(
         self,
         controller,
@@ -102,14 +111,6 @@ class InteractiveArm:
         self.move_time_ms = move_time_ms
         self.step_xy = step_xy
         self.step_z = step_z
-        self.wrist_rotation = 0.0
-        self.gripper_angle = 0.0
-        self.current_joints: list[float] = [0.0] * len(self._SERVO_METADATA)
-        self.commanded_joints: list[float] = list(self.current_joints)
-        self.feedback_joints: list[float] | None = None
-        self._initial_feedback_move_pending = False
-        self._initial_feedback_move_time_ms = 10_000
-        self._skip_next_command = False
         self._base_servo_configs = deepcopy(DEFAULT_SERVO_CONFIGS)
         self.servo_configs: dict[int, ServoConfig] = dict(self._base_servo_configs)
         self.servo_inversions: list[bool] = [False] * len(self._SERVO_METADATA)
@@ -117,9 +118,38 @@ class InteractiveArm:
         self._invert_button_active_color = "#90ee90"
         self._calibration_path = CALIBRATION_CONFIG_PATH
         self.servo_offsets: dict[int, float] = self._load_servo_offsets()
+
+        self.current_joints = self._default_joint_configuration()
+        self.commanded_joints: list[float] = list(self.current_joints)
+        self.feedback_joints: list[float] | None = None
+
+        if len(self.current_joints) >= 5:
+            self.wrist_rotation = self.current_joints[4]
+        else:
+            self.wrist_rotation = 0.0
+        if len(self.current_joints) >= 6:
+            self.gripper_angle = self.current_joints[5]
+        else:
+            self.gripper_angle = 0.0
+
+        if len(self.current_joints) >= 4:
+            self.wrist_pitch = (
+                self.current_joints[1]
+                + self.current_joints[2]
+                + self.current_joints[3]
+            )
+            forward_pose = self.kin.forward(self.current_joints)
+            target_position = forward_pose[:3, 3]
+        else:
+            target_position = np.array([0.18, 0.0, 0.18])
+
+        self.target = np.array(target_position, dtype=float)
         self._last_commanded_raw: tuple[float, ...] | None = tuple(
             self._apply_offsets(self.current_joints, direction="raw")
         )
+        self._initial_feedback_move_pending = False
+        self._initial_feedback_move_time_ms = 10_000
+        self._skip_next_command = False
         self._smoothing_step_ms = 60
         self._min_smoothing_segments = 5
         self._default_max_joint_speed = math.radians(60.0) / 0.2  # ~300°/s
@@ -142,7 +172,6 @@ class InteractiveArm:
         )
         self._command_thread.start()
 
-        self.target = np.array([0.18, 0.0, 0.18])
         self.drag_state = DragState()
         self.figure = plt.figure("Lynxmotion AL5A Controller")
         self.ax = self.figure.add_subplot(111, projection="3d")
@@ -188,6 +217,17 @@ class InteractiveArm:
         self._create_controls()
         self._initialise_from_feedback()
         self.update_robot()
+
+    def _default_joint_configuration(self) -> list[float]:
+        joints: list[float] = []
+        for idx in range(len(self._SERVO_METADATA)):
+            config = self.servo_configs.get(idx)
+            pulse = self.DEFAULT_HOME_PULSES.get(idx)
+            if config is None or pulse is None:
+                joints.append(0.0)
+                continue
+            joints.append(config.pulse_to_angle(pulse))
+        return joints
 
     def _initialise_from_feedback(self) -> None:
         read_positions = getattr(self.controller, "read_positions", None)
