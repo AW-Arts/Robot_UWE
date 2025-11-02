@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import importlib
+import math
 import sys
 from typing import Any
 
-import matplotlib
 import pytest
+
+matplotlib = pytest.importorskip("matplotlib")
 
 
 @pytest.fixture
@@ -52,6 +55,26 @@ class _FailingFeedbackController:
 
     def read_positions(self, **_kwargs):
         raise RuntimeError("serial fault")
+
+
+class _CalibrationController:
+    def __init__(self, feedback):
+        self._feedback = feedback
+        self.relaxed = False
+        self.read_count = 0
+
+    def move_joints(self, *_args, **_kwargs) -> None:
+        return
+
+    def read_positions(self, **_kwargs):
+        self.read_count += 1
+        return list(self._feedback)
+
+    def relax_servos(self, *_args, **_kwargs) -> None:
+        self.relaxed = True
+
+    def set_feedback(self, feedback) -> None:
+        self._feedback = feedback
 
 
 @contextlib.contextmanager
@@ -105,3 +128,62 @@ def test_initial_feedback_failure_skips_first_command(monkeypatch, interactive_m
     controller = _FailingFeedbackController()
     with _prepare_arm(monkeypatch, interactive_module, controller) as arm:
         assert arm._command_queue.commands == []  # type: ignore[attr-defined]
+
+
+def test_calibration_mode_skips_motion_commands(
+    monkeypatch, interactive_module, tmp_path
+) -> None:
+    monkeypatch.setattr(
+        interactive_module,
+        "CALIBRATION_CONFIG_PATH",
+        tmp_path / "servo_offsets.json",
+        raising=False,
+    )
+    controller = _CalibrationController([0.0, 0.1, -0.2, 0.3, 0.0, 0.0])
+    with _prepare_arm(monkeypatch, interactive_module, controller) as arm:
+        arm._command_queue.commands.clear()  # type: ignore[attr-defined]
+        controller.read_count = 0
+        arm._enter_calibration_mode()
+        assert controller.relaxed
+        assert arm._calibration_active
+        assert arm._command_queue.commands == []  # type: ignore[attr-defined]
+
+        arm.update_robot()
+        assert arm._command_queue.commands == []  # type: ignore[attr-defined]
+
+        controller.set_feedback([0.05, 0.25, -0.15, 0.4, 0.0, 0.0])
+        arm._poll_calibration_feedback()
+        assert controller.read_count == 1
+        assert arm.feedback_joints is not None
+        assert arm.feedback_joints[:4] == pytest.approx([0.05, 0.25, -0.15, 0.4])
+        arm._exit_calibration_mode()
+
+
+def test_set_vertical_persists_offsets(monkeypatch, interactive_module, tmp_path) -> None:
+    calibration_file = tmp_path / "servo_offsets.json"
+    monkeypatch.setattr(
+        interactive_module,
+        "CALIBRATION_CONFIG_PATH",
+        calibration_file,
+        raising=False,
+    )
+    controller = _CalibrationController([0.0, 0.4, -0.2, 0.1, 0.0, 0.0])
+    with _prepare_arm(monkeypatch, interactive_module, controller) as arm:
+        arm._enter_calibration_mode()
+        arm._poll_calibration_feedback()
+        arm._handle_set_vertical()
+        arm._exit_calibration_mode()
+
+    assert calibration_file.exists()
+    stored = json.loads(calibration_file.read_text())
+    expected_shoulder = math.pi / 2 - 0.4
+    expected_elbow = 0.0 - (-0.2)
+    assert math.isclose(float(stored["1"]), expected_shoulder, rel_tol=1e-6)
+    assert math.isclose(float(stored["2"]), expected_elbow, rel_tol=1e-6)
+
+    new_controller = _CalibrationController([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    with _prepare_arm(monkeypatch, interactive_module, new_controller) as arm:
+        assert math.isclose(
+            arm.servo_offsets.get(1, 0.0), expected_shoulder, rel_tol=1e-6
+        )
+        assert math.isclose(arm.servo_offsets.get(2, 0.0), expected_elbow, rel_tol=1e-6)
