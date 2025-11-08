@@ -29,6 +29,16 @@ _LOGGER = logging.getLogger(__name__)
 CALIBRATION_CONFIG_PATH = Path.home() / ".config" / "lynxmotion_al5a" / "servo_offsets.json"
 
 
+_DEFAULT_VERTICAL_JOINTS = [
+    0.0,
+    math.pi / 2,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+]
+
+
 def _ensure_interactive_backend() -> None:
     """Ensure Matplotlib is using a backend that supports mouse interaction."""
 
@@ -117,7 +127,15 @@ class InteractiveArm:
         self._invert_button_inactive_color = "0.85"
         self._invert_button_active_color = "#90ee90"
         self._calibration_path = CALIBRATION_CONFIG_PATH
-        self.servo_offsets: dict[int, float] = self._load_servo_offsets()
+        self.zero_reference: dict[int, float] = {
+            index: angle for index, angle in enumerate(_DEFAULT_VERTICAL_JOINTS)
+        }
+        self._show_raw_angles = False
+        self._raw_angle_button: Button | None = None
+        self._soft_start_min_time_ms = 4_000
+        self._soft_start_min_segments = 18
+        self._home_move_time_ms = 4_000
+        self.servo_offsets: dict[int, float] = self._load_calibration_data()
 
         self.current_joints = self._default_joint_configuration()
         self.commanded_joints: list[float] = list(self.current_joints)
@@ -164,7 +182,9 @@ class InteractiveArm:
 
         # Serial writes can block when the controller is busy. Offload them to a
         # dedicated worker so the Matplotlib event loop stays responsive.
-        self._command_queue: queue.Queue[tuple[tuple[float, ...], int | None]] = (
+        self._command_queue: queue.Queue[
+            tuple[tuple[float, ...], int | None, bool]
+        ] = (
             queue.Queue(maxsize=1)
         )
         self._command_thread = threading.Thread(
@@ -216,7 +236,9 @@ class InteractiveArm:
 
         self._create_controls()
         self._initialise_from_feedback()
+        self._skip_next_command = True
         self.update_robot()
+        self._start_homing_sequence()
 
     def _default_joint_configuration(self) -> list[float]:
         joints: list[float] = []
@@ -228,6 +250,20 @@ class InteractiveArm:
                 continue
             joints.append(config.pulse_to_angle(pulse))
         return joints
+
+    def _get_home_joints(self) -> list[float] | None:
+        if not self.zero_reference:
+            return list(_DEFAULT_VERTICAL_JOINTS)
+
+        home: list[float] = []
+        for idx in range(len(self._SERVO_METADATA)):
+            if idx in self.zero_reference:
+                home.append(self.zero_reference[idx])
+            elif idx < len(_DEFAULT_VERTICAL_JOINTS):
+                home.append(_DEFAULT_VERTICAL_JOINTS[idx])
+            else:
+                home.append(0.0)
+        return home
 
     def _initialise_from_feedback(self) -> None:
         read_positions = getattr(self.controller, "read_positions", None)
@@ -286,10 +322,38 @@ class InteractiveArm:
         self._update_servo_readouts()
         self._initial_feedback_move_pending = True
 
+    def _start_homing_sequence(self) -> None:
+        home = self._get_home_joints()
+        if not home:
+            return
+
+        clamped_home = self._clamp_joint_list(home)
+        self.commanded_joints = list(clamped_home)
+        if len(clamped_home) >= 4:
+            try:
+                pose = self.kin.forward(clamped_home)
+            except Exception:  # pragma: no cover - runtime safety net
+                pose = None
+            else:
+                self.target = pose[:3, 3]
+                self.wrist_pitch = sum(clamped_home[1:4])
+                self._update_visuals(clamped_home[:4])
+        if len(clamped_home) >= 5:
+            self.wrist_rotation = clamped_home[4]
+        if len(clamped_home) >= 6:
+            self.gripper_angle = clamped_home[5]
+
+        self._update_servo_readouts()
+        self._send_move_command(
+            clamped_home, move_time_ms=self._home_move_time_ms, soft_start=True
+        )
+
     def update_robot(self) -> None:
         joints = self.kin.inverse(self.target[[0, 1, 2]], self.wrist_pitch)
+        joints = self._clamp_joint_list(list(joints))
         self.wrist_pitch = joints[1] + joints[2] + joints[3]
-        full_joints = list(joints) + [self.wrist_rotation, self.gripper_angle]
+        full_joints = joints + [self.wrist_rotation, self.gripper_angle]
+        full_joints = self._clamp_joint_list(full_joints)
         self.commanded_joints = list(full_joints)
         self._update_visuals(joints)
         self._update_servo_readouts()
@@ -514,6 +578,14 @@ class InteractiveArm:
         self._set_vertical_button.on_clicked(self._handle_set_vertical)
         self._update_calibration_button_visual()
 
+        raw_toggle_left = set_vertical_left + calibration_width + 0.01
+        raw_toggle_ax = self.figure.add_axes(
+            [raw_toggle_left, calibration_bottom, calibration_width, calibration_height]
+        )
+        self._raw_angle_button = Button(raw_toggle_ax, "Show raw", hovercolor="0.95")
+        self._raw_angle_button.on_clicked(self._toggle_raw_angle_display)
+        self._update_raw_angle_button_visual()
+
 
     def _make_move_callback(self, delta: tuple[float, float, float]):
         def _callback(event) -> None:  # pragma: no cover - UI interaction
@@ -660,6 +732,16 @@ class InteractiveArm:
         except AttributeError:  # pragma: no cover - depends on Matplotlib
             pass
 
+    def _clamp_joint_list(
+        self, joints: list[float] | tuple[float, ...]
+    ) -> list[float]:
+        clamped = list(joints)
+        for idx, angle in enumerate(clamped):
+            config = self.servo_configs.get(idx)
+            if config is not None:
+                clamped[idx] = config.clamp_angle(angle)
+        return clamped
+
     def _apply_offsets(
         self, joints: list[float] | tuple[float, ...], *, direction: str
     ) -> list[float]:
@@ -674,33 +756,68 @@ class InteractiveArm:
                 raise ValueError(f"Unknown offset direction {direction}")
         return result
 
-    def _load_servo_offsets(self) -> dict[int, float]:
+    def _load_calibration_data(self) -> dict[int, float]:
         path = self._calibration_path
         if not path.exists():
             return {}
+
         try:
             data = json.loads(path.read_text())
         except Exception:  # pragma: no cover - configuration robustness
-            _LOGGER.warning("Failed to load servo offsets from %s", path, exc_info=True)
+            _LOGGER.warning(
+                "Failed to load calibration data from %s", path, exc_info=True
+            )
             return {}
 
+        offsets_raw: dict[str, object] | None = None
+        vertical_raw: dict[str, object] | None = None
+
+        if isinstance(data, dict) and (
+            "offsets" in data or "vertical_angles" in data
+        ):
+            offsets_candidate = data.get("offsets")
+            if isinstance(offsets_candidate, dict):
+                offsets_raw = offsets_candidate
+            vertical_candidate = data.get("vertical_angles")
+            if isinstance(vertical_candidate, dict):
+                vertical_raw = vertical_candidate
+        elif isinstance(data, dict):
+            offsets_raw = data
+
         offsets: dict[int, float] = {}
-        for key, value in data.items():
-            try:
-                index = int(key)
-                offsets[index] = float(value)
-            except (TypeError, ValueError):
-                _LOGGER.warning("Ignoring invalid servo offset entry for %s", key)
+        if offsets_raw:
+            for key, value in offsets_raw.items():
+                try:
+                    index = int(key)
+                    offsets[index] = float(value)
+                except (TypeError, ValueError):
+                    _LOGGER.warning("Ignoring invalid servo offset entry for %s", key)
+
+        if vertical_raw:
+            for key, value in vertical_raw.items():
+                try:
+                    index = int(key)
+                    self.zero_reference[index] = float(value)
+                except (TypeError, ValueError):
+                    _LOGGER.warning("Ignoring invalid zero reference entry for %s", key)
+
         return offsets
 
-    def _save_servo_offsets(self) -> None:
+    def _save_calibration_data(self) -> None:
         path = self._calibration_path
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            serialisable = {str(idx): offset for idx, offset in self.servo_offsets.items()}
+            serialisable = {
+                "offsets": {str(idx): offset for idx, offset in self.servo_offsets.items()},
+                "vertical_angles": {
+                    str(idx): angle for idx, angle in self.zero_reference.items()
+                },
+            }
             path.write_text(json.dumps(serialisable, indent=2, sort_keys=True))
         except Exception:  # pragma: no cover - configuration robustness
-            _LOGGER.warning("Failed to persist servo offsets to %s", path, exc_info=True)
+            _LOGGER.warning(
+                "Failed to persist calibration data to %s", path, exc_info=True
+            )
 
     def _update_calibration_button_visual(self) -> None:
         if self._calibration_button is None:
@@ -722,9 +839,25 @@ class InteractiveArm:
                 self._set_vertical_button.hovercolor = "#ffe7b8"
             else:
                 self._set_vertical_button.color = "0.85"
-                self._set_vertical_button.hovercolor = "0.95"
+            self._set_vertical_button.hovercolor = "0.95"
             self._set_vertical_button.ax.set_facecolor(self._set_vertical_button.color)
 
+        self.figure.canvas.draw_idle()
+
+        self._update_raw_angle_button_visual()
+
+    def _update_raw_angle_button_visual(self) -> None:
+        if self._raw_angle_button is None:
+            return
+        if self._show_raw_angles:
+            self._raw_angle_button.color = "#add8e6"
+            self._raw_angle_button.hovercolor = "#bde0fe"
+            self._raw_angle_button.label.set_text("Hide raw")
+        else:
+            self._raw_angle_button.color = "0.85"
+            self._raw_angle_button.hovercolor = "0.95"
+            self._raw_angle_button.label.set_text("Show raw")
+        self._raw_angle_button.ax.set_facecolor(self._raw_angle_button.color)
         self.figure.canvas.draw_idle()
 
     def _toggle_calibration(self, _event=None) -> None:  # pragma: no cover - UI interaction
@@ -732,6 +865,11 @@ class InteractiveArm:
             self._exit_calibration_mode()
         else:
             self._enter_calibration_mode()
+
+    def _toggle_raw_angle_display(self, _event=None) -> None:  # pragma: no cover - UI interaction
+        self._show_raw_angles = not self._show_raw_angles
+        self._update_raw_angle_button_visual()
+        self._update_servo_readouts()
 
     def _enter_calibration_mode(self) -> None:
         if self._calibration_active:
@@ -808,7 +946,10 @@ class InteractiveArm:
             self.servo_offsets[idx] = self.servo_offsets.get(idx, 0.0) + delta
             updated_feedback.append(actual + delta)
 
-        self._save_servo_offsets()
+        for idx, angle in enumerate(updated_feedback):
+            self.zero_reference[idx] = angle
+
+        self._save_calibration_data()
         self.feedback_joints = list(updated_feedback)
         self.current_joints = list(updated_feedback)
         self.commanded_joints = list(updated_feedback)
@@ -959,11 +1100,22 @@ class InteractiveArm:
     def _update_servo_readouts(self) -> None:
         for idx, text in enumerate(self.servo_value_texts):
             name, model, location = self._SERVO_METADATA[idx]
-            commanded_deg = math.degrees(self.commanded_joints[idx])
-            if self.feedback_joints and idx < len(self.feedback_joints):
-                actual_deg = math.degrees(self.feedback_joints[idx])
-            else:
-                actual_deg = math.degrees(self.current_joints[idx])
+            zero_angle = self.zero_reference.get(
+                idx,
+                _DEFAULT_VERTICAL_JOINTS[idx]
+                if idx < len(_DEFAULT_VERTICAL_JOINTS)
+                else 0.0,
+            )
+            zero_deg = math.degrees(zero_angle)
+            commanded_raw_deg = math.degrees(self.commanded_joints[idx])
+            actual_source = (
+                self.feedback_joints
+                if self.feedback_joints and idx < len(self.feedback_joints)
+                else self.current_joints
+            )
+            actual_raw_deg = math.degrees(actual_source[idx])
+            commanded_deg = commanded_raw_deg - zero_deg
+            actual_deg = actual_raw_deg - zero_deg
             inversion_note = " (inv)" if self.servo_inversions[idx] else ""
             config = self._base_servo_configs.get(idx)
             limits_text = ""
@@ -972,9 +1124,16 @@ class InteractiveArm:
                     f"Limits: {math.degrees(config.min_angle):.0f}° to "
                     f"{math.degrees(config.max_angle):.0f}°"
                 )
+            commanded_raw_suffix = (
+                f" (raw {commanded_raw_deg:.1f}°)" if self._show_raw_angles else ""
+            )
+            actual_raw_suffix = (
+                f" (raw {actual_raw_deg:.1f}°)" if self._show_raw_angles else ""
+            )
             text.set_text(
                 f"{name} ({model})\n{location}\nCmd: {commanded_deg:.1f}°"
-                f" | Actual: {actual_deg:.1f}°{inversion_note}\n{limits_text}"
+                f"{commanded_raw_suffix} | Actual: {actual_deg:.1f}°"
+                f"{actual_raw_suffix}{inversion_note}\n{limits_text}"
             )
         self.figure.canvas.draw_idle()
 
@@ -1033,12 +1192,12 @@ class InteractiveArm:
 
     def _command_worker(self) -> None:
         while True:
-            joints_raw, move_time = self._command_queue.get()
+            joints_raw, move_time, soft_start = self._command_queue.get()
             try:
                 interrupted = False
                 aborted_for_calibration = False
                 for segment_raw, segment_time in self._generate_smooth_segments(
-                    self._last_commanded_raw, joints_raw, move_time
+                    self._last_commanded_raw, joints_raw, move_time, soft_start=soft_start
                 ):
                     if self._calibration_active:
                         relax = getattr(self.controller, "relax_servos", None)
@@ -1101,7 +1260,11 @@ class InteractiveArm:
                 self._command_queue.task_done()
 
     def _send_move_command(
-        self, joints: list[float] | tuple[float, ...], move_time_ms: int | None
+        self,
+        joints: list[float] | tuple[float, ...],
+        move_time_ms: int | None,
+        *,
+        soft_start: bool = False,
     ) -> None:
         adjusted_move_time = move_time_ms
         if self._initial_feedback_move_pending:
@@ -1112,6 +1275,12 @@ class InteractiveArm:
                     adjusted_move_time, self._initial_feedback_move_time_ms
                 )
             self._initial_feedback_move_pending = False
+
+        if soft_start:
+            if adjusted_move_time is None:
+                adjusted_move_time = self._soft_start_min_time_ms
+            else:
+                adjusted_move_time = max(adjusted_move_time, self._soft_start_min_time_ms)
 
         self.commanded_joints = list(joints)
         if not self._calibration_active:
@@ -1126,7 +1295,7 @@ class InteractiveArm:
             return
 
         raw_command = tuple(self._apply_offsets(joints, direction="raw"))
-        command = (raw_command, adjusted_move_time)
+        command = (raw_command, adjusted_move_time, soft_start)
         try:
             self._command_queue.put_nowait(command)
         except queue.Full:
@@ -1145,6 +1314,8 @@ class InteractiveArm:
         start: tuple[float, ...] | None,
         target: tuple[float, ...],
         move_time_ms: int | None,
+        *,
+        soft_start: bool = False,
     ) -> list[tuple[tuple[float, ...], int | None]]:
         if start is None or len(start) != len(target):
             return [(target, move_time_ms)]
@@ -1159,12 +1330,17 @@ class InteractiveArm:
 
         requested_time_s = 0.0 if move_time_ms is None else max(0.0, move_time_ms / 1000.0)
         total_time_s = max(requested_time_s, required_time_s)
+        if soft_start:
+            total_time_s = max(total_time_s, self._soft_start_min_time_ms / 1000.0)
         if total_time_s <= 0:
             return [(target, None)]
 
         move_time_ms = int(round(total_time_s * 1000))
+        min_segments = self._min_smoothing_segments
+        if soft_start:
+            min_segments = max(min_segments, self._soft_start_min_segments)
         segments = max(
-            self._min_smoothing_segments,
+            min_segments,
             int(math.ceil(max(move_time_ms, self._smoothing_step_ms) / self._smoothing_step_ms)),
         )
         step_time = move_time_ms / segments
