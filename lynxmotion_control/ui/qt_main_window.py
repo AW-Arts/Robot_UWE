@@ -94,6 +94,14 @@ class QtInteractiveArm(QtWidgets.QMainWindow):
         self._updating_waypoint_list = False
         self._updating_waypoint_duration = False
 
+        # Ensure widget attributes referenced by backend callbacks exist before the
+        # backend initialises and schedules UI updates.
+        self._servo_rows: list[ServoRowWidgets] = []
+        self._calibrate_button: QtWidgets.QPushButton | None = None
+        self._set_vertical_button: QtWidgets.QPushButton | None = None
+        self._raw_angle_checkbox: QtWidgets.QCheckBox | None = None
+        self._keyframe_panel: KeyframePanel | None = None
+
         central_widget = QtWidgets.QWidget(self)
         central_layout = QtWidgets.QVBoxLayout(central_widget)
         central_layout.setContentsMargins(0, 0, 0, 0)
@@ -132,7 +140,6 @@ class QtInteractiveArm(QtWidgets.QMainWindow):
         controls_splitter.setChildrenCollapsible(False)
         splitter.addWidget(controls_splitter)
 
-        self._servo_rows: list[ServoRowWidgets] = []
         servo_panel = self._build_servo_panel()
         controls_splitter.addWidget(servo_panel)
 
@@ -588,6 +595,8 @@ QHeaderView::section {
 
     def schedule_calibration_update(self) -> None:
         def update() -> None:
+            if self._calibrate_button is None or self._set_vertical_button is None:
+                return
             active = self.backend._calibration_active
             self._updating_calibration_controls = True
             try:
@@ -603,6 +612,8 @@ QHeaderView::section {
 
     def schedule_raw_angle_update(self) -> None:
         def update() -> None:
+            if self._raw_angle_checkbox is None:
+                return
             self._updating_raw_checkbox = True
             try:
                 self._raw_angle_checkbox.setChecked(self.backend._show_raw_angles)
@@ -667,6 +678,8 @@ QHeaderView::section {
 
     def schedule_waypoint_refresh(self) -> None:
         def update() -> None:
+            if self._keyframe_panel is None:
+                return
             self._updating_waypoint_list = True
             try:
                 self._keyframe_panel.set_waypoints(
@@ -680,6 +693,8 @@ QHeaderView::section {
 
     def schedule_waypoint_duration_update(self) -> None:
         def update() -> None:
+            if self._keyframe_panel is None:
+                return
             self._updating_waypoint_duration = True
             try:
                 index = self.backend._selected_waypoint_index
@@ -696,12 +711,16 @@ QHeaderView::section {
 
     def schedule_play_button_update(self, *, running: bool) -> None:
         def update() -> None:
+            if self._keyframe_panel is None:
+                return
             self._keyframe_panel.set_playing(running)
 
         self._invoke_in_main_thread(update)
 
     def schedule_waypoint_selection_update(self) -> None:
         def update() -> None:
+            if self._keyframe_panel is None:
+                return
             index = self.backend._selected_waypoint_index
             self._updating_waypoint_list = True
             try:
