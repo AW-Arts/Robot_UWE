@@ -86,6 +86,8 @@ class QtInteractiveArm(QtWidgets.QMainWindow):
         self.setWindowTitle("Lynxmotion AL5A Controller")
         self.resize(1280, 720)
 
+        self._current_theme = "light"
+
         self._updating_limits = False
         self._updating_calibration_controls = False
         self._updating_raw_checkbox = False
@@ -100,20 +102,68 @@ class QtInteractiveArm(QtWidgets.QMainWindow):
         self.backend = _QtInteractiveArmBackend(self, controller, **kwargs)
 
         self.canvas = FigureCanvas(self.backend.figure)
+        self.canvas.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding
+        )
+
         toolbar = NavigationToolbar2QT(self.canvas, self)
-        central_layout.addWidget(toolbar)
-        central_layout.addWidget(self.canvas)
-        self.setCentralWidget(central_widget)
+        toolbar.setMovable(False)
 
         self._view_menu = self.menuBar().addMenu("&View")
         self._view_toolbar = QtWidgets.QToolBar("View", self)
         self._view_toolbar.setObjectName("viewToolbar")
+        self._view_toolbar.setMovable(False)
         self.addToolBar(self._view_toolbar)
 
+        splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal, central_widget)
+        splitter.setObjectName("mainSplitter")
+        central_layout.addWidget(splitter)
+
+        viewport_container = QtWidgets.QWidget(splitter)
+        viewport_layout = QtWidgets.QVBoxLayout(viewport_container)
+        viewport_layout.setContentsMargins(4, 4, 4, 4)
+        viewport_layout.setSpacing(4)
+        viewport_layout.addWidget(toolbar)
+        viewport_layout.addWidget(self.canvas, 1)
+        splitter.addWidget(viewport_container)
+
+        controls_splitter = QtWidgets.QSplitter(QtCore.Qt.Vertical, splitter)
+        controls_splitter.setObjectName("controlsSplitter")
+        controls_splitter.setChildrenCollapsible(False)
+        splitter.addWidget(controls_splitter)
+
         self._servo_rows: list[ServoRowWidgets] = []
-        self._build_servo_dock()
-        self._build_calibration_dock()
-        self._build_waypoint_dock()
+        servo_panel = self._build_servo_panel()
+        controls_splitter.addWidget(servo_panel)
+
+        lower_controls = QtWidgets.QWidget(controls_splitter)
+        lower_layout = QtWidgets.QVBoxLayout(lower_controls)
+        lower_layout.setContentsMargins(4, 4, 4, 4)
+        lower_layout.setSpacing(8)
+
+        calibration_panel = self._build_calibration_panel()
+        lower_layout.addWidget(calibration_panel)
+
+        waypoint_panel = self._build_waypoint_panel()
+        lower_layout.addWidget(waypoint_panel, 1)
+        lower_layout.setStretch(0, 0)
+        lower_layout.setStretch(1, 1)
+        controls_splitter.addWidget(lower_controls)
+
+        splitter.setStretchFactor(0, 5)
+        splitter.setStretchFactor(1, 3)
+        controls_splitter.setStretchFactor(0, 3)
+        controls_splitter.setStretchFactor(1, 2)
+
+        self.setCentralWidget(central_widget)
+
+        self._theme_action = QtWidgets.QAction("Use dark theme", self)
+        self._theme_action.setCheckable(True)
+        self._theme_action.setChecked(False)
+        self._theme_action.toggled.connect(self._on_theme_toggled)
+        self._view_menu.addAction(self._theme_action)
+        self._view_toolbar.addAction(self._theme_action)
+        self._apply_theme(self._current_theme)
 
         # Populate UI with the backend state.
         self.schedule_servo_update()
@@ -138,16 +188,185 @@ class QtInteractiveArm(QtWidgets.QMainWindow):
     # ------------------------------------------------------------------
     # Servo dock construction and updates
     # ------------------------------------------------------------------
-    def _build_servo_dock(self) -> None:
-        dock = QtWidgets.QDockWidget("Servo controls", self)
-        dock.setObjectName("servoControlsDock")
-        dock.setAllowedAreas(
-            QtCore.Qt.LeftDockWidgetArea | QtCore.Qt.RightDockWidgetArea
+    def _apply_theme(self, theme: str) -> None:
+        palette = {
+            "light": {
+                "stylesheet": """
+QWidget {
+    font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+    font-size: 10pt;
+    color: #202124;
+    background-color: #f5f7fa;
+}
+QMenuBar, QMenu {
+    background-color: #ffffff;
+    border: none;
+}
+QToolBar {
+    background-color: #e8eaed;
+    spacing: 6px;
+    border: none;
+}
+QGroupBox {
+    font-weight: 600;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    margin-top: 12px;
+    padding: 8px 8px 8px 8px;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 12px;
+    padding: 0 4px 0 4px;
+}
+QScrollArea {
+    border: none;
+    background: transparent;
+}
+QPushButton {
+    background-color: #ffffff;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    padding: 4px 12px;
+}
+QPushButton:hover {
+    background-color: #e8f0fe;
+}
+QPushButton:pressed {
+    background-color: #d2e3fc;
+}
+QPushButton[inverted="true"] {
+    background-color: #1f7a1f;
+    color: #ffffff;
+}
+QLineEdit, QSpinBox, QDoubleSpinBox {
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    padding: 4px 6px;
+    background-color: #ffffff;
+}
+QTableWidget {
+    alternate-background-color: #eef2f7;
+    gridline-color: #d0d7de;
+}
+QHeaderView::section {
+    background-color: #e4e9f2;
+    border: none;
+    padding: 6px;
+}
+        """,
+            },
+            "dark": {
+                "stylesheet": """
+QWidget {
+    font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+    font-size: 10pt;
+    color: #e8eaed;
+    background-color: #202124;
+}
+QMenuBar, QMenu {
+    background-color: #303134;
+    color: #e8eaed;
+    border: none;
+}
+QMenu::item:selected {
+    background-color: #3c4043;
+}
+QToolBar {
+    background-color: #292a2d;
+    spacing: 6px;
+    border: none;
+}
+QGroupBox {
+    font-weight: 600;
+    border: 1px solid #3c4043;
+    border-radius: 6px;
+    margin-top: 12px;
+    padding: 8px 8px 8px 8px;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 12px;
+    padding: 0 4px 0 4px;
+}
+QScrollArea {
+    border: none;
+    background: transparent;
+}
+QPushButton {
+    background-color: #303134;
+    border: 1px solid #4a4d52;
+    border-radius: 6px;
+    padding: 4px 12px;
+}
+QPushButton:hover {
+    background-color: #3c4043;
+}
+QPushButton:pressed {
+    background-color: #5f6368;
+}
+QPushButton[inverted="true"] {
+    background-color: #2e7d32;
+    color: #e8eaed;
+}
+QLineEdit, QSpinBox, QDoubleSpinBox {
+    border: 1px solid #4a4d52;
+    border-radius: 6px;
+    padding: 4px 6px;
+    background-color: #2d2e30;
+    color: #e8eaed;
+}
+QTableWidget {
+    background-color: #2d2e30;
+    alternate-background-color: #35363a;
+    gridline-color: #4a4d52;
+}
+QHeaderView::section {
+    background-color: #35363a;
+    border: none;
+    padding: 6px;
+}
+        """,
+            },
+        }
+
+        app = QtWidgets.QApplication.instance()
+        if app is None:
+            return
+
+        data = palette.get(theme, palette["light"])
+        app.setStyleSheet(data["stylesheet"])
+        self._current_theme = theme
+        self._theme_action.blockSignals(True)
+        self._theme_action.setChecked(theme == "dark")
+        self._theme_action.blockSignals(False)
+        self._theme_action.setText(
+            "Use light theme" if theme == "dark" else "Use dark theme"
         )
 
-        container = QtWidgets.QWidget(dock)
+        # Refresh inversion buttons to ensure the dynamic property styling updates.
+        for row in self._servo_rows:
+            button = row.invert_button
+            button.style().unpolish(button)
+            button.style().polish(button)
+
+    def _on_theme_toggled(self, checked: bool) -> None:
+        self._apply_theme("dark" if checked else "light")
+
+    def _build_servo_panel(self) -> QtWidgets.QWidget:
+        group = QtWidgets.QGroupBox("Servo controls", self)
+        outer_layout = QtWidgets.QVBoxLayout(group)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(0)
+
+        scroll = QtWidgets.QScrollArea(group)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+        outer_layout.addWidget(scroll)
+
+        container = QtWidgets.QWidget(scroll)
         layout = QtWidgets.QGridLayout(container)
-        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setContentsMargins(12, 12, 12, 12)
         layout.setHorizontalSpacing(12)
         layout.setVerticalSpacing(6)
 
@@ -200,6 +419,7 @@ class QtInteractiveArm(QtWidgets.QMainWindow):
 
             invert_button = QtWidgets.QPushButton("Inv")
             invert_button.setCheckable(True)
+            invert_button.setProperty("inverted", False)
             invert_button.clicked.connect(
                 lambda checked=False, idx=index: self.backend._toggle_servo_inversion(idx)
             )
@@ -243,12 +463,9 @@ class QtInteractiveArm(QtWidgets.QMainWindow):
         layout.setColumnStretch(2, 1)
 
         container.setLayout(layout)
-
-        scroll = QtWidgets.QScrollArea(dock)
-        scroll.setWidgetResizable(True)
         scroll.setWidget(container)
-        dock.setWidget(scroll)
-        self.addDockWidget(QtCore.Qt.RightDockWidgetArea, dock)
+
+        return group
 
     def _on_limit_spin_finished(
         self, index: int, bound: str, spin_box: QtWidgets.QDoubleSpinBox
@@ -304,10 +521,9 @@ class QtInteractiveArm(QtWidgets.QMainWindow):
             button.blockSignals(True)
             button.setChecked(inverted)
             button.setText("Inv✓" if inverted else "Inv")
-            if inverted:
-                button.setStyleSheet("background-color: #90ee90;")
-            else:
-                button.setStyleSheet("")
+            button.setProperty("inverted", inverted)
+            button.style().unpolish(button)
+            button.style().polish(button)
             button.blockSignals(False)
 
         self._invoke_in_main_thread(update)
@@ -336,16 +552,10 @@ class QtInteractiveArm(QtWidgets.QMainWindow):
     # ------------------------------------------------------------------
     # Calibration dock
     # ------------------------------------------------------------------
-    def _build_calibration_dock(self) -> None:
-        dock = QtWidgets.QDockWidget("Calibration", self)
-        dock.setObjectName("calibrationDock")
-        dock.setAllowedAreas(
-            QtCore.Qt.LeftDockWidgetArea | QtCore.Qt.RightDockWidgetArea
-        )
-
-        widget = QtWidgets.QWidget(dock)
-        layout = QtWidgets.QVBoxLayout(widget)
-        layout.setContentsMargins(8, 8, 8, 8)
+    def _build_calibration_panel(self) -> QtWidgets.QWidget:
+        group = QtWidgets.QGroupBox("Calibration", self)
+        layout = QtWidgets.QVBoxLayout(group)
+        layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(8)
 
         self._calibrate_button = QtWidgets.QPushButton("Calibrate")
@@ -363,9 +573,7 @@ class QtInteractiveArm(QtWidgets.QMainWindow):
 
         layout.addStretch()
 
-        widget.setLayout(layout)
-        dock.setWidget(widget)
-        self.addDockWidget(QtCore.Qt.LeftDockWidgetArea, dock)
+        return group
 
     def _on_calibrate_clicked(self) -> None:
         if self._updating_calibration_controls:
@@ -406,14 +614,13 @@ class QtInteractiveArm(QtWidgets.QMainWindow):
     # ------------------------------------------------------------------
     # Waypoint dock and updates
     # ------------------------------------------------------------------
-    def _build_waypoint_dock(self) -> None:
-        dock = QtWidgets.QDockWidget("Waypoints", self)
-        dock.setObjectName("waypointDock")
-        dock.setAllowedAreas(
-            QtCore.Qt.LeftDockWidgetArea | QtCore.Qt.RightDockWidgetArea
-        )
+    def _build_waypoint_panel(self) -> QtWidgets.QWidget:
+        group = QtWidgets.QGroupBox("Waypoints", self)
+        layout = QtWidgets.QVBoxLayout(group)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(0)
 
-        self._keyframe_panel = KeyframePanel(dock)
+        self._keyframe_panel = KeyframePanel(group)
         self._keyframe_panel.addWaypointRequested.connect(self._on_add_waypoint)
         self._keyframe_panel.playRequested.connect(
             self.backend._handle_play_waypoints
@@ -425,14 +632,9 @@ class QtInteractiveArm(QtWidgets.QMainWindow):
         self._keyframe_panel.durationChanged.connect(
             self._on_waypoint_duration_changed
         )
-        dock.setWidget(self._keyframe_panel)
-        self.addDockWidget(QtCore.Qt.RightDockWidgetArea, dock)
+        layout.addWidget(self._keyframe_panel)
 
-        toggle_action = dock.toggleViewAction()
-        toggle_action.setText("Waypoints panel")
-        toggle_action.setStatusTip("Show or hide the waypoint manager")
-        self._view_menu.addAction(toggle_action)
-        self._view_toolbar.addAction(toggle_action)
+        return group
 
     def _on_add_waypoint(self, duration: float) -> None:
         duration = max(0.1, duration)
