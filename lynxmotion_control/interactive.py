@@ -131,6 +131,8 @@ class InteractiveArm:
         move_time_ms: int = 1000,
         step_xy: float = 0.01,
         step_z: float = 0.01,
+        *,
+        build_matplotlib_controls: bool = True,
     ) -> None:
         self.controller = controller
         self.kin = kinematics or AL5AKinematics()
@@ -287,7 +289,22 @@ class InteractiveArm:
         self._set_vertical_button: Button | None = None
         self._calibration_timer = None
 
-        self._create_controls()
+        # UI placeholders populated when using the Matplotlib-based controls.
+        self.buttons: dict[str, Button] = {}
+        self.servo_value_texts: list = []
+        self.servo_buttons: list[Button] = []
+        self.servo_invert_buttons: list[Button] = []
+        self.servo_limit_boxes_min: list[TextBox] = []
+        self.servo_limit_boxes_max: list[TextBox] = []
+        self._home_button: Button | None = None
+        self._waypoint_duration_box: TextBox | None = None
+        self._add_waypoint_button: Button | None = None
+        self._play_waypoints_button: Button | None = None
+        self._clear_waypoints_button: Button | None = None
+        self.waypoint_ax = None
+
+        if build_matplotlib_controls:
+            self._create_controls()
         self._initialise_from_feedback()
         self._skip_next_command = True
         self.update_robot()
@@ -1663,6 +1680,8 @@ class InteractiveArm:
         )
 
     def _update_servo_readouts(self) -> None:
+        if not self.servo_value_texts:
+            return
         for idx, text in enumerate(self.servo_value_texts):
             name, model, location = self._SERVO_METADATA[idx]
             zero_angle = self.zero_reference.get(
@@ -1940,9 +1959,24 @@ class InteractiveArm:
 
 
 def run_demo(controller, move_time_ms: int = 1000) -> None:
-    InteractiveArm(controller, move_time_ms=move_time_ms)
-    plt.legend()
-    plt.show()
+    try:
+        from .ui import QtInteractiveArm, create_qt_application
+
+        app = create_qt_application()
+        window = QtInteractiveArm(controller, move_time_ms=move_time_ms)
+        window.show()
+        if hasattr(app, "exec"):
+            app.exec()
+        else:  # pragma: no cover - PyQt5 compatibility
+            app.exec_()
+    except Exception:  # pragma: no cover - fallback when Qt is unavailable
+        _LOGGER.warning(
+            "Falling back to Matplotlib UI because the Qt interface could not be initialised.",
+            exc_info=True,
+        )
+        InteractiveArm(controller, move_time_ms=move_time_ms)
+        plt.legend()
+        plt.show()
 
 
 __all__ = ["InteractiveArm", "run_demo"]
