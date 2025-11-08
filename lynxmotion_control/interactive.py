@@ -167,7 +167,6 @@ class InteractiveArm:
                 + self.kin.links.elbow,
             ),
         }
-        self._load_workspace_limits_from_config()
         self._apply_loaded_servo_limits()
 
         for index, inverted in enumerate(self.servo_inversions):
@@ -199,6 +198,7 @@ class InteractiveArm:
             target_position = np.array([0.18, 0.0, 0.18])
 
         self.target = np.array(target_position, dtype=float)
+        self._load_workspace_limits_from_config()
         self._last_commanded_raw: tuple[float, ...] | None = tuple(
             self._apply_offsets(self.current_joints, direction="raw")
         )
@@ -1253,8 +1253,10 @@ class InteractiveArm:
                 self.workspace_limits[axis] = (lower, upper)
             else:
                 self.workspace_limits[axis] = (lower, upper)
-        self.target[:] = self._clamp_target(self.target)
-        self._recompute_camera_framing()
+        if hasattr(self, "target"):
+            self.target[:] = self._clamp_target(self.target)
+        if hasattr(self, "ax"):
+            self._recompute_camera_framing()
 
     def _apply_loaded_servo_limits(self) -> None:
         if not self._loaded_servo_limits:
