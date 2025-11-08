@@ -24,6 +24,7 @@ except ImportError:  # pragma: no cover - fallback for older Matplotlib releases
     )
 
 from ..interactive import InteractiveArm, Waypoint, _DEFAULT_VERTICAL_JOINTS
+from .keyframe_panel import KeyframePanel
 
 
 @dataclass
@@ -103,6 +104,11 @@ class QtInteractiveArm(QtWidgets.QMainWindow):
         central_layout.addWidget(toolbar)
         central_layout.addWidget(self.canvas)
         self.setCentralWidget(central_widget)
+
+        self._view_menu = self.menuBar().addMenu("&View")
+        self._view_toolbar = QtWidgets.QToolBar("View", self)
+        self._view_toolbar.setObjectName("viewToolbar")
+        self.addToolBar(self._view_toolbar)
 
         self._servo_rows: list[ServoRowWidgets] = []
         self._build_servo_dock()
@@ -407,50 +413,29 @@ class QtInteractiveArm(QtWidgets.QMainWindow):
             QtCore.Qt.LeftDockWidgetArea | QtCore.Qt.RightDockWidgetArea
         )
 
-        widget = QtWidgets.QWidget(dock)
-        layout = QtWidgets.QVBoxLayout(widget)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(8)
-
-        self._waypoint_list = QtWidgets.QListWidget()
-        self._waypoint_list.currentRowChanged.connect(self._on_waypoint_selected)
-        layout.addWidget(self._waypoint_list)
-
-        duration_layout = QtWidgets.QHBoxLayout()
-        duration_label = QtWidgets.QLabel("Duration (s):")
-        self._waypoint_duration_spin = QtWidgets.QDoubleSpinBox()
-        self._waypoint_duration_spin.setRange(0.1, 60.0)
-        self._waypoint_duration_spin.setDecimals(2)
-        self._waypoint_duration_spin.setSingleStep(0.1)
-        self._waypoint_duration_spin.valueChanged.connect(
-            self._on_waypoint_duration_changed
+        self._keyframe_panel = KeyframePanel(dock)
+        self._keyframe_panel.addWaypointRequested.connect(self._on_add_waypoint)
+        self._keyframe_panel.playRequested.connect(
+            self.backend._handle_play_waypoints
         )
-        duration_layout.addWidget(duration_label)
-        duration_layout.addWidget(self._waypoint_duration_spin)
-        layout.addLayout(duration_layout)
-
-        button_layout = QtWidgets.QHBoxLayout()
-        self._add_waypoint_button = QtWidgets.QPushButton("Add")
-        self._add_waypoint_button.clicked.connect(self._on_add_waypoint)
-        button_layout.addWidget(self._add_waypoint_button)
-
-        self._play_waypoints_button = QtWidgets.QPushButton("Play path")
-        self._play_waypoints_button.clicked.connect(self.backend._handle_play_waypoints)
-        button_layout.addWidget(self._play_waypoints_button)
-
-        self._clear_waypoints_button = QtWidgets.QPushButton("Clear")
-        self._clear_waypoints_button.clicked.connect(
+        self._keyframe_panel.clearRequested.connect(
             self.backend._handle_clear_waypoints
         )
-        button_layout.addWidget(self._clear_waypoints_button)
-
-        layout.addLayout(button_layout)
-        widget.setLayout(layout)
-        dock.setWidget(widget)
+        self._keyframe_panel.selectionChanged.connect(self._on_waypoint_selected)
+        self._keyframe_panel.durationChanged.connect(
+            self._on_waypoint_duration_changed
+        )
+        dock.setWidget(self._keyframe_panel)
         self.addDockWidget(QtCore.Qt.RightDockWidgetArea, dock)
 
-    def _on_add_waypoint(self) -> None:
-        duration = max(0.1, self._waypoint_duration_spin.value())
+        toggle_action = dock.toggleViewAction()
+        toggle_action.setText("Waypoints panel")
+        toggle_action.setStatusTip("Show or hide the waypoint manager")
+        self._view_menu.addAction(toggle_action)
+        self._view_toolbar.addAction(toggle_action)
+
+    def _on_add_waypoint(self, duration: float) -> None:
+        duration = max(0.1, duration)
         position = self.backend._clamp_target(np.array(self.backend.target))
         self.backend.waypoints.append(
             Waypoint(position=position.copy(), duration=duration)
@@ -482,24 +467,10 @@ class QtInteractiveArm(QtWidgets.QMainWindow):
         def update() -> None:
             self._updating_waypoint_list = True
             try:
-                self._waypoint_list.clear()
-                if not self.backend.waypoints:
-                    empty_item = QtWidgets.QListWidgetItem("No waypoints")
-                    empty_item.setFlags(QtCore.Qt.NoItemFlags)
-                    self._waypoint_list.addItem(empty_item)
-                    return
-                for idx, waypoint in enumerate(self.backend.waypoints):
-                    text = (
-                        f"#{idx + 1}: x={waypoint.position[0]:.3f}, "
-                        f"y={waypoint.position[1]:.3f}, z={waypoint.position[2]:.3f}"
-                        f" — {waypoint.duration:.2f} s"
-                    )
-                    self._waypoint_list.addItem(text)
-                selected = self.backend._selected_waypoint_index or -1
-                if selected >= 0:
-                    self._waypoint_list.setCurrentRow(selected)
-                else:
-                    self._waypoint_list.setCurrentRow(-1)
+                self._keyframe_panel.set_waypoints(
+                    self.backend.waypoints,
+                    selected_index=self.backend._selected_waypoint_index,
+                )
             finally:
                 self._updating_waypoint_list = False
 
@@ -510,14 +481,12 @@ class QtInteractiveArm(QtWidgets.QMainWindow):
             self._updating_waypoint_duration = True
             try:
                 index = self.backend._selected_waypoint_index
-                if index is None or index >= len(self.backend.waypoints):
-                    self._waypoint_duration_spin.setValue(2.0)
-                    self._waypoint_duration_spin.setEnabled(False)
-                else:
-                    self._waypoint_duration_spin.setEnabled(True)
-                    self._waypoint_duration_spin.setValue(
-                        self.backend.waypoints[index].duration
-                    )
+                duration = (
+                    None
+                    if index is None or index >= len(self.backend.waypoints)
+                    else self.backend.waypoints[index].duration
+                )
+                self._keyframe_panel.set_duration(duration)
             finally:
                 self._updating_waypoint_duration = False
 
@@ -525,18 +494,18 @@ class QtInteractiveArm(QtWidgets.QMainWindow):
 
     def schedule_play_button_update(self, *, running: bool) -> None:
         def update() -> None:
-            label = "Stop" if running else "Play path"
-            self._play_waypoints_button.setText(label)
+            self._keyframe_panel.set_playing(running)
 
         self._invoke_in_main_thread(update)
 
     def schedule_waypoint_selection_update(self) -> None:
         def update() -> None:
             index = self.backend._selected_waypoint_index
-            if index is None:
-                self._waypoint_list.setCurrentRow(-1)
-            else:
-                self._waypoint_list.setCurrentRow(index)
+            self._updating_waypoint_list = True
+            try:
+                self._keyframe_panel.set_selected_index(index)
+            finally:
+                self._updating_waypoint_list = False
 
         self._invoke_in_main_thread(update)
 
