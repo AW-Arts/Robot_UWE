@@ -137,6 +137,10 @@ class InteractiveArm:
         self._home_move_time_ms = 4_000
         self.servo_offsets: dict[int, float] = self._load_calibration_data()
 
+        for index, inverted in enumerate(self.servo_inversions):
+            if inverted:
+                self._apply_servo_inversion(index)
+
         self.current_joints = self._default_joint_configuration()
         self.commanded_joints: list[float] = list(self.current_joints)
         self.feedback_joints: list[float] | None = None
@@ -687,6 +691,7 @@ class InteractiveArm:
         self.servo_inversions[index] = not self.servo_inversions[index]
         self._apply_servo_inversion(index)
         self._update_inversion_button_visual(index)
+        self._save_calibration_data()
 
         name, model, _ = self._SERVO_METADATA[index]
         state = "enabled" if self.servo_inversions[index] else "disabled"
@@ -771,6 +776,7 @@ class InteractiveArm:
 
         offsets_raw: dict[str, object] | None = None
         vertical_raw: dict[str, object] | None = None
+        inversion_raw: dict[str, object] | None = None
 
         if isinstance(data, dict) and (
             "offsets" in data or "vertical_angles" in data
@@ -781,6 +787,9 @@ class InteractiveArm:
             vertical_candidate = data.get("vertical_angles")
             if isinstance(vertical_candidate, dict):
                 vertical_raw = vertical_candidate
+            inversion_candidate = data.get("inverted")
+            if isinstance(inversion_candidate, dict):
+                inversion_raw = inversion_candidate
         elif isinstance(data, dict):
             offsets_raw = data
 
@@ -801,6 +810,17 @@ class InteractiveArm:
                 except (TypeError, ValueError):
                     _LOGGER.warning("Ignoring invalid zero reference entry for %s", key)
 
+        if inversion_raw:
+            for key, value in inversion_raw.items():
+                try:
+                    index = int(key)
+                except (TypeError, ValueError):
+                    _LOGGER.warning("Ignoring invalid inversion entry for %s", key)
+                    continue
+                if index >= len(self.servo_inversions):
+                    continue
+                self.servo_inversions[index] = bool(value)
+
         return offsets
 
     def _save_calibration_data(self) -> None:
@@ -811,6 +831,9 @@ class InteractiveArm:
                 "offsets": {str(idx): offset for idx, offset in self.servo_offsets.items()},
                 "vertical_angles": {
                     str(idx): angle for idx, angle in self.zero_reference.items()
+                },
+                "inverted": {
+                    str(idx): state for idx, state in enumerate(self.servo_inversions)
                 },
             }
             path.write_text(json.dumps(serialisable, indent=2, sort_keys=True))
