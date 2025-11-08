@@ -91,6 +91,17 @@ class QtInteractiveArm(QtWidgets.QMainWindow):
         self._updating_waypoint_list = False
         self._updating_waypoint_duration = False
 
+        # Placeholder widget attributes required by backend callbacks. These are
+        # populated once the dock widgets are built but must exist early so the
+        # backend can safely issue updates during its initialisation.
+        self._servo_rows: list[ServoRowWidgets] = []
+        self._calibrate_button: QtWidgets.QPushButton | None = None
+        self._set_vertical_button: QtWidgets.QPushButton | None = None
+        self._raw_angle_checkbox: QtWidgets.QCheckBox | None = None
+        self._waypoint_list: QtWidgets.QListWidget | None = None
+        self._waypoint_duration_spin: QtWidgets.QDoubleSpinBox | None = None
+        self._play_waypoints_button: QtWidgets.QPushButton | None = None
+
         central_widget = QtWidgets.QWidget(self)
         central_layout = QtWidgets.QVBoxLayout(central_widget)
         central_layout.setContentsMargins(0, 0, 0, 0)
@@ -104,7 +115,6 @@ class QtInteractiveArm(QtWidgets.QMainWindow):
         central_layout.addWidget(self.canvas)
         self.setCentralWidget(central_widget)
 
-        self._servo_rows: list[ServoRowWidgets] = []
         self._build_servo_dock()
         self._build_calibration_dock()
         self._build_waypoint_dock()
@@ -258,6 +268,8 @@ class QtInteractiveArm(QtWidgets.QMainWindow):
 
     def schedule_servo_update(self) -> None:
         def update() -> None:
+            if not self._servo_rows:
+                return
             for idx, row in enumerate(self._servo_rows):
                 if idx >= len(self.backend.commanded_joints):
                     continue
@@ -374,6 +386,8 @@ class QtInteractiveArm(QtWidgets.QMainWindow):
 
     def schedule_calibration_update(self) -> None:
         def update() -> None:
+            if self._calibrate_button is None or self._set_vertical_button is None:
+                return
             active = self.backend._calibration_active
             self._updating_calibration_controls = True
             try:
@@ -389,6 +403,8 @@ class QtInteractiveArm(QtWidgets.QMainWindow):
 
     def schedule_raw_angle_update(self) -> None:
         def update() -> None:
+            if self._raw_angle_checkbox is None:
+                return
             self._updating_raw_checkbox = True
             try:
                 self._raw_angle_checkbox.setChecked(self.backend._show_raw_angles)
@@ -480,6 +496,8 @@ class QtInteractiveArm(QtWidgets.QMainWindow):
 
     def schedule_waypoint_refresh(self) -> None:
         def update() -> None:
+            if self._waypoint_list is None:
+                return
             self._updating_waypoint_list = True
             try:
                 self._waypoint_list.clear()
@@ -507,6 +525,8 @@ class QtInteractiveArm(QtWidgets.QMainWindow):
 
     def schedule_waypoint_duration_update(self) -> None:
         def update() -> None:
+            if self._waypoint_duration_spin is None:
+                return
             self._updating_waypoint_duration = True
             try:
                 index = self.backend._selected_waypoint_index
@@ -525,6 +545,8 @@ class QtInteractiveArm(QtWidgets.QMainWindow):
 
     def schedule_play_button_update(self, *, running: bool) -> None:
         def update() -> None:
+            if self._play_waypoints_button is None:
+                return
             label = "Stop" if running else "Play path"
             self._play_waypoints_button.setText(label)
 
@@ -532,6 +554,8 @@ class QtInteractiveArm(QtWidgets.QMainWindow):
 
     def schedule_waypoint_selection_update(self) -> None:
         def update() -> None:
+            if self._waypoint_list is None:
+                return
             index = self.backend._selected_waypoint_index
             if index is None:
                 self._waypoint_list.setCurrentRow(-1)
