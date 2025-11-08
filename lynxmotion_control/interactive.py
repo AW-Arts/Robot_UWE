@@ -121,7 +121,6 @@ class InteractiveArm:
 
         self.current_joints = self._default_joint_configuration()
         self.commanded_joints: list[float] = list(self.current_joints)
-        self.feedback_joints: list[float] | None = None
 
         if len(self.current_joints) >= 5:
             self.wrist_rotation = self.current_joints[4]
@@ -147,9 +146,6 @@ class InteractiveArm:
         self._last_commanded_raw: tuple[float, ...] | None = tuple(
             self._apply_offsets(self.current_joints, direction="raw")
         )
-        self._initial_feedback_move_pending = False
-        self._initial_feedback_move_time_ms = 10_000
-        self._skip_next_command = False
         self._smoothing_step_ms = 60
         self._min_smoothing_segments = 5
         self._default_max_joint_speed = math.radians(60.0) / 0.2  # ~300°/s
@@ -212,10 +208,8 @@ class InteractiveArm:
         self._calibration_active = False
         self._calibration_button: Button | None = None
         self._set_vertical_button: Button | None = None
-        self._calibration_timer = None
 
         self._create_controls()
-        self._initialise_from_feedback()
         self.update_robot()
 
     def _default_joint_configuration(self) -> list[float]:
@@ -228,63 +222,6 @@ class InteractiveArm:
                 continue
             joints.append(config.pulse_to_angle(pulse))
         return joints
-
-    def _initialise_from_feedback(self) -> None:
-        read_positions = getattr(self.controller, "read_positions", None)
-        if not callable(read_positions):
-            return
-
-        try:
-            feedback = read_positions(
-                servo_configs=self._get_servo_configs_for_controller(),
-                servo_channels=DEFAULT_SERVO_CHANNELS,
-            )
-        except Exception:  # pragma: no cover - runtime safety net
-            _LOGGER.warning(
-                "Failed to obtain initial feedback from controller", exc_info=True
-            )
-            self._skip_next_command = True
-            return
-
-        if not feedback:
-            return
-
-        corrected = self._apply_offsets(list(feedback), direction="correct")
-        for idx, angle in enumerate(corrected):
-            if idx < len(self.current_joints):
-                self.current_joints[idx] = angle
-            else:
-                self.current_joints.append(angle)
-
-        self.commanded_joints = list(self.current_joints)
-        self.feedback_joints = list(self.current_joints)
-        self._last_commanded_raw = tuple(
-            self._apply_offsets(self.current_joints, direction="raw")
-        )
-
-        if len(self.current_joints) >= 5:
-            self.wrist_rotation = self.current_joints[4]
-        if len(self.current_joints) >= 6:
-            self.gripper_angle = self.current_joints[5]
-
-        if len(self.current_joints) >= 4:
-            try:
-                pose = self.kin.forward(self.current_joints)
-            except Exception:  # pragma: no cover - safety net
-                _LOGGER.warning(
-                    "Failed to compute pose from controller feedback", exc_info=True
-                )
-            else:
-                self.target[:3] = pose[:3, 3]
-                self.wrist_pitch = (
-                    self.current_joints[1]
-                    + self.current_joints[2]
-                    + self.current_joints[3]
-                )
-                self._update_visuals(self.current_joints)
-
-        self._update_servo_readouts()
-        self._initial_feedback_move_pending = True
 
     def update_robot(self) -> None:
         joints = self.kin.inverse(self.target[[0, 1, 2]], self.wrist_pitch)
@@ -573,9 +510,7 @@ class InteractiveArm:
         if config is None:
             return
 
-        source = self.feedback_joints or self.commanded_joints
-        if not source:
-            source = self.current_joints
+        source = self.commanded_joints or self.current_joints
         updated = list(source)
         old_angle = updated[index]
         new_angle = config.clamp_angle(old_angle + delta)
@@ -737,12 +672,6 @@ class InteractiveArm:
         if self._calibration_active:
             return
         self._calibration_active = True
-        relax = getattr(self.controller, "relax_servos", None)
-        if callable(relax):
-            try:
-                relax()
-            except Exception:  # pragma: no cover - runtime safety net
-                _LOGGER.warning("Failed to relax servos for calibration", exc_info=True)
         commands_buffer = getattr(self._command_queue, "commands", None)
         if isinstance(commands_buffer, list):
             commands_buffer.clear()
@@ -757,59 +686,34 @@ class InteractiveArm:
                         self._command_queue.task_done()
                     except Exception:
                         pass
-        if self._calibration_timer is not None:
-            try:
-                self._calibration_timer.stop()
-            except Exception:  # pragma: no cover - backend specific
-                pass
-        self._calibration_timer = self.figure.canvas.new_timer(interval=300)
-        self._calibration_timer.add_callback(self._poll_calibration_feedback)
-        self._calibration_timer.start()
         self._update_calibration_button_visual()
 
     def _exit_calibration_mode(self) -> None:
         if not self._calibration_active:
             return
         self._calibration_active = False
-        if self._calibration_timer is not None:
-            try:
-                self._calibration_timer.stop()
-            except Exception:  # pragma: no cover - backend specific
-                pass
-            self._calibration_timer = None
         self._update_calibration_button_visual()
-
-    def _poll_calibration_feedback(self) -> None:
-        if not self._calibration_active:
-            return
-        feedback_raw = self._read_feedback_from_controller()
-        if feedback_raw:
-            corrected = self._apply_offsets(feedback_raw, direction="correct")
-            self._apply_feedback(corrected)
-
     def _handle_set_vertical(self, _event=None) -> None:  # pragma: no cover - UI interaction
         if not self._calibration_active:
             return
-        source = self.feedback_joints or self.current_joints
-        if not source:
+        if not self.current_joints:
             return
         desired_pose = [0.0, math.pi / 2, 0.0, 0.0, 0.0, 0.0]
         desired: list[float] = []
-        for idx in range(len(source)):
+        for idx in range(len(self.current_joints)):
             if idx < len(desired_pose):
                 desired.append(desired_pose[idx])
             else:
                 desired.append(0.0)
 
         updated_feedback: list[float] = []
-        for idx, actual in enumerate(source):
+        for idx, actual in enumerate(self.current_joints):
             target_angle = desired[idx]
             delta = target_angle - actual
             self.servo_offsets[idx] = self.servo_offsets.get(idx, 0.0) + delta
             updated_feedback.append(actual + delta)
 
         self._save_servo_offsets()
-        self.feedback_joints = list(updated_feedback)
         self.current_joints = list(updated_feedback)
         self.commanded_joints = list(updated_feedback)
         self._last_commanded_raw = tuple(
@@ -828,36 +732,6 @@ class InteractiveArm:
         self._update_servo_readouts()
         if len(self.current_joints) >= 4:
             self._update_visuals(self.current_joints)
-
-    def _apply_feedback(self, corrected: list[float]) -> None:
-        self.feedback_joints = list(corrected)
-        for idx, angle in enumerate(corrected):
-            if idx < len(self.current_joints):
-                self.current_joints[idx] = angle
-            else:
-                self.current_joints.append(angle)
-        self._update_servo_readouts()
-        if len(self.current_joints) >= 4:
-            self._update_visuals(self.current_joints)
-
-    def _read_feedback_from_controller(self) -> list[float] | None:
-        read_positions = getattr(self.controller, "read_positions", None)
-        if not callable(read_positions):
-            return None
-        try:
-            feedback = read_positions(
-                servo_configs=self._get_servo_configs_for_controller(),
-                servo_channels=DEFAULT_SERVO_CHANNELS,
-            )
-        except Exception:  # pragma: no cover - runtime safety net
-            _LOGGER.warning(
-                "Failed to obtain feedback from controller", exc_info=True
-            )
-            return None
-
-        if not feedback:
-            return None
-        return list(feedback)
 
     def _update_inversion_button_visual(self, index: int) -> None:
         if index >= len(self.servo_invert_buttons):
@@ -960,10 +834,7 @@ class InteractiveArm:
         for idx, text in enumerate(self.servo_value_texts):
             name, model, location = self._SERVO_METADATA[idx]
             commanded_deg = math.degrees(self.commanded_joints[idx])
-            if self.feedback_joints and idx < len(self.feedback_joints):
-                actual_deg = math.degrees(self.feedback_joints[idx])
-            else:
-                actual_deg = math.degrees(self.current_joints[idx])
+            current_deg = math.degrees(self.current_joints[idx])
             inversion_note = " (inv)" if self.servo_inversions[idx] else ""
             config = self._base_servo_configs.get(idx)
             limits_text = ""
@@ -974,7 +845,7 @@ class InteractiveArm:
                 )
             text.set_text(
                 f"{name} ({model})\n{location}\nCmd: {commanded_deg:.1f}°"
-                f" | Actual: {actual_deg:.1f}°{inversion_note}\n{limits_text}"
+                f" | Current: {current_deg:.1f}°{inversion_note}\n{limits_text}"
             )
         self.figure.canvas.draw_idle()
 
@@ -1024,7 +895,6 @@ class InteractiveArm:
 
         _clamp_list(self.current_joints)
         _clamp_list(self.commanded_joints)
-        _clamp_list(self.feedback_joints)
         self._last_commanded_raw = tuple(
             self._apply_offsets(self.commanded_joints, direction="raw")
         )
@@ -1036,22 +906,9 @@ class InteractiveArm:
             joints_raw, move_time = self._command_queue.get()
             try:
                 interrupted = False
-                aborted_for_calibration = False
                 for segment_raw, segment_time in self._generate_smooth_segments(
                     self._last_commanded_raw, joints_raw, move_time
                 ):
-                    if self._calibration_active:
-                        relax = getattr(self.controller, "relax_servos", None)
-                        if callable(relax):
-                            try:
-                                relax()
-                            except Exception:  # pragma: no cover - runtime safety net
-                                _LOGGER.warning(
-                                    "Failed to relax servos when calibration became active",
-                                    exc_info=True,
-                                )
-                        aborted_for_calibration = True
-                        break
                     corrected_segment = self._apply_offsets(
                         segment_raw, direction="correct"
                     )
@@ -1075,26 +932,7 @@ class InteractiveArm:
                         break
 
                 if interrupted:
-                    self.feedback_joints = None
                     continue
-
-                if aborted_for_calibration:
-                    self.feedback_joints = None
-                    self.commanded_joints = list(self.current_joints)
-                    self._last_commanded_raw = tuple(
-                        self._apply_offsets(self.current_joints, direction="raw")
-                    )
-                    self._update_servo_readouts()
-                    continue
-
-                feedback_raw = self._read_feedback_from_controller()
-                if feedback_raw:
-                    corrected_feedback = self._apply_offsets(
-                        feedback_raw, direction="correct"
-                    )
-                    self._apply_feedback(corrected_feedback)
-                else:
-                    self.feedback_joints = None
             except Exception:  # pragma: no cover - runtime safety net
                 _LOGGER.exception("Failed to send move command to controller")
             finally:
@@ -1104,26 +942,9 @@ class InteractiveArm:
         self, joints: list[float] | tuple[float, ...], move_time_ms: int | None
     ) -> None:
         adjusted_move_time = move_time_ms
-        if self._initial_feedback_move_pending:
-            if adjusted_move_time is None:
-                adjusted_move_time = self._initial_feedback_move_time_ms
-            else:
-                adjusted_move_time = max(
-                    adjusted_move_time, self._initial_feedback_move_time_ms
-                )
-            self._initial_feedback_move_pending = False
 
         self.commanded_joints = list(joints)
-        if not self._calibration_active:
-            self.feedback_joints = None
         self._update_servo_readouts()
-
-        if self._calibration_active:
-            return
-
-        if self._skip_next_command:
-            self._skip_next_command = False
-            return
 
         raw_command = tuple(self._apply_offsets(joints, direction="raw"))
         command = (raw_command, adjusted_move_time)
