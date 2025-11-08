@@ -239,18 +239,15 @@ class InteractiveArm:
         self._waypoint_stop_event = threading.Event()
         self._updating_duration_box = False
         self.figure = plt.figure("Lynxmotion AL5A Controller")
+        try:
+            self.figure.set_tight_layout(True)
+        except AttributeError:  # pragma: no cover - Matplotlib < 3.1
+            self.figure.tight_layout()
         self.ax = self.figure.add_subplot(111, projection="3d")
-        self.ax.set_position([0.05, 0.12, 0.5, 0.78])
         self.ax.set_xlabel("X (m)")
         self.ax.set_ylabel("Y (m)")
         self.ax.set_zlabel("Z (m)")
-        self.ax.set_xlim(-0.25, 0.25)
-        self.ax.set_ylim(-0.25, 0.25)
-        self.ax.set_zlim(0.0, 0.35)
-        try:
-            self.ax.set_box_aspect((1.0, 1.0, 0.6))
-        except AttributeError:  # Matplotlib < 3.4
-            pass
+        self._recompute_camera_framing()
         self.ax.view_init(elev=25, azim=-60)
 
         (self.base_line,) = self.ax.plot([], [], [], "-o", lw=3)
@@ -283,6 +280,7 @@ class InteractiveArm:
         self.figure.canvas.mpl_connect("scroll_event", self._on_scroll)
         self.figure.canvas.mpl_connect("key_press_event", self._on_key_press)
         self.figure.canvas.mpl_connect("key_release_event", self._on_key_release)
+        self.figure.canvas.mpl_connect("resize_event", self._on_canvas_resized)
 
         self._calibration_active = False
         self._calibration_button: Button | None = None
@@ -309,6 +307,35 @@ class InteractiveArm:
         self._skip_next_command = True
         self.update_robot()
         self._run_home_sequence()
+
+    def _on_canvas_resized(self, _event) -> None:
+        try:
+            self.figure.tight_layout()
+        except Exception:  # pragma: no cover - backend specific layout errors
+            pass
+        self._recompute_camera_framing()
+        self.figure.canvas.draw_idle()
+
+    def _recompute_camera_framing(self) -> None:
+        x_limits = self.workspace_limits.get("x", (-0.25, 0.25))
+        y_limits = self.workspace_limits.get("y", (-0.25, 0.25))
+        z_limits = self.workspace_limits.get("z", (0.0, 0.35))
+
+        pad_x = (x_limits[1] - x_limits[0]) * 0.05 or 0.01
+        pad_y = (y_limits[1] - y_limits[0]) * 0.05 or 0.01
+        pad_z = (z_limits[1] - z_limits[0]) * 0.05 or 0.01
+
+        self.ax.set_xlim(x_limits[0] - pad_x, x_limits[1] + pad_x)
+        self.ax.set_ylim(y_limits[0] - pad_y, y_limits[1] + pad_y)
+        self.ax.set_zlim(z_limits[0] - pad_z, z_limits[1] + pad_z)
+
+        try:
+            span_x = max(x_limits[1] - x_limits[0], 1e-6)
+            span_y = max(y_limits[1] - y_limits[0], 1e-6)
+            span_z = max(z_limits[1] - z_limits[0], 1e-6)
+            self.ax.set_box_aspect((span_x, span_y, span_z))
+        except AttributeError:  # Matplotlib < 3.4
+            pass
 
     def _default_joint_configuration(self) -> list[float]:
         joints: list[float] = []
@@ -1227,6 +1254,7 @@ class InteractiveArm:
             else:
                 self.workspace_limits[axis] = (lower, upper)
         self.target[:] = self._clamp_target(self.target)
+        self._recompute_camera_framing()
 
     def _apply_loaded_servo_limits(self) -> None:
         if not self._loaded_servo_limits:
