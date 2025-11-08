@@ -42,7 +42,9 @@ def test_relax_servos_generates_expected_command(
     expected_order = (
         [0, 1, 2] if servo_indices is None else list(servo_indices)
     )
-    expected = ("".join(f"#{patched_channels[index]}L" for index in expected_order) + "\r").encode(
+    expected = (
+        "".join(f"#{patched_channels[index]}PO" for index in expected_order) + "\r"
+    ).encode(
         "ascii"
     )
     assert fake_serial.writes == [expected]
@@ -56,4 +58,4 @@ def test_print_controller_relax_outputs_command(
     controller.relax_servos(servo_indices=[1])
 
     captured = capsys.readouterr().out.strip()
-    assert captured == f"#{patched_channels[1]}L"
+    assert captured == f"#{patched_channels[1]}PO"
