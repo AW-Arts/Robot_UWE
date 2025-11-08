@@ -7,6 +7,7 @@ import math
 import queue
 import threading
 import time
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
@@ -236,6 +237,9 @@ class InteractiveArm:
         self._waypoint_playback_thread: threading.Thread | None = None
         self._waypoint_stop_event = threading.Event()
         self._updating_duration_box = False
+        self._ui_update_queue: queue.Queue[
+            tuple[Callable[..., None], tuple, dict]
+        ] = queue.Queue()
         self.figure = plt.figure("Lynxmotion AL5A Controller")
         self.ax = self.figure.add_subplot(111, projection="3d")
         self.ax.set_position([0.05, 0.12, 0.5, 0.78])
@@ -275,6 +279,13 @@ class InteractiveArm:
             transform=self.ax.transAxes,
             bbox=dict(facecolor="white", alpha=0.7),
         )
+        self._ui_timer = self.figure.canvas.new_timer(interval=50)
+        try:
+            self._ui_timer.single_shot = False
+        except AttributeError:  # pragma: no cover - backend specific
+            pass
+        self._ui_timer.add_callback(self._process_ui_queue)
+        self._ui_timer.start()
         self.figure.canvas.mpl_connect("button_press_event", self._on_press)
         self.figure.canvas.mpl_connect("button_release_event", self._on_release)
         self.figure.canvas.mpl_connect("motion_notify_event", self._on_motion)
@@ -1333,6 +1344,44 @@ class InteractiveArm:
         button.label.set_text(label)
         button.ax.figure.canvas.draw_idle()
 
+    def _queue_ui_update(
+        self, callback: Callable[..., None], *args, **kwargs
+    ) -> None:
+        if threading.current_thread() is threading.main_thread():
+            callback(*args, **kwargs)
+            return
+        self._ui_update_queue.put((callback, args, kwargs))
+        timer = getattr(self, "_ui_timer", None)
+        if timer is not None:
+            timer.start()
+
+    def _process_ui_queue(self) -> None:
+        processed = False
+        while True:
+            try:
+                callback, args, kwargs = self._ui_update_queue.get_nowait()
+            except queue.Empty:
+                break
+            try:
+                callback(*args, **kwargs)
+            except Exception:  # pragma: no cover - defensive
+                _LOGGER.exception("Unhandled exception while processing UI callback")
+            finally:
+                self._ui_update_queue.task_done()
+            processed = True
+        if processed:
+            canvas = getattr(self.figure, "canvas", None)
+            if canvas is not None:
+                canvas.draw_idle()
+
+    def _on_waypoint_reached(self, index: int) -> None:
+        self._selected_waypoint_index = index
+        self._highlight_selected_waypoint()
+        self._update_waypoint_duration_box()
+
+    def _on_waypoint_playback_finished(self) -> None:
+        self._update_play_button_label(running=False)
+
     def _stop_waypoint_playback(self) -> None:
         if (
             self._waypoint_playback_thread
@@ -1369,13 +1418,11 @@ class InteractiveArm:
                 self._command_queue.join()
                 if self._waypoint_stop_event.is_set():
                     break
-                self._selected_waypoint_index = index
-                self._highlight_selected_waypoint()
-                self._update_waypoint_duration_box()
+                self._queue_ui_update(self._on_waypoint_reached, index)
         finally:
-            self._update_play_button_label(running=False)
             self._waypoint_stop_event.clear()
             self._waypoint_playback_thread = None
+            self._queue_ui_update(self._on_waypoint_playback_finished)
 
     def _handle_waypoint_press(self, event) -> bool:
         waypoint_ax = getattr(self, "waypoint_ax", None)
