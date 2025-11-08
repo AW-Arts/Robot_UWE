@@ -13,7 +13,10 @@ from pathlib import Path
 
 import matplotlib
 import numpy as np
+from matplotlib.lines import Line2D
+from matplotlib.patches import Rectangle
 from matplotlib.widgets import Button, TextBox
+from mpl_toolkits.mplot3d import proj3d
 
 from .al5a_kinematics import (
     AL5AKinematics,
@@ -83,6 +86,20 @@ import matplotlib.pyplot as plt  # noqa: E402  (import after backend selection)
 class DragState:
     dragging: bool = False
     last_event: object | None = None
+    active_axis: str | None = None
+    start_target: np.ndarray | None = None
+
+
+@dataclass
+class Waypoint:
+    position: np.ndarray
+    duration: float
+
+
+@dataclass
+class WaypointDragState:
+    index: int | None = None
+    offset: float = 0.0
 
 
 class InteractiveArm:
@@ -135,7 +152,21 @@ class InteractiveArm:
         self._soft_start_min_time_ms = 4_000
         self._soft_start_min_segments = 18
         self._home_move_time_ms = 4_000
+        self._loaded_servo_limits: dict[int, tuple[float, float]] = {}
+        self._loaded_workspace: dict[str, tuple[float, float]] = {}
         self.servo_offsets: dict[int, float] = self._load_calibration_data()
+        self.workspace_limits = {
+            "x": (-0.25, 0.25),
+            "y": (-0.25, 0.25),
+            "z": (
+                self.kin.links.base_height + 0.02,
+                self.kin.links.base_height
+                + self.kin.links.shoulder
+                + self.kin.links.elbow,
+            ),
+        }
+        self._load_workspace_limits_from_config()
+        self._apply_loaded_servo_limits()
 
         for index, inverted in enumerate(self.servo_inversions):
             if inverted:
@@ -188,13 +219,23 @@ class InteractiveArm:
         # dedicated worker so the Matplotlib event loop stays responsive.
         self._command_queue: queue.Queue[
             tuple[tuple[float, ...], int | None, bool]
-        ] = queue.Queue(maxsize=1)
+        ] = queue.Queue(maxsize=32)
         self._command_thread = threading.Thread(
             target=self._command_worker, name="al5a-command-worker", daemon=True
         )
         self._command_thread.start()
 
         self.drag_state = DragState()
+        self._modifiers: set[str] = set()
+        self._drag_z_scale = 0.0008
+        self.waypoints: list[Waypoint] = []
+        self._waypoint_patches: list[Rectangle] = []
+        self._waypoint_texts: list = []
+        self._waypoint_drag = WaypointDragState()
+        self._selected_waypoint_index: int | None = None
+        self._waypoint_playback_thread: threading.Thread | None = None
+        self._waypoint_stop_event = threading.Event()
+        self._updating_duration_box = False
         self.figure = plt.figure("Lynxmotion AL5A Controller")
         self.ax = self.figure.add_subplot(111, projection="3d")
         self.ax.set_position([0.05, 0.12, 0.5, 0.78])
@@ -211,6 +252,12 @@ class InteractiveArm:
         self.ax.view_init(elev=25, azim=-60)
 
         (self.base_line,) = self.ax.plot([], [], [], "-o", lw=3)
+        self._gizmo_vectors = {
+            "x": np.array([1.0, 0.0, 0.0]),
+            "y": np.array([0.0, 1.0, 0.0]),
+            "z": np.array([0.0, 0.0, 1.0]),
+        }
+        self._gizmo_colors = {"x": "#ff595e", "y": "#1982c4", "z": "#8ac926"}
         self.target_artist = self.ax.scatter(
             [self.target[0]],
             [self.target[1]],
@@ -219,6 +266,8 @@ class InteractiveArm:
             s=100,
             label="Target",
         )
+        self._gizmo_length = 0.06
+        self._gizmo_lines = self._create_gizmo()
         self.text = self.ax.text2D(
             0.02,
             0.95,
@@ -230,6 +279,8 @@ class InteractiveArm:
         self.figure.canvas.mpl_connect("button_release_event", self._on_release)
         self.figure.canvas.mpl_connect("motion_notify_event", self._on_motion)
         self.figure.canvas.mpl_connect("scroll_event", self._on_scroll)
+        self.figure.canvas.mpl_connect("key_press_event", self._on_key_press)
+        self.figure.canvas.mpl_connect("key_release_event", self._on_key_release)
 
         self._calibration_active = False
         self._calibration_button: Button | None = None
@@ -240,7 +291,7 @@ class InteractiveArm:
         self._initialise_from_feedback()
         self._skip_next_command = True
         self.update_robot()
-        self._start_homing_sequence()
+        self._run_home_sequence()
 
     def _default_joint_configuration(self) -> list[float]:
         joints: list[float] = []
@@ -319,7 +370,7 @@ class InteractiveArm:
         self._update_servo_readouts()
         self._initial_feedback_move_pending = True
 
-    def _start_homing_sequence(self) -> None:
+    def _run_home_sequence(self) -> None:
         home = self._get_home_joints()
         if not home:
             return
@@ -332,7 +383,7 @@ class InteractiveArm:
             except Exception:  # pragma: no cover - runtime safety net
                 pose = None
             else:
-                self.target = np.array(pose[:3, 3], dtype=float)
+                self.target[:] = self._clamp_target(np.array(pose[:3, 3], dtype=float))
                 self.wrist_pitch = sum(clamped_home[1:4])
                 self._update_visuals(clamped_home[:4])
         if len(clamped_home) >= 5:
@@ -346,6 +397,7 @@ class InteractiveArm:
         )
 
     def update_robot(self) -> None:
+        self.target[:] = self._clamp_target(self.target)
         joints = self.kin.inverse(self.target[[0, 1, 2]], self.wrist_pitch)
         joints = self._clamp_joint_list(list(joints))
         self.wrist_pitch = joints[1] + joints[2] + joints[3]
@@ -354,7 +406,9 @@ class InteractiveArm:
         self.commanded_joints = list(full_joints)
         self._update_visuals(joints)
         self._update_servo_readouts()
-        self._send_move_command(full_joints, move_time_ms=self.move_time_ms)
+        self._send_move_command(
+            full_joints, move_time_ms=self.move_time_ms, soft_start=True
+        )
         self.figure.canvas.draw_idle()
 
         self._update_raw_angle_button_visual()
@@ -374,6 +428,8 @@ class InteractiveArm:
         self.figure.canvas.draw_idle()
 
     def _on_press(self, event) -> None:
+        if self._handle_waypoint_press(event):
+            return
         if event.inaxes != self.ax:
             return
         if event.button != 1:
@@ -388,9 +444,14 @@ class InteractiveArm:
         # preventing accidental drags from distant clicks.
         tolerance = 0.02  # metres
         distance = math.hypot(event.xdata - self.target[0], event.ydata - self.target[1])
-        if distance <= tolerance:
+        axis = self._pick_gizmo_axis(event)
+        if axis is None and distance <= tolerance:
+            axis = "xy"
+        if axis is not None:
             self.drag_state.dragging = True
             self.drag_state.last_event = event
+            self.drag_state.active_axis = axis
+            self.drag_state.start_target = self.target.copy()
             return
 
         # If the click is outside the tolerance treat it as a request to jump
@@ -401,34 +462,121 @@ class InteractiveArm:
         self.target[1] = event.ydata
         self.drag_state.dragging = True
         self.drag_state.last_event = event
+        self.drag_state.active_axis = "xy"
+        self.drag_state.start_target = self.target.copy()
         self.update_robot()
 
     def _on_release(self, event) -> None:
+        if self._handle_waypoint_release(event):
+            return
         self.drag_state.dragging = False
         self.drag_state.last_event = None
+        self.drag_state.active_axis = None
+        self.drag_state.start_target = None
 
     def _on_motion(self, event) -> None:
+        if self._handle_waypoint_motion(event):
+            return
         if not self.drag_state.dragging or event.inaxes != self.ax:
             return
         if event.xdata is None or event.ydata is None:
             return
-        self.target[0] = event.xdata
-        self.target[1] = event.ydata
+        axis = self.drag_state.active_axis or "xy"
+        new_target = self.target.copy()
+        if "shift" in self._modifiers or "ctrl" in self._modifiers or "control" in self._modifiers:
+            direction = 0.0
+            if any(mod in self._modifiers for mod in {"shift"}):
+                direction += 1.0
+            if any(mod in self._modifiers for mod in {"ctrl", "control"}):
+                direction -= 1.0
+            if direction != 0.0 and self.drag_state.last_event is not None:
+                delta_pixels = self.drag_state.last_event.y - event.y
+                new_target[2] += direction * delta_pixels * self._drag_z_scale
+        else:
+            if axis in {"x", "xy"}:
+                new_target[0] = event.xdata
+            if axis in {"y", "xy"}:
+                new_target[1] = event.ydata
+            if axis == "z" and self.drag_state.last_event is not None:
+                delta_pixels = self.drag_state.last_event.y - event.y
+                new_target[2] += delta_pixels * self._drag_z_scale
+        self.target[:] = new_target
         self.update_robot()
+        self.drag_state.last_event = event
 
     def _on_scroll(self, event) -> None:
         if event.inaxes != self.ax:
             return
         step = 0.01 if event.button == "up" else -0.01
-        self.target[2] = np.clip(
-            self.target[2] + step,
-            self.kin.links.base_height + 0.02,
-            self.kin.links.base_height + self.kin.links.shoulder + self.kin.links.elbow,
-        )
+        updated = self.target.copy()
+        updated[2] += step
+        self.target[:] = self._clamp_target(updated)
         self.update_robot()
+
+    def _on_key_press(self, event) -> None:
+        if event.key is None:
+            return
+        self._modifiers.add(event.key.lower())
+
+    def _on_key_release(self, event) -> None:
+        if event.key is None:
+            return
+        self._modifiers.discard(event.key.lower())
 
     # ------------------------------------------------------------------
     # UI helpers
+    def _create_gizmo(self) -> dict[str, Line2D]:
+        lines: dict[str, Line2D] = {}
+        for axis, direction in self._gizmo_vectors.items():
+            color = self._gizmo_colors.get(axis, "black")
+            endpoint = self.target + direction * self._gizmo_length
+            (line,) = self.ax.plot(
+                [self.target[0], endpoint[0]],
+                [self.target[1], endpoint[1]],
+                [self.target[2], endpoint[2]],
+                color=color,
+                linewidth=2,
+                marker="o",
+                markersize=6,
+                markerfacecolor=color,
+                markeredgecolor=color,
+                alpha=0.9,
+                picker=5,
+            )
+            lines[axis] = line
+        return lines
+
+    def _update_gizmo(self) -> None:
+        for axis, line in self._gizmo_lines.items():
+            direction = self._gizmo_vectors.get(axis)
+            if direction is None:
+                continue
+            endpoint = self.target + direction * self._gizmo_length
+            line.set_data_3d(
+                [self.target[0], endpoint[0]],
+                [self.target[1], endpoint[1]],
+                [self.target[2], endpoint[2]],
+            )
+
+    def _project_point(self, point: np.ndarray) -> tuple[float, float]:
+        x2, y2, _ = proj3d.proj_transform(point[0], point[1], point[2], self.ax.get_proj())
+        sx, sy = self.ax.transData.transform((x2, y2))
+        return sx, sy
+
+    def _pick_gizmo_axis(self, event) -> str | None:
+        if event.x is None or event.y is None:
+            return None
+        tolerance = 18.0
+        target_screen = self._project_point(self.target)
+        for axis, direction in self._gizmo_vectors.items():
+            endpoint = self.target + direction * self._gizmo_length
+            screen = self._project_point(endpoint)
+            if math.hypot(event.x - screen[0], event.y - screen[1]) <= tolerance:
+                return axis
+        if math.hypot(event.x - target_screen[0], event.y - target_screen[1]) <= tolerance:
+            return "xy"
+        return None
+
     def _create_controls(self) -> None:
         """Create on-figure UI elements such as the D-pad."""
 
@@ -508,6 +656,12 @@ class InteractiveArm:
         servo_row_height = 0.055
         servo_gap = 0.01
         servo_top = 0.9
+
+        home_ax = self.figure.add_axes(
+            [pad_left, pad_bottom - 3 * (pad_size + pad_gap), pad_size * 2 + pad_gap, pad_size]
+        )
+        self._home_button = Button(home_ax, "Home", hovercolor="0.95")
+        self._home_button.on_clicked(self._handle_home_button)
 
         for index, (name, model, location) in enumerate(self._SERVO_METADATA):
             row_bottom = servo_top - servo_row_height - index * (servo_row_height + servo_gap)
@@ -599,6 +753,140 @@ class InteractiveArm:
         self._raw_angle_button.on_clicked(self._toggle_raw_angle_display)
         self._update_raw_angle_button_visual()
 
+        self._setup_waypoint_controls()
+
+    def _setup_waypoint_controls(self) -> None:
+        panel_left = 0.75
+        panel_width = 0.2
+        panel_bottom = 0.18
+        panel_height = 0.48
+        self._waypoint_item_height = 0.12
+        self._waypoint_item_gap = 0.02
+
+        self.waypoint_ax = self.figure.add_axes(
+            [panel_left, panel_bottom, panel_width, panel_height]
+        )
+        self.waypoint_ax.set_xlim(0, 1)
+        self.waypoint_ax.set_ylim(0, 1)
+        self.waypoint_ax.set_xticks([])
+        self.waypoint_ax.set_yticks([])
+        self.waypoint_ax.set_facecolor("#f7f7f7")
+        self.waypoint_ax.set_title("Waypoints", pad=8)
+
+        duration_ax = self.figure.add_axes(
+            [panel_left, panel_bottom + panel_height + 0.01, panel_width, 0.05]
+        )
+        self._waypoint_duration_box = TextBox(
+            duration_ax, "Duration (s)", initial="2.0"
+        )
+        self._waypoint_duration_box.on_submit(self._handle_duration_submit)
+
+        add_ax = self.figure.add_axes(
+            [panel_left, panel_bottom + panel_height + 0.08, panel_width, 0.05]
+        )
+        self._add_waypoint_button = Button(add_ax, "Add waypoint", hovercolor="0.95")
+        self._add_waypoint_button.on_clicked(self._handle_add_waypoint)
+
+        play_ax = self.figure.add_axes(
+            [panel_left, panel_bottom + panel_height + 0.14, panel_width, 0.05]
+        )
+        self._play_waypoints_button = Button(play_ax, "Play path", hovercolor="0.95")
+        self._play_waypoints_button.on_clicked(self._handle_play_waypoints)
+
+        clear_ax = self.figure.add_axes(
+            [panel_left, panel_bottom + panel_height + 0.20, panel_width, 0.05]
+        )
+        self._clear_waypoints_button = Button(clear_ax, "Clear path", hovercolor="0.95")
+        self._clear_waypoints_button.on_clicked(self._handle_clear_waypoints)
+
+        self._refresh_waypoint_display()
+
+    def _refresh_waypoint_display(self) -> None:
+        if not hasattr(self, "waypoint_ax"):
+            return
+        self.waypoint_ax.cla()
+        self.waypoint_ax.set_xlim(0, 1)
+        self.waypoint_ax.set_ylim(0, 1)
+        self.waypoint_ax.set_xticks([])
+        self.waypoint_ax.set_yticks([])
+        self.waypoint_ax.set_facecolor("#f7f7f7")
+        self.waypoint_ax.set_title("Waypoints", pad=8)
+        self._waypoint_patches = []
+        self._waypoint_texts = []
+
+        if not self.waypoints:
+            self.waypoint_ax.text(
+                0.5,
+                0.5,
+                "No waypoints",
+                ha="center",
+                va="center",
+                fontsize=10,
+                color="#666666",
+            )
+            self.figure.canvas.draw_idle()
+            return
+
+        for index, waypoint in enumerate(self.waypoints):
+            y = 1.0 - (index + 1) * self._waypoint_item_height - index * self._waypoint_item_gap
+            y = max(y, 0.02)
+            rect = Rectangle(
+                (0.02, y),
+                0.96,
+                min(self._waypoint_item_height, 0.9),
+                facecolor="#ffffff",
+                edgecolor="#cccccc",
+                linewidth=1,
+            )
+            if index == self._selected_waypoint_index:
+                rect.set_facecolor("#cfe8fc")
+            self.waypoint_ax.add_patch(rect)
+            self._waypoint_patches.append(rect)
+
+            position_text = (
+                f"#{index + 1}: x={waypoint.position[0]:.3f}, "
+                f"y={waypoint.position[1]:.3f}, z={waypoint.position[2]:.3f}"
+            )
+            text = self.waypoint_ax.text(
+                0.04,
+                y + self._waypoint_item_height / 2,
+                f"{position_text}\n{waypoint.duration:.2f} s",
+                va="center",
+                ha="left",
+                fontsize=9,
+                color="#333333",
+            )
+            self._waypoint_texts.append(text)
+
+        self.figure.canvas.draw_idle()
+
+    def _highlight_selected_waypoint(self) -> None:
+        for idx, patch in enumerate(self._waypoint_patches):
+            if idx == self._selected_waypoint_index:
+                patch.set_facecolor("#cfe8fc")
+            else:
+                patch.set_facecolor("#ffffff")
+        self.figure.canvas.draw_idle()
+
+    def _update_waypoint_duration_box(self) -> None:
+        if not hasattr(self, "_waypoint_duration_box"):
+            return
+        if self._waypoint_duration_box is None:
+            return
+        if self._updating_duration_box:
+            return
+        value = "2.0"
+        if (
+            self._selected_waypoint_index is not None
+            and 0 <= self._selected_waypoint_index < len(self.waypoints)
+        ):
+            value = f"{self.waypoints[self._selected_waypoint_index].duration:.2f}"
+        try:
+            self._updating_duration_box = True
+            self._waypoint_duration_box.set_val(value)
+        finally:
+            self._updating_duration_box = False
+
 
     def _make_move_callback(self, delta: tuple[float, float, float]):
         def _callback(event) -> None:  # pragma: no cover - UI interaction
@@ -637,20 +925,11 @@ class InteractiveArm:
         return _callback
 
     def _nudge_target(self, dx: float, dy: float, dz: float) -> None:
-        limits = (
-            (-0.25, 0.25),
-            (-0.25, 0.25),
-            (
-                self.kin.links.base_height + 0.02,
-                self.kin.links.base_height
-                + self.kin.links.shoulder
-                + self.kin.links.elbow,
-            ),
-        )
-
-        self.target[0] = np.clip(self.target[0] + dx, *limits[0])
-        self.target[1] = np.clip(self.target[1] + dy, *limits[1])
-        self.target[2] = np.clip(self.target[2] + dz, *limits[2])
+        updated = self.target.copy()
+        updated[0] += dx
+        updated[1] += dy
+        updated[2] += dz
+        self.target[:] = self._clamp_target(updated)
         self.update_robot()
 
     def _adjust_servo(self, index: int, delta: float) -> None:
@@ -754,6 +1033,16 @@ class InteractiveArm:
                 clamped[idx] = config.clamp_angle(angle)
         return clamped
 
+    def _clamp_target(self, target: np.ndarray | list[float]) -> np.ndarray:
+        result = np.array(target, dtype=float)
+        x_limits = self.workspace_limits.get("x", (-0.3, 0.3))
+        y_limits = self.workspace_limits.get("y", (-0.3, 0.3))
+        z_limits = self.workspace_limits.get("z", (0.0, 0.4))
+        result[0] = float(np.clip(result[0], *x_limits))
+        result[1] = float(np.clip(result[1], *y_limits))
+        result[2] = float(np.clip(result[2], *z_limits))
+        return result
+
     def _apply_offsets(
         self, joints: list[float] | tuple[float, ...], *, direction: str
     ) -> list[float]:
@@ -783,6 +1072,8 @@ class InteractiveArm:
         offsets_raw: dict[str, object] | None = None
         vertical_raw: dict[str, object] | None = None
         inversion_raw: dict[str, object] | None = None
+        workspace_raw: dict[str, object] | None = None
+        limits_raw: dict[str, object] | None = None
 
         if isinstance(data, dict) and (
             "offsets" in data or "vertical_angles" in data
@@ -796,6 +1087,12 @@ class InteractiveArm:
             inversion_candidate = data.get("inverted")
             if isinstance(inversion_candidate, dict):
                 inversion_raw = inversion_candidate
+            workspace_candidate = data.get("workspace")
+            if isinstance(workspace_candidate, dict):
+                workspace_raw = workspace_candidate
+            limits_candidate = data.get("servo_limits")
+            if isinstance(limits_candidate, dict):
+                limits_raw = limits_candidate
         elif isinstance(data, dict):
             offsets_raw = data
 
@@ -827,12 +1124,58 @@ class InteractiveArm:
                     continue
                 self.servo_inversions[index] = bool(value)
 
+        if workspace_raw:
+            loaded_workspace: dict[str, tuple[float, float]] = {}
+            for axis, bounds in workspace_raw.items():
+                if not isinstance(bounds, (list, tuple)) or len(bounds) != 2:
+                    continue
+                try:
+                    lower = float(bounds[0])
+                    upper = float(bounds[1])
+                except (TypeError, ValueError):
+                    continue
+                if lower > upper:
+                    lower, upper = upper, lower
+                loaded_workspace[axis] = (lower, upper)
+            if loaded_workspace:
+                self._loaded_workspace.update(loaded_workspace)
+
+        if limits_raw:
+            parsed_limits: dict[int, tuple[float, float]] = {}
+            for key, payload in limits_raw.items():
+                if not isinstance(payload, dict):
+                    continue
+                try:
+                    index = int(key)
+                except (TypeError, ValueError):
+                    continue
+                try:
+                    min_deg = float(payload.get("min_deg"))
+                    max_deg = float(payload.get("max_deg"))
+                except (TypeError, ValueError):
+                    continue
+                if min_deg >= max_deg:
+                    continue
+                parsed_limits[index] = (
+                    math.radians(min_deg),
+                    math.radians(max_deg),
+                )
+            if parsed_limits:
+                self._loaded_servo_limits.update(parsed_limits)
+
         return offsets
 
     def _save_calibration_data(self) -> None:
         path = self._calibration_path
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
+            servo_limits = {
+                str(idx): {
+                    "min_deg": math.degrees(config.min_angle),
+                    "max_deg": math.degrees(config.max_angle),
+                }
+                for idx, config in self._base_servo_configs.items()
+            }
             serialisable = {
                 "offsets": {str(idx): offset for idx, offset in self.servo_offsets.items()},
                 "vertical_angles": {
@@ -841,12 +1184,50 @@ class InteractiveArm:
                 "inverted": {
                     str(idx): state for idx, state in enumerate(self.servo_inversions)
                 },
+                "servo_limits": servo_limits,
+                "workspace": {
+                    axis: [bounds[0], bounds[1]]
+                    for axis, bounds in self.workspace_limits.items()
+                },
             }
             path.write_text(json.dumps(serialisable, indent=2, sort_keys=True))
         except Exception:  # pragma: no cover - configuration robustness
             _LOGGER.warning(
                 "Failed to persist calibration data to %s", path, exc_info=True
             )
+
+    def _load_workspace_limits_from_config(self) -> None:
+        if not self._loaded_workspace:
+            return
+        for axis, bounds in self._loaded_workspace.items():
+            if len(bounds) != 2:
+                continue
+            lower, upper = bounds
+            if lower >= upper:
+                continue
+            if axis in self.workspace_limits:
+                self.workspace_limits[axis] = (lower, upper)
+            else:
+                self.workspace_limits[axis] = (lower, upper)
+        self.target[:] = self._clamp_target(self.target)
+
+    def _apply_loaded_servo_limits(self) -> None:
+        if not self._loaded_servo_limits:
+            return
+        for idx, (min_angle, max_angle) in self._loaded_servo_limits.items():
+            base = self._base_servo_configs.get(idx)
+            if base is None:
+                continue
+            if min_angle >= max_angle:
+                continue
+            updated = ServoConfig(
+                min_angle=min_angle,
+                max_angle=max_angle,
+                min_pulse=base.min_pulse,
+                max_pulse=base.max_pulse,
+            )
+            self._base_servo_configs[idx] = updated
+            self.servo_configs[idx] = updated
 
     def _update_calibration_button_visual(self) -> None:
         if self._calibration_button is None:
@@ -883,6 +1264,172 @@ class InteractiveArm:
         self._show_raw_angles = not self._show_raw_angles
         self._update_raw_angle_button_visual()
         self._update_servo_readouts()
+
+    def _handle_home_button(self, _event=None) -> None:  # pragma: no cover - UI interaction
+        self._run_home_sequence()
+
+    def _handle_duration_submit(self, text: str) -> None:  # pragma: no cover - UI interaction
+        if self._updating_duration_box:
+            return
+        try:
+            value = float(text)
+        except ValueError:
+            _LOGGER.warning("Ignoring invalid waypoint duration entry: %s", text)
+            self._update_waypoint_duration_box()
+            return
+        value = max(0.1, value)
+        if (
+            self._selected_waypoint_index is None
+            or self._selected_waypoint_index >= len(self.waypoints)
+        ):
+            return
+        self.waypoints[self._selected_waypoint_index].duration = value
+        self._refresh_waypoint_display()
+        self._update_waypoint_duration_box()
+
+    def _handle_add_waypoint(self, _event=None) -> None:  # pragma: no cover - UI interaction
+        if self._waypoint_duration_box is None:
+            duration = 2.0
+        else:
+            try:
+                duration = float(self._waypoint_duration_box.text)
+            except ValueError:
+                duration = 2.0
+        duration = max(0.1, duration)
+        position = self._clamp_target(np.array(self.target))
+        self.waypoints.append(Waypoint(position=position.copy(), duration=duration))
+        self._selected_waypoint_index = len(self.waypoints) - 1
+        self._refresh_waypoint_display()
+        self._update_waypoint_duration_box()
+
+    def _handle_clear_waypoints(self, _event=None) -> None:  # pragma: no cover - UI interaction
+        self._stop_waypoint_playback()
+        self.waypoints.clear()
+        self._selected_waypoint_index = None
+        self._refresh_waypoint_display()
+        self._update_waypoint_duration_box()
+
+    def _handle_play_waypoints(self, _event=None) -> None:  # pragma: no cover - UI interaction
+        if self._waypoint_playback_thread and self._waypoint_playback_thread.is_alive():
+            self._stop_waypoint_playback()
+            return
+        if not self.waypoints:
+            _LOGGER.info("No waypoints queued; add at least one before playback")
+            return
+        self._waypoint_stop_event.clear()
+        self._waypoint_playback_thread = threading.Thread(
+            target=self._waypoint_playback_worker,
+            name="al5a-waypoint-playback",
+            daemon=True,
+        )
+        self._waypoint_playback_thread.start()
+        self._update_play_button_label(running=True)
+
+    def _update_play_button_label(self, *, running: bool) -> None:
+        button = getattr(self, "_play_waypoints_button", None)
+        if button is None:
+            return
+        label = "Stop" if running else "Play path"
+        button.label.set_text(label)
+        button.ax.figure.canvas.draw_idle()
+
+    def _stop_waypoint_playback(self) -> None:
+        if (
+            self._waypoint_playback_thread
+            and self._waypoint_playback_thread.is_alive()
+        ):
+            self._waypoint_stop_event.set()
+            self._waypoint_playback_thread.join(timeout=1.0)
+        self._waypoint_playback_thread = None
+        self._waypoint_stop_event.clear()
+        self._update_play_button_label(running=False)
+
+    def _waypoint_playback_worker(self) -> None:
+        try:
+            for index, waypoint in enumerate(list(self.waypoints)):
+                if self._waypoint_stop_event.is_set():
+                    break
+                target = self._clamp_target(np.array(waypoint.position, dtype=float))
+                duration_ms = int(max(0.1, waypoint.duration) * 1000)
+                try:
+                    joints = list(self.kin.inverse(target[[0, 1, 2]], self.wrist_pitch))
+                except Exception:
+                    _LOGGER.exception("Failed to solve IK for waypoint %d", index + 1)
+                    continue
+                self.wrist_pitch = joints[1] + joints[2] + joints[3]
+                full_joints = joints + [self.wrist_rotation, self.gripper_angle]
+                full_joints = self._clamp_joint_list(full_joints)
+                self.target[:] = target
+                self._send_move_command(
+                    full_joints,
+                    move_time_ms=duration_ms,
+                    soft_start=True,
+                    replace=False,
+                )
+                self._command_queue.join()
+                if self._waypoint_stop_event.is_set():
+                    break
+                self._selected_waypoint_index = index
+                self._highlight_selected_waypoint()
+                self._update_waypoint_duration_box()
+        finally:
+            self._update_play_button_label(running=False)
+            self._waypoint_stop_event.clear()
+            self._waypoint_playback_thread = None
+
+    def _handle_waypoint_press(self, event) -> bool:
+        waypoint_ax = getattr(self, "waypoint_ax", None)
+        if waypoint_ax is None or event.inaxes != waypoint_ax:
+            return False
+        if event.xdata is None or event.ydata is None:
+            return True
+        handled = False
+        for idx, patch in enumerate(self._waypoint_patches):
+            contains, _ = patch.contains(event)
+            if contains:
+                self._waypoint_drag = WaypointDragState(index=idx, offset=event.ydata)
+                self._selected_waypoint_index = idx
+                self._highlight_selected_waypoint()
+                self._update_waypoint_duration_box()
+                handled = True
+                break
+        if not handled:
+            self._waypoint_drag = WaypointDragState()
+            self._selected_waypoint_index = None
+            self._refresh_waypoint_display()
+            self._update_waypoint_duration_box()
+        return True
+
+    def _handle_waypoint_motion(self, event) -> bool:
+        if self._waypoint_drag.index is None:
+            return False
+        waypoint_ax = getattr(self, "waypoint_ax", None)
+        if waypoint_ax is None or event.inaxes != waypoint_ax:
+            return True
+        if event.ydata is None or not self.waypoints:
+            return True
+        centers = [
+            patch.get_y() + self._waypoint_item_height / 2 for patch in self._waypoint_patches
+        ]
+        if not centers:
+            return True
+        distances = [abs(event.ydata - center) for center in centers]
+        new_index = int(min(range(len(distances)), key=distances.__getitem__))
+        old_index = self._waypoint_drag.index
+        if new_index != old_index:
+            waypoint = self.waypoints.pop(old_index)
+            self.waypoints.insert(new_index, waypoint)
+            self._waypoint_drag.index = new_index
+            self._selected_waypoint_index = new_index
+            self._refresh_waypoint_display()
+            self._update_waypoint_duration_box()
+        return True
+
+    def _handle_waypoint_release(self, event) -> bool:
+        if self._waypoint_drag.index is None:
+            return False
+        self._waypoint_drag = WaypointDragState()
+        return True
 
     def _enter_calibration_mode(self) -> None:
         if self._calibration_active:
@@ -1109,6 +1656,7 @@ class InteractiveArm:
             [self.target[1]],
             [self.target[2]],
         )
+        self._update_gizmo()
         self.text.set_text(
             f"Target: x={self.target[0]:.3f} m, y={self.target[1]:.3f} m, z={self.target[2]:.3f} m\n"
             + f"Wrist pitch: {math.degrees(self.wrist_pitch):.1f}°"
@@ -1279,7 +1827,8 @@ class InteractiveArm:
         joints: list[float] | tuple[float, ...],
         move_time_ms: int | None,
         *,
-        soft_start: bool = False,
+        soft_start: bool = True,
+        replace: bool = True,
     ) -> None:
         adjusted_move_time = move_time_ms
         if self._initial_feedback_move_pending:
@@ -1311,15 +1860,18 @@ class InteractiveArm:
 
         raw_command = tuple(self._apply_offsets(joints, direction="raw"))
         command = (raw_command, adjusted_move_time, soft_start)
-        try:
-            self._command_queue.put_nowait(command)
-        except queue.Full:
+        if replace:
             try:
-                self._command_queue.get_nowait()
-                self._command_queue.task_done()
-            except queue.Empty:  # pragma: no cover - defensive
-                pass
-            self._command_queue.put_nowait(command)
+                self._command_queue.put_nowait(command)
+            except queue.Full:
+                try:
+                    self._command_queue.get_nowait()
+                    self._command_queue.task_done()
+                except queue.Empty:  # pragma: no cover - defensive
+                    pass
+                self._command_queue.put_nowait(command)
+        else:
+            self._command_queue.put(command)
 
     def _get_servo_configs_for_controller(self) -> dict[int, ServoConfig]:
         return dict(self.servo_configs)
