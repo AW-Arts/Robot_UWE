@@ -243,6 +243,12 @@ class InteractiveArm:
         self._updating_duration_box = False
         self.figure = plt.figure("Lynxmotion AL5A Controller")
         try:
+            # Provide extra breathing room for the on-figure panels while keeping the
+            # 3D viewport generous enough for manipulation.
+            self.figure.set_size_inches(14.5, 8.5, forward=True)
+        except Exception:  # pragma: no cover - backend quirks when sizing figures
+            pass
+        try:
             self.figure.set_tight_layout(True)
         except AttributeError:  # pragma: no cover - Matplotlib < 3.1
             self.figure.tight_layout()
@@ -651,14 +657,14 @@ class InteractiveArm:
     def _create_controls(self) -> None:
         """Create on-figure UI elements organised into collapsible panels."""
 
-        self.figure.subplots_adjust(left=0.05, right=0.68, top=0.95, bottom=0.08)
+        self.figure.subplots_adjust(left=0.045, right=0.575, top=0.965, bottom=0.08)
 
-        self._panel_left = 0.72
+        self._panel_left = 0.61
         self._panel_bottom = 0.08
-        self._panel_width = 0.26
-        self._panel_height = 0.84
-        self._panel_margin = 0.03
-        self._panel_menu_height = 0.18
+        self._panel_width = 0.36
+        self._panel_height = 0.88
+        self._panel_margin = 0.035
+        self._panel_menu_height = 0.16
         self._panel_content_top = 1.0 - self._panel_menu_height - self._panel_margin
 
         background = self._panel_axes(0.0, 0.0, 1.0, 1.0)
@@ -682,7 +688,7 @@ class InteractiveArm:
         self._panel_menu_buttons: dict[str, Button] = {}
         self._active_panel: str | None = None
 
-        button_height = self._panel_menu_height * 0.7
+        button_height = self._panel_menu_height * 0.65
         menu_bottom = 1.0 - self._panel_menu_height + (
             self._panel_menu_height - button_height
         ) / 2
@@ -771,10 +777,10 @@ class InteractiveArm:
         )
         axes.append(title_ax)
 
-        pad_left = self._panel_margin + 0.04
-        pad_bottom = self._panel_margin + 0.30
-        pad_size = 0.18
-        pad_gap = 0.025
+        pad_left = self._panel_margin + 0.045
+        pad_bottom = self._panel_margin + 0.33
+        pad_size = 0.19
+        pad_gap = 0.03
 
         button_defs = {
             "up": (
@@ -838,7 +844,7 @@ class InteractiveArm:
 
         home_ax = self._panel_axes(
             pad_left,
-            self._panel_margin + 0.08,
+            self._panel_margin + 0.1,
             pad_size * 2 + pad_gap,
             0.12,
         )
@@ -871,22 +877,22 @@ class InteractiveArm:
         )
         axes.append(title_ax)
 
-        top_edge = self._panel_content_top - 0.14
+        top_edge = self._panel_content_top - 0.12
         bottom_edge = self._panel_margin + 0.18
-        row_gap = 0.012
+        row_gap = 0.02
         available_height = max(
             top_edge - bottom_edge - (len(self._SERVO_METADATA) - 1) * row_gap, 0.001
         )
         row_height = available_height / max(len(self._SERVO_METADATA), 1)
 
         value_left = self._panel_margin
-        value_width = 0.44
-        gap_small = 0.012
-        invert_gap = 0.018
-        minus_width = 0.065
-        plus_width = 0.065
-        invert_width = 0.08
-        limit_width = 0.09
+        value_width = 0.48
+        gap_small = 0.014
+        invert_gap = 0.02
+        minus_width = 0.07
+        plus_width = 0.07
+        invert_width = 0.085
+        limit_width = 0.1
 
         for index, (name, model, location) in enumerate(self._SERVO_METADATA):
             row_bottom = bottom_edge + (
@@ -907,8 +913,9 @@ class InteractiveArm:
                 f"{name} ({model})\n{location}\nAngle: 0.0°",
                 va="center",
                 ha="left",
-                fontsize=8,
-                linespacing=1.4,
+                fontsize=9,
+                linespacing=1.5,
+                wrap=True,
                 transform=value_ax.transAxes,
             )
             self.servo_value_texts.append(text)
@@ -975,9 +982,9 @@ class InteractiveArm:
 
             axes.extend([minus_ax, plus_ax, invert_ax, min_ax, max_ax])
 
-        control_bottom = self._panel_margin + 0.05
-        control_height = 0.08
-        control_gap = 0.02
+        control_bottom = self._panel_margin + 0.06
+        control_height = 0.085
+        control_gap = 0.022
         control_width = (
             1.0 - 2 * self._panel_margin - 2 * control_gap
         ) / 3
@@ -1057,8 +1064,8 @@ class InteractiveArm:
         self._panel_interactive_widgets[panel_key].append(self._waypoint_duration_box)
         axes.append(duration_ax)
 
-        button_height = 0.08
-        button_gap = 0.02
+        button_height = 0.085
+        button_gap = 0.025
         button_width = (
             1.0 - 2 * self._panel_margin - 2 * button_gap
         ) / 3
@@ -1097,8 +1104,8 @@ class InteractiveArm:
 
         waypoint_bottom = self._panel_margin + 0.02
         waypoint_height = button_bottom - waypoint_bottom - 0.04
-        self._waypoint_item_height = 0.16
-        self._waypoint_item_gap = 0.04
+        self._waypoint_item_height = 0.15
+        self._waypoint_item_gap = 0.045
 
         self.waypoint_ax = self._panel_axes(
             self._panel_margin,
