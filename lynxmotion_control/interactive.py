@@ -1250,17 +1250,27 @@ class InteractiveArm:
             else:
                 self.gripper_angle = new_angle
             self.commanded_joints = list(updated)
+            self.current_joints = list(updated)
             self._update_servo_readouts()
-            self._send_move_command(updated, move_time_ms=self.move_time_ms)
+            self._cancel_pending_commands()
+            self._send_move_command(
+                updated, move_time_ms=self.move_time_ms, soft_start=False
+            )
             return
 
         self.commanded_joints = list(updated)
+        self.current_joints = list(updated)
         forward_pose = self.kin.forward(self.commanded_joints)
-        self.target = forward_pose[:3, 3]
+        self.target[:] = forward_pose[:3, 3]
         self.wrist_pitch = sum(self.commanded_joints[1:4])
         self._update_visuals(self.commanded_joints[:4])
         self._update_servo_readouts()
-        self._send_move_command(self.commanded_joints, move_time_ms=self.move_time_ms)
+        self._cancel_pending_commands()
+        self._send_move_command(
+            self.commanded_joints,
+            move_time_ms=self.move_time_ms,
+            soft_start=False,
+        )
 
     def _toggle_servo_inversion(self, index: int) -> None:
         if index >= len(self.servo_inversions):
@@ -2102,6 +2112,15 @@ class InteractiveArm:
         )
         self._update_servo_readouts()
         self._update_limit_box_display(index)
+
+    def _cancel_pending_commands(self) -> None:
+        while True:
+            try:
+                queued = self._command_queue.get_nowait()
+            except queue.Empty:
+                break
+            else:
+                self._command_queue.task_done()
 
     def _store_setpoint(self, joints: Sequence[float]) -> None:
         if len(joints) < 4:
