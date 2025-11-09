@@ -1229,7 +1229,10 @@ class InteractiveArm:
         if config is None:
             return
 
-        source = self.commanded_joints or self.current_joints
+        source = self.feedback_joints or self.current_joints
+        if not source:
+            return
+
         updated = list(source)
         old_angle = updated[index]
         new_angle = config.clamp_angle(old_angle + delta)
