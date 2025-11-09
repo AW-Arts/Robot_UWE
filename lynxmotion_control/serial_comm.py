@@ -48,6 +48,8 @@ class SSC32Command:
 class AL5ASerialController:
     """High-level interface to the SSC-32/SSC-32U controller."""
 
+    AUTO_RELAX_ON_CALIBRATION = True
+
     def __init__(self, port: str | None = None, baudrate: int = 115200) -> None:
         self.port_name = port
         self.baudrate = baudrate
