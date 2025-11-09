@@ -153,7 +153,7 @@ class InteractiveArm:
         self._raw_angle_button: Button | None = None
         self._soft_start_min_time_ms = 4_000
         self._soft_start_min_segments = 18
-        self._home_move_time_ms = 4_000
+        self._home_move_time_ms = move_time_ms
         self._loaded_servo_limits: dict[int, tuple[float, float]] = {}
         self._loaded_workspace: dict[str, tuple[float, float]] = {}
         self.servo_offsets: dict[int, float] = self._load_calibration_data()
@@ -437,7 +437,7 @@ class InteractiveArm:
 
         self._update_servo_readouts()
         self._send_move_command(
-            clamped_home, move_time_ms=self._home_move_time_ms, soft_start=True
+            clamped_home, move_time_ms=self._home_move_time_ms, soft_start=False
         )
 
     def update_robot(self) -> None:
@@ -622,12 +622,121 @@ class InteractiveArm:
         return None
 
     def _create_controls(self) -> None:
-        """Create on-figure UI elements such as the D-pad."""
+        """Create on-figure UI elements organised into collapsible panels."""
 
-        pad_left = 0.56
-        pad_bottom = 0.18
-        pad_size = 0.07
-        pad_gap = 0.005
+        self.figure.subplots_adjust(left=0.05, right=0.68, top=0.95, bottom=0.08)
+
+        self._panel_left = 0.72
+        self._panel_bottom = 0.08
+        self._panel_width = 0.26
+        self._panel_height = 0.84
+        self._panel_margin = 0.03
+        self._panel_menu_height = 0.18
+        self._panel_content_top = 1.0 - self._panel_menu_height - self._panel_margin
+
+        background = self._panel_axes(0.0, 0.0, 1.0, 1.0)
+        background.set_xticks([])
+        background.set_yticks([])
+        background.set_facecolor("#f4f4f4")
+        for spine in background.spines.values():
+            spine.set_visible(False)
+        background.set_zorder(-10)
+
+        menu_entries = [
+            ("Movement", "movement"),
+            ("Servos", "servos"),
+            ("Path", "waypoints"),
+        ]
+
+        self._panel_widgets = {key: [] for _, key in menu_entries}
+        self._panel_menu_buttons: dict[str, Button] = {}
+        self._active_panel: str | None = None
+
+        button_height = self._panel_menu_height * 0.7
+        menu_bottom = 1.0 - self._panel_menu_height + (
+            self._panel_menu_height - button_height
+        ) / 2
+        available_width = 1.0 - 2 * self._panel_margin
+        button_width = (
+            available_width - (len(menu_entries) - 1) * self._panel_margin
+        ) / len(menu_entries)
+
+        for idx, (label, key) in enumerate(menu_entries):
+            left = self._panel_margin + idx * (button_width + self._panel_margin)
+            ax = self._panel_axes(left, menu_bottom, button_width, button_height)
+            button = Button(ax, label, hovercolor="#d9e8ff")
+            button.on_clicked(lambda _event, name=key: self._set_active_panel(name))
+            self._panel_menu_buttons[key] = button
+
+        self.buttons = {}
+        self.servo_value_texts = []
+        self.servo_buttons = []
+        self.servo_invert_buttons = []
+        self.servo_limit_boxes_min = []
+        self.servo_limit_boxes_max = []
+
+        self._panel_widgets["movement"] = self._build_movement_panel()
+        self._panel_widgets["servos"] = self._build_servo_panel()
+        self._panel_widgets["waypoints"] = self._build_waypoint_panel()
+
+        self._set_active_panel("movement")
+
+    def _panel_axes(
+        self, rel_left: float, rel_bottom: float, rel_width: float, rel_height: float
+    ):
+        return self.figure.add_axes(
+            [
+                self._panel_left + rel_left * self._panel_width,
+                self._panel_bottom + rel_bottom * self._panel_height,
+                rel_width * self._panel_width,
+                rel_height * self._panel_height,
+            ]
+        )
+
+    def _set_active_panel(self, panel: str) -> None:
+        if self._active_panel == panel:
+            return
+
+        for name, axes in self._panel_widgets.items():
+            visible = name == panel
+            for axis in axes:
+                axis.set_visible(visible)
+        for name, button in self._panel_menu_buttons.items():
+            if name == panel:
+                button.color = "#aac8ff"
+                button.hovercolor = "#aac8ff"
+            else:
+                button.color = "0.85"
+                button.hovercolor = "0.95"
+            button.ax.set_facecolor(button.color)
+        self._active_panel = panel
+        self.figure.canvas.draw_idle()
+
+    def _build_movement_panel(self) -> list:
+        axes: list = []
+
+        title_ax = self._panel_axes(
+            self._panel_margin,
+            self._panel_content_top - 0.08,
+            1.0 - 2 * self._panel_margin,
+            0.06,
+        )
+        title_ax.axis("off")
+        title_ax.text(
+            0.0,
+            0.5,
+            "Target nudging",
+            va="center",
+            ha="left",
+            fontsize=10,
+            fontweight="bold",
+        )
+        axes.append(title_ax)
+
+        pad_left = self._panel_margin + 0.04
+        pad_bottom = self._panel_margin + 0.30
+        pad_size = 0.18
+        pad_gap = 0.025
 
         button_defs = {
             "up": (
@@ -668,15 +777,14 @@ class InteractiveArm:
             ),
         }
 
-        self.buttons: dict[str, Button] = {}
-
         for name, (x, y, label, delta) in button_defs.items():
-            axes = self.figure.add_axes([x, y, pad_size, pad_size])
-            button = Button(axes, label)
+            axes_obj = self._panel_axes(x, y, pad_size, pad_size)
+            button = Button(axes_obj, label, hovercolor="#e8f0ff")
             button.on_clicked(self._make_move_callback(delta))
             self.buttons[name] = button
+            axes.append(axes_obj)
 
-        centre_ax = self.figure.add_axes([pad_left, pad_bottom, pad_size, pad_size])
+        centre_ax = self._panel_axes(pad_left, pad_bottom, pad_size, pad_size)
         centre_ax.axis("off")
         centre_ax.text(
             0.5,
@@ -687,31 +795,69 @@ class InteractiveArm:
             fontsize=10,
             transform=centre_ax.transAxes,
         )
+        axes.append(centre_ax)
 
-        self.servo_value_texts: list = []
-        self.servo_buttons: list[Button] = []
-        self.servo_invert_buttons: list[Button] = []
-        self.servo_limit_boxes_min: list[TextBox] = []
-        self.servo_limit_boxes_max: list[TextBox] = []
-
-        servo_value_left = 0.56
-        servo_value_width = 0.16
-        servo_button_width = 0.04
-        servo_row_height = 0.055
-        servo_gap = 0.01
-        servo_top = 0.9
-
-        home_ax = self.figure.add_axes(
-            [pad_left, pad_bottom - 3 * (pad_size + pad_gap), pad_size * 2 + pad_gap, pad_size]
+        home_ax = self._panel_axes(
+            pad_left,
+            self._panel_margin + 0.08,
+            pad_size * 2 + pad_gap,
+            0.12,
         )
         self._home_button = Button(home_ax, "Home", hovercolor="0.95")
         self._home_button.on_clicked(self._handle_home_button)
+        axes.append(home_ax)
+
+        return axes
+
+    def _build_servo_panel(self) -> list:
+        axes: list = []
+
+        title_ax = self._panel_axes(
+            self._panel_margin,
+            self._panel_content_top - 0.08,
+            1.0 - 2 * self._panel_margin,
+            0.06,
+        )
+        title_ax.axis("off")
+        title_ax.text(
+            0.0,
+            0.5,
+            "Servo tuning",
+            va="center",
+            ha="left",
+            fontsize=10,
+            fontweight="bold",
+        )
+        axes.append(title_ax)
+
+        top_edge = self._panel_content_top - 0.14
+        bottom_edge = self._panel_margin + 0.18
+        row_gap = 0.012
+        available_height = max(
+            top_edge - bottom_edge - (len(self._SERVO_METADATA) - 1) * row_gap, 0.001
+        )
+        row_height = available_height / max(len(self._SERVO_METADATA), 1)
+
+        value_left = self._panel_margin
+        value_width = 0.44
+        gap_small = 0.012
+        invert_gap = 0.018
+        minus_width = 0.065
+        plus_width = 0.065
+        invert_width = 0.08
+        limit_width = 0.09
 
         for index, (name, model, location) in enumerate(self._SERVO_METADATA):
-            row_bottom = servo_top - servo_row_height - index * (servo_row_height + servo_gap)
+            row_bottom = bottom_edge + (
+                len(self._SERVO_METADATA) - index - 1
+            ) * (row_height + row_gap)
+            control_height = row_height
 
-            value_ax = self.figure.add_axes(
-                [servo_value_left, row_bottom, servo_value_width, servo_row_height]
+            value_ax = self._panel_axes(
+                value_left,
+                row_bottom,
+                value_width,
+                control_height,
             )
             value_ax.axis("off")
             text = value_ax.text(
@@ -721,42 +867,54 @@ class InteractiveArm:
                 va="center",
                 ha="left",
                 fontsize=8,
+                linespacing=1.4,
                 transform=value_ax.transAxes,
             )
             self.servo_value_texts.append(text)
+            axes.append(value_ax)
 
-            minus_left = servo_value_left + servo_value_width + 0.008
-            plus_left = minus_left + servo_button_width + 0.008
-            invert_left = plus_left + servo_button_width + 0.008
-            limit_left = invert_left + servo_button_width + 0.012
-            limit_width = 0.05
-            max_left = limit_left + limit_width + 0.008
+            minus_left = value_left + value_width + gap_small
+            plus_left = minus_left + minus_width + gap_small
+            invert_left = plus_left + plus_width + gap_small
+            min_left = invert_left + invert_width + invert_gap
+            max_left = min_left + limit_width + gap_small
 
-            minus_ax = self.figure.add_axes(
-                [minus_left, row_bottom, servo_button_width, servo_row_height]
+            minus_ax = self._panel_axes(
+                minus_left,
+                row_bottom,
+                minus_width,
+                control_height,
             )
-            plus_ax = self.figure.add_axes(
-                [plus_left, row_bottom, servo_button_width, servo_row_height]
+            plus_ax = self._panel_axes(
+                plus_left,
+                row_bottom,
+                plus_width,
+                control_height,
             )
-            invert_ax = self.figure.add_axes(
-                [invert_left, row_bottom, servo_button_width, servo_row_height]
+            invert_ax = self._panel_axes(
+                invert_left,
+                row_bottom,
+                invert_width,
+                control_height,
             )
-            min_ax = self.figure.add_axes([limit_left, row_bottom, limit_width, servo_row_height])
-            max_ax = self.figure.add_axes([max_left, row_bottom, limit_width, servo_row_height])
+            min_ax = self._panel_axes(
+                min_left,
+                row_bottom,
+                limit_width,
+                control_height,
+            )
+            max_ax = self._panel_axes(
+                max_left,
+                row_bottom,
+                limit_width,
+                control_height,
+            )
 
             minus_button = Button(minus_ax, "-", hovercolor="0.975")
             plus_button = Button(plus_ax, "+", hovercolor="0.975")
             invert_button = Button(invert_ax, "Inv", hovercolor="0.975")
-            min_box = TextBox(
-                min_ax,
-                "Min°",
-                initial=f"{math.degrees(self.servo_configs[index].min_angle):.0f}",
-            )
-            max_box = TextBox(
-                max_ax,
-                "Max°",
-                initial=f"{math.degrees(self.servo_configs[index].max_angle):.0f}",
-            )
+            min_box = TextBox(min_ax, "Min°", initial="0.0")
+            max_box = TextBox(max_ax, "Max°", initial="0.0")
 
             minus_button.on_clicked(self._make_servo_adjust_callback(index, -math.radians(5)))
             plus_button.on_clicked(self._make_servo_adjust_callback(index, math.radians(5)))
@@ -769,46 +927,132 @@ class InteractiveArm:
             self.servo_limit_boxes_min.append(min_box)
             self.servo_limit_boxes_max.append(max_box)
             self._update_inversion_button_visual(index)
+            self._update_limit_box_display(index)
 
-        calibration_left = servo_value_left
-        calibration_bottom = pad_bottom - 2 * (pad_size + pad_gap)
-        calibration_width = 0.12
-        calibration_height = 0.045
+            axes.extend([minus_ax, plus_ax, invert_ax, min_ax, max_ax])
 
-        calibrate_ax = self.figure.add_axes(
-            [calibration_left, calibration_bottom, calibration_width, calibration_height]
+        control_bottom = self._panel_margin + 0.05
+        control_height = 0.08
+        control_gap = 0.02
+        control_width = (
+            1.0 - 2 * self._panel_margin - 2 * control_gap
+        ) / 3
+
+        calibrate_ax = self._panel_axes(
+            self._panel_margin,
+            control_bottom,
+            control_width,
+            control_height,
         )
+        set_vertical_ax = self._panel_axes(
+            self._panel_margin + control_width + control_gap,
+            control_bottom,
+            control_width,
+            control_height,
+        )
+        raw_toggle_ax = self._panel_axes(
+            self._panel_margin + 2 * (control_width + control_gap),
+            control_bottom,
+            control_width,
+            control_height,
+        )
+
         self._calibration_button = Button(calibrate_ax, "Calibrate", hovercolor="0.95")
         self._calibration_button.on_clicked(self._toggle_calibration)
-
-        set_vertical_left = calibration_left + calibration_width + 0.01
-        set_vertical_ax = self.figure.add_axes(
-            [set_vertical_left, calibration_bottom, calibration_width, calibration_height]
+        self._set_vertical_button = Button(
+            set_vertical_ax, "Set vertical", hovercolor="0.95"
         )
-        self._set_vertical_button = Button(set_vertical_ax, "Set vertical", hovercolor="0.95")
         self._set_vertical_button.on_clicked(self._handle_set_vertical)
-        self._update_calibration_button_visual()
-
-        raw_toggle_left = set_vertical_left + calibration_width + 0.01
-        raw_toggle_ax = self.figure.add_axes(
-            [raw_toggle_left, calibration_bottom, calibration_width, calibration_height]
-        )
         self._raw_angle_button = Button(raw_toggle_ax, "Show raw", hovercolor="0.95")
         self._raw_angle_button.on_clicked(self._toggle_raw_angle_display)
+
+        self._update_calibration_button_visual()
         self._update_raw_angle_button_visual()
 
-        self._setup_waypoint_controls()
+        axes.extend([calibrate_ax, set_vertical_ax, raw_toggle_ax])
 
-    def _setup_waypoint_controls(self) -> None:
-        panel_left = 0.75
-        panel_width = 0.2
-        panel_bottom = 0.18
-        panel_height = 0.48
-        self._waypoint_item_height = 0.12
-        self._waypoint_item_gap = 0.02
+        return axes
 
-        self.waypoint_ax = self.figure.add_axes(
-            [panel_left, panel_bottom, panel_width, panel_height]
+    def _build_waypoint_panel(self) -> list:
+        axes: list = []
+
+        title_ax = self._panel_axes(
+            self._panel_margin,
+            self._panel_content_top - 0.08,
+            1.0 - 2 * self._panel_margin,
+            0.06,
+        )
+        title_ax.axis("off")
+        title_ax.text(
+            0.0,
+            0.5,
+            "Path planning",
+            va="center",
+            ha="left",
+            fontsize=10,
+            fontweight="bold",
+        )
+        axes.append(title_ax)
+
+        duration_height = 0.08
+        duration_bottom = self._panel_content_top - 0.12
+        duration_ax = self._panel_axes(
+            self._panel_margin,
+            duration_bottom,
+            1.0 - 2 * self._panel_margin,
+            duration_height,
+        )
+        self._waypoint_duration_box = TextBox(
+            duration_ax, "Duration (s)", initial="2.0"
+        )
+        self._waypoint_duration_box.on_submit(self._handle_duration_submit)
+        axes.append(duration_ax)
+
+        button_height = 0.08
+        button_gap = 0.02
+        button_width = (
+            1.0 - 2 * self._panel_margin - 2 * button_gap
+        ) / 3
+        button_bottom = duration_bottom - button_height - 0.03
+
+        add_ax = self._panel_axes(
+            self._panel_margin,
+            button_bottom,
+            button_width,
+            button_height,
+        )
+        play_ax = self._panel_axes(
+            self._panel_margin + button_width + button_gap,
+            button_bottom,
+            button_width,
+            button_height,
+        )
+        clear_ax = self._panel_axes(
+            self._panel_margin + 2 * (button_width + button_gap),
+            button_bottom,
+            button_width,
+            button_height,
+        )
+
+        self._add_waypoint_button = Button(add_ax, "Add waypoint", hovercolor="0.95")
+        self._add_waypoint_button.on_clicked(self._handle_add_waypoint)
+        self._play_waypoints_button = Button(play_ax, "Play path", hovercolor="0.95")
+        self._play_waypoints_button.on_clicked(self._handle_play_waypoints)
+        self._clear_waypoints_button = Button(clear_ax, "Clear path", hovercolor="0.95")
+        self._clear_waypoints_button.on_clicked(self._handle_clear_waypoints)
+
+        axes.extend([add_ax, play_ax, clear_ax])
+
+        waypoint_bottom = self._panel_margin + 0.02
+        waypoint_height = button_bottom - waypoint_bottom - 0.04
+        self._waypoint_item_height = 0.16
+        self._waypoint_item_gap = 0.04
+
+        self.waypoint_ax = self._panel_axes(
+            self._panel_margin,
+            waypoint_bottom,
+            1.0 - 2 * self._panel_margin,
+            waypoint_height,
         )
         self.waypoint_ax.set_xlim(0, 1)
         self.waypoint_ax.set_ylim(0, 1)
@@ -816,34 +1060,11 @@ class InteractiveArm:
         self.waypoint_ax.set_yticks([])
         self.waypoint_ax.set_facecolor("#f7f7f7")
         self.waypoint_ax.set_title("Waypoints", pad=8)
-
-        duration_ax = self.figure.add_axes(
-            [panel_left, panel_bottom + panel_height + 0.01, panel_width, 0.05]
-        )
-        self._waypoint_duration_box = TextBox(
-            duration_ax, "Duration (s)", initial="2.0"
-        )
-        self._waypoint_duration_box.on_submit(self._handle_duration_submit)
-
-        add_ax = self.figure.add_axes(
-            [panel_left, panel_bottom + panel_height + 0.08, panel_width, 0.05]
-        )
-        self._add_waypoint_button = Button(add_ax, "Add waypoint", hovercolor="0.95")
-        self._add_waypoint_button.on_clicked(self._handle_add_waypoint)
-
-        play_ax = self.figure.add_axes(
-            [panel_left, panel_bottom + panel_height + 0.14, panel_width, 0.05]
-        )
-        self._play_waypoints_button = Button(play_ax, "Play path", hovercolor="0.95")
-        self._play_waypoints_button.on_clicked(self._handle_play_waypoints)
-
-        clear_ax = self.figure.add_axes(
-            [panel_left, panel_bottom + panel_height + 0.20, panel_width, 0.05]
-        )
-        self._clear_waypoints_button = Button(clear_ax, "Clear path", hovercolor="0.95")
-        self._clear_waypoints_button.on_clicked(self._handle_clear_waypoints)
+        axes.append(self.waypoint_ax)
 
         self._refresh_waypoint_display()
+
+        return axes
 
     def _refresh_waypoint_display(self) -> None:
         if not hasattr(self, "waypoint_ax"):
@@ -1220,20 +1441,27 @@ class InteractiveArm:
                 }
                 for idx, config in self._base_servo_configs.items()
             }
-            serialisable = {
-                "offsets": {str(idx): offset for idx, offset in self.servo_offsets.items()},
-                "vertical_angles": {
-                    str(idx): angle for idx, angle in self.zero_reference.items()
-                },
-                "inverted": {
-                    str(idx): state for idx, state in enumerate(self.servo_inversions)
-                },
-                "servo_limits": servo_limits,
-                "workspace": {
-                    axis: [bounds[0], bounds[1]]
-                    for axis, bounds in self.workspace_limits.items()
-                },
+            offsets_serialised = {
+                str(idx): offset for idx, offset in self.servo_offsets.items()
             }
+            vertical_serialised = {
+                str(idx): angle for idx, angle in self.zero_reference.items()
+            }
+            serialisable = dict(offsets_serialised)
+            serialisable.update(
+                {
+                    "offsets": dict(offsets_serialised),
+                    "vertical_angles": dict(vertical_serialised),
+                    "inverted": {
+                        str(idx): state for idx, state in enumerate(self.servo_inversions)
+                    },
+                    "servo_limits": servo_limits,
+                    "workspace": {
+                        axis: [bounds[0], bounds[1]]
+                        for axis, bounds in self.workspace_limits.items()
+                    },
+                }
+            )
             path.write_text(json.dumps(serialisable, indent=2, sort_keys=True))
         except Exception:  # pragma: no cover - configuration robustness
             _LOGGER.warning(
@@ -1483,7 +1711,8 @@ class InteractiveArm:
             return
         self._calibration_active = True
         relax = getattr(self.controller, "relax_servos", None)
-        if callable(relax):
+        should_relax = getattr(self.controller, "AUTO_RELAX_ON_CALIBRATION", False)
+        if callable(relax) and should_relax:
             try:
                 relax()
             except Exception:  # pragma: no cover - runtime safety net
@@ -1989,24 +2218,11 @@ class InteractiveArm:
 
 
 def run_demo(controller, move_time_ms: int = 1000) -> None:
-    try:
-        from .ui import QtInteractiveArm, create_qt_application
+    """Launch the Matplotlib-based demo interface."""
 
-        app = create_qt_application()
-        window = QtInteractiveArm(controller, move_time_ms=move_time_ms)
-        window.show()
-        if hasattr(app, "exec"):
-            app.exec()
-        else:  # pragma: no cover - PyQt5 compatibility
-            app.exec_()
-    except Exception:  # pragma: no cover - fallback when Qt is unavailable
-        _LOGGER.warning(
-            "Falling back to Matplotlib UI because the Qt interface could not be initialised.",
-            exc_info=True,
-        )
-        InteractiveArm(controller, move_time_ms=move_time_ms)
-        plt.legend()
-        plt.show()
+    InteractiveArm(controller, move_time_ms=move_time_ms)
+    plt.legend()
+    plt.show()
 
 
 __all__ = ["InteractiveArm", "run_demo"]
