@@ -16,7 +16,7 @@ import matplotlib
 import numpy as np
 from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
-from matplotlib.widgets import Button, TextBox
+from matplotlib.widgets import Button, Slider, TextBox
 from mpl_toolkits.mplot3d import proj3d
 
 from .al5a_kinematics import (
@@ -31,6 +31,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 CALIBRATION_CONFIG_PATH = Path.home() / ".config" / "lynxmotion_al5a" / "servo_offsets.json"
+PATH_STORAGE_PATH = CALIBRATION_CONFIG_PATH.with_name("saved_path.json")
 
 
 _DEFAULT_VERTICAL_JOINTS = [
@@ -95,6 +96,7 @@ class DragState:
 class Waypoint:
     position: np.ndarray
     duration: float
+    wrist_pitch: float
 
 
 @dataclass
@@ -128,7 +130,7 @@ class InteractiveArm:
         self,
         controller,
         kinematics: AL5AKinematics | None = None,
-        wrist_pitch: float = math.radians(30),
+        wrist_pitch: float = 0.0,
         move_time_ms: int = 1000,
         step_xy: float = 0.01,
         step_z: float = 0.01,
@@ -137,7 +139,13 @@ class InteractiveArm:
     ) -> None:
         self.controller = controller
         self.kin = kinematics or AL5AKinematics()
-        self.wrist_pitch = wrist_pitch
+        self._wrist_pitch_limits = (
+            math.radians(-120.0),
+            math.radians(120.0),
+        )
+        self._wrist_slider_limits = (-90.0, 90.0)
+        self.wrist_pitch = float(np.clip(wrist_pitch, *self._wrist_pitch_limits))
+        self._last_wrist_pitch = self.wrist_pitch
         self.move_time_ms = move_time_ms
         self.step_xy = step_xy
         self.step_z = step_z
@@ -147,6 +155,8 @@ class InteractiveArm:
         self._invert_button_inactive_color = "0.85"
         self._invert_button_active_color = "#90ee90"
         self._calibration_path = CALIBRATION_CONFIG_PATH
+        self._wrist_slider: Slider | None = None
+        self._updating_wrist_slider = False
         self.zero_reference: dict[int, float] = {
             index: angle for index, angle in enumerate(_DEFAULT_VERTICAL_JOINTS)
         }
@@ -188,7 +198,7 @@ class InteractiveArm:
             self.gripper_angle = 0.0
 
         if len(self.current_joints) >= 4:
-            self.wrist_pitch = (
+            self._last_wrist_pitch = (
                 self.current_joints[1]
                 + self.current_joints[2]
                 + self.current_joints[3]
@@ -237,6 +247,7 @@ class InteractiveArm:
         self._waypoint_patches: list[Rectangle] = []
         self._waypoint_texts: list = []
         self._waypoint_drag = WaypointDragState()
+        self._waypoint_reordered = False
         self._selected_waypoint_index: int | None = None
         self._waypoint_playback_thread: threading.Thread | None = None
         self._waypoint_stop_event = threading.Event()
@@ -319,6 +330,8 @@ class InteractiveArm:
         self._play_waypoints_button: Button | None = None
         self._clear_waypoints_button: Button | None = None
         self.waypoint_ax = None
+
+        self._load_saved_waypoints()
 
         if build_matplotlib_controls:
             self._create_controls()
@@ -422,11 +435,13 @@ class InteractiveArm:
                 )
             else:
                 self.target[:3] = pose[:3, 3]
-                self.wrist_pitch = (
+                actual_pitch = (
                     self.current_joints[1]
                     + self.current_joints[2]
                     + self.current_joints[3]
                 )
+                self._last_wrist_pitch = actual_pitch
+                self._set_wrist_pitch_target(actual_pitch)
                 if len(self.current_joints) >= 4:
                     self._setpoint_joints = list(self.current_joints[:4])
                     self._setpoint_position = np.array(self.target)
@@ -451,7 +466,9 @@ class InteractiveArm:
             else:
                 position = np.array(pose[:3, 3], dtype=float)
                 self.target[:] = self._clamp_target(position)
-                self.wrist_pitch = sum(clamped_home[1:4])
+                actual_pitch = sum(clamped_home[1:4])
+                self._last_wrist_pitch = actual_pitch
+                self._set_wrist_pitch_target(actual_pitch)
                 self._setpoint_joints = list(clamped_home[:4])
                 self._setpoint_position = np.array(self.target)
                 self._update_visuals(self.current_joints)
@@ -470,7 +487,7 @@ class InteractiveArm:
         self.target[:] = requested
         joints = self.kin.inverse(requested[[0, 1, 2]], self.wrist_pitch)
         joints = self._clamp_joint_list(list(joints))
-        self.wrist_pitch = joints[1] + joints[2] + joints[3]
+        self._last_wrist_pitch = joints[1] + joints[2] + joints[3]
         try:
             pose = self.kin.forward(joints)
         except Exception:
@@ -489,6 +506,50 @@ class InteractiveArm:
         self.figure.canvas.draw_idle()
 
         self._update_raw_angle_button_visual()
+
+    def _slider_value_from_pitch(self, pitch: float) -> float:
+        clamped = float(np.clip(pitch, *self._wrist_pitch_limits))
+        slider_value = 90.0 - math.degrees(clamped)
+        return float(np.clip(slider_value, *self._wrist_slider_limits))
+
+    def _pitch_from_slider_value(self, value: float) -> float:
+        clamped_value = float(np.clip(value, *self._wrist_slider_limits))
+        pitch = math.radians(90.0 - clamped_value)
+        return float(np.clip(pitch, *self._wrist_pitch_limits))
+
+    def _set_wrist_pitch_target(self, pitch: float, *, update_slider: bool = True) -> None:
+        clamped = float(np.clip(pitch, *self._wrist_pitch_limits))
+        self.wrist_pitch = clamped
+        if update_slider and self._wrist_slider is not None:
+            slider_value = self._slider_value_from_pitch(clamped)
+            try:
+                self._updating_wrist_slider = True
+                self._wrist_slider.set_val(slider_value)
+            finally:
+                self._updating_wrist_slider = False
+
+    def _handle_wrist_slider_change(self, value: float) -> None:  # pragma: no cover - UI interaction
+        if self._updating_wrist_slider:
+            return
+        desired_pitch = self._pitch_from_slider_value(value)
+        self._set_wrist_pitch_target(desired_pitch, update_slider=False)
+        self.update_robot()
+        if (
+            self._selected_waypoint_index is not None
+            and 0 <= self._selected_waypoint_index < len(self.waypoints)
+        ):
+            self.waypoints[self._selected_waypoint_index].wrist_pitch = desired_pitch
+            self._refresh_waypoint_display()
+            self._save_waypoints()
+
+    def _update_wrist_slider_display(self) -> None:
+        if self._wrist_slider is None:
+            return
+        try:
+            self._updating_wrist_slider = True
+            self._wrist_slider.set_val(self._slider_value_from_pitch(self.wrist_pitch))
+        finally:
+            self._updating_wrist_slider = False
 
     def _update_raw_angle_button_visual(self) -> None:
         if self._raw_angle_button is None:
@@ -716,6 +777,8 @@ class InteractiveArm:
         self._panel_widgets["waypoints"] = self._build_waypoint_panel()
 
         self._set_active_panel("movement")
+        self._refresh_waypoint_display()
+        self._update_waypoint_duration_box()
 
     def _panel_axes(
         self, rel_left: float, rel_bottom: float, rel_width: float, rel_height: float
@@ -842,6 +905,23 @@ class InteractiveArm:
         )
         axes.append(centre_ax)
 
+        slider_ax = self._panel_axes(
+            self._panel_margin,
+            self._panel_margin + 0.2,
+            1.0 - 2 * self._panel_margin,
+            0.08,
+        )
+        self._wrist_slider = Slider(
+            slider_ax,
+            "Wrist pitch (°)",
+            valmin=self._wrist_slider_limits[0],
+            valmax=self._wrist_slider_limits[1],
+            valinit=self._slider_value_from_pitch(self.wrist_pitch),
+        )
+        self._wrist_slider.on_changed(self._handle_wrist_slider_change)
+        self._panel_interactive_widgets[panel_key].append(self._wrist_slider)
+        axes.append(slider_ax)
+
         home_ax = self._panel_axes(
             pad_left,
             self._panel_margin + 0.1,
@@ -852,6 +932,8 @@ class InteractiveArm:
         self._home_button.on_clicked(self._handle_home_button)
         self._panel_interactive_widgets[panel_key].append(self._home_button)
         axes.append(home_ax)
+
+        self._update_wrist_slider_display()
 
         return axes
 
@@ -1171,10 +1253,13 @@ class InteractiveArm:
                 f"#{index + 1}: x={waypoint.position[0]:.3f}, "
                 f"y={waypoint.position[1]:.3f}, z={waypoint.position[2]:.3f}"
             )
+            pitch_text = (
+                f"Wrist: {self._slider_value_from_pitch(waypoint.wrist_pitch):.1f}°"
+            )
             text = self.waypoint_ax.text(
                 0.04,
                 y + self._waypoint_item_height / 2,
-                f"{position_text}\n{waypoint.duration:.2f} s",
+                f"{position_text}\n{waypoint.duration:.2f} s, {pitch_text}",
                 va="center",
                 ha="left",
                 fontsize=9,
@@ -1210,6 +1295,65 @@ class InteractiveArm:
             self._waypoint_duration_box.set_val(value)
         finally:
             self._updating_duration_box = False
+
+    def _load_saved_waypoints(self) -> None:
+        try:
+            if not PATH_STORAGE_PATH.exists():
+                return
+            data = json.loads(PATH_STORAGE_PATH.read_text())
+        except Exception:
+            _LOGGER.warning(
+                "Failed to load saved path from %s", PATH_STORAGE_PATH, exc_info=True
+            )
+            return
+
+        if not isinstance(data, list):
+            return
+
+        loaded: list[Waypoint] = []
+        for entry in data:
+            if not isinstance(entry, dict):
+                continue
+            position = entry.get("position")
+            duration = entry.get("duration")
+            wrist_pitch = entry.get("wrist_pitch")
+            try:
+                position_array = np.array(position, dtype=float)
+                if position_array.shape != (3,):
+                    continue
+                duration_value = float(duration)
+                pitch_value = float(wrist_pitch)
+            except (TypeError, ValueError):
+                continue
+            loaded.append(
+                Waypoint(
+                    position=position_array,
+                    duration=max(0.1, duration_value),
+                    wrist_pitch=float(np.clip(pitch_value, *self._wrist_pitch_limits)),
+                )
+            )
+
+        if loaded:
+            self.waypoints = loaded
+        else:
+            self.waypoints = []
+
+    def _save_waypoints(self) -> None:
+        try:
+            PATH_STORAGE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            serialisable = [
+                {
+                    "position": waypoint.position.tolist(),
+                    "duration": float(waypoint.duration),
+                    "wrist_pitch": float(waypoint.wrist_pitch),
+                }
+                for waypoint in self.waypoints
+            ]
+            PATH_STORAGE_PATH.write_text(json.dumps(serialisable, indent=2))
+        except Exception:
+            _LOGGER.warning(
+                "Failed to persist path data to %s", PATH_STORAGE_PATH, exc_info=True
+            )
 
 
     def _make_move_callback(self, delta: tuple[float, float, float]):
@@ -1297,7 +1441,9 @@ class InteractiveArm:
         self.current_joints = list(updated)
         forward_pose = self.kin.forward(self.commanded_joints)
         self.target[:] = forward_pose[:3, 3]
-        self.wrist_pitch = sum(self.commanded_joints[1:4])
+        actual_pitch = sum(self.commanded_joints[1:4])
+        self._last_wrist_pitch = actual_pitch
+        self._set_wrist_pitch_target(actual_pitch)
         self._update_visuals(self.commanded_joints[:4])
         self._update_servo_readouts()
         self._cancel_pending_commands()
@@ -1633,6 +1779,7 @@ class InteractiveArm:
         self.waypoints[self._selected_waypoint_index].duration = value
         self._refresh_waypoint_display()
         self._update_waypoint_duration_box()
+        self._save_waypoints()
 
     def _handle_add_waypoint(self, _event=None) -> None:  # pragma: no cover - UI interaction
         if self._waypoint_duration_box is None:
@@ -1644,10 +1791,17 @@ class InteractiveArm:
                 duration = 2.0
         duration = max(0.1, duration)
         position = self._clamp_target(np.array(self.target))
-        self.waypoints.append(Waypoint(position=position.copy(), duration=duration))
+        self.waypoints.append(
+            Waypoint(
+                position=position.copy(),
+                duration=duration,
+                wrist_pitch=self.wrist_pitch,
+            )
+        )
         self._selected_waypoint_index = len(self.waypoints) - 1
         self._refresh_waypoint_display()
         self._update_waypoint_duration_box()
+        self._save_waypoints()
 
     def _handle_clear_waypoints(self, _event=None) -> None:  # pragma: no cover - UI interaction
         self._stop_waypoint_playback()
@@ -1655,6 +1809,7 @@ class InteractiveArm:
         self._selected_waypoint_index = None
         self._refresh_waypoint_display()
         self._update_waypoint_duration_box()
+        self._save_waypoints()
 
     def _handle_play_waypoints(self, _event=None) -> None:  # pragma: no cover - UI interaction
         if self._waypoint_playback_thread and self._waypoint_playback_thread.is_alive():
@@ -1698,12 +1853,16 @@ class InteractiveArm:
                     break
                 target = self._clamp_target(np.array(waypoint.position, dtype=float))
                 duration_ms = int(max(0.1, waypoint.duration) * 1000)
+                desired_pitch = float(
+                    np.clip(waypoint.wrist_pitch, *self._wrist_pitch_limits)
+                )
+                self._set_wrist_pitch_target(desired_pitch, update_slider=False)
                 try:
-                    joints = list(self.kin.inverse(target[[0, 1, 2]], self.wrist_pitch))
+                    joints = list(self.kin.inverse(target[[0, 1, 2]], desired_pitch))
                 except Exception:
                     _LOGGER.exception("Failed to solve IK for waypoint %d", index + 1)
                     continue
-                self.wrist_pitch = joints[1] + joints[2] + joints[3]
+                self._last_wrist_pitch = joints[1] + joints[2] + joints[3]
                 full_joints = joints + [self.wrist_rotation, self.gripper_angle]
                 full_joints = self._clamp_joint_list(full_joints)
                 self.target[:] = target
@@ -1736,6 +1895,9 @@ class InteractiveArm:
             if contains:
                 self._waypoint_drag = WaypointDragState(index=idx, offset=event.ydata)
                 self._selected_waypoint_index = idx
+                self._waypoint_reordered = False
+                if 0 <= idx < len(self.waypoints):
+                    self._set_wrist_pitch_target(self.waypoints[idx].wrist_pitch)
                 self._highlight_selected_waypoint()
                 self._update_waypoint_duration_box()
                 handled = True
@@ -1770,12 +1932,16 @@ class InteractiveArm:
             self._selected_waypoint_index = new_index
             self._refresh_waypoint_display()
             self._update_waypoint_duration_box()
+            self._waypoint_reordered = True
         return True
 
     def _handle_waypoint_release(self, event) -> bool:
         if self._waypoint_drag.index is None:
             return False
         self._waypoint_drag = WaypointDragState()
+        if self._waypoint_reordered:
+            self._save_waypoints()
+        self._waypoint_reordered = False
         return True
 
     def _enter_calibration_mode(self) -> None:
@@ -1852,11 +2018,13 @@ class InteractiveArm:
         if len(self.current_joints) >= 6:
             self.gripper_angle = self.current_joints[5]
         if len(self.current_joints) >= 4:
-            self.wrist_pitch = (
+            actual_pitch = (
                 self.current_joints[1]
                 + self.current_joints[2]
                 + self.current_joints[3]
             )
+            self._last_wrist_pitch = actual_pitch
+            self._set_wrist_pitch_target(actual_pitch)
         self._update_servo_readouts()
         if len(self.current_joints) >= 4:
             self._update_visuals(self.current_joints)
@@ -1883,11 +2051,13 @@ class InteractiveArm:
                 )
             else:
                 self.target[:3] = pose[:3, 3]
-                self.wrist_pitch = (
+                actual_pitch = (
                     self.current_joints[1]
                     + self.current_joints[2]
                     + self.current_joints[3]
                 )
+                self._last_wrist_pitch = actual_pitch
+                self._set_wrist_pitch_target(actual_pitch)
                 self._update_visuals(self.current_joints[:4])
 
         self._update_servo_readouts()
@@ -2051,7 +2221,9 @@ class InteractiveArm:
             f"y={actual_tip[1]:.3f} m, "
             f"z={actual_tip[2]:.3f} m"
         )
-        target_text += f"\nWrist pitch: {math.degrees(self.wrist_pitch):.1f}°"
+        target_text += (
+            f"\nWrist pitch: {self._slider_value_from_pitch(self.wrist_pitch):.1f}°"
+        )
         self.text.set_text(target_text)
 
     def _update_servo_readouts(self) -> None:
