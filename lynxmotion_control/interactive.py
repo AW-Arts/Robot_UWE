@@ -676,6 +676,9 @@ class InteractiveArm:
         ]
 
         self._panel_widgets = {key: [] for _, key in menu_entries}
+        self._panel_interactive_widgets: dict[str, list] = {
+            key: [] for _, key in menu_entries
+        }
         self._panel_menu_buttons: dict[str, Button] = {}
         self._active_panel: str | None = None
 
@@ -728,6 +731,13 @@ class InteractiveArm:
             visible = name == panel
             for axis in axes:
                 axis.set_visible(visible)
+        for name, widgets in self._panel_interactive_widgets.items():
+            active = name == panel
+            for widget in widgets:
+                if hasattr(widget, "set_active"):
+                    widget.set_active(active)
+                elif hasattr(widget, "eventson"):
+                    widget.eventson = active
         for name, button in self._panel_menu_buttons.items():
             if name == panel:
                 button.color = "#aac8ff"
@@ -740,6 +750,7 @@ class InteractiveArm:
         self.figure.canvas.draw_idle()
 
     def _build_movement_panel(self) -> list:
+        panel_key = "movement"
         axes: list = []
 
         title_ax = self._panel_axes(
@@ -809,6 +820,7 @@ class InteractiveArm:
             button = Button(axes_obj, label, hovercolor="#e8f0ff")
             button.on_clicked(self._make_move_callback(delta))
             self.buttons[name] = button
+            self._panel_interactive_widgets[panel_key].append(button)
             axes.append(axes_obj)
 
         centre_ax = self._panel_axes(pad_left, pad_bottom, pad_size, pad_size)
@@ -832,11 +844,13 @@ class InteractiveArm:
         )
         self._home_button = Button(home_ax, "Home", hovercolor="0.95")
         self._home_button.on_clicked(self._handle_home_button)
+        self._panel_interactive_widgets[panel_key].append(self._home_button)
         axes.append(home_ax)
 
         return axes
 
     def _build_servo_panel(self) -> list:
+        panel_key = "servos"
         axes: list = []
 
         title_ax = self._panel_axes(
@@ -953,6 +967,9 @@ class InteractiveArm:
             self.servo_invert_buttons.append(invert_button)
             self.servo_limit_boxes_min.append(min_box)
             self.servo_limit_boxes_max.append(max_box)
+            self._panel_interactive_widgets[panel_key].extend(
+                [minus_button, plus_button, invert_button, min_box, max_box]
+            )
             self._update_inversion_button_visual(index)
             self._update_limit_box_display(index)
 
@@ -986,12 +1003,15 @@ class InteractiveArm:
 
         self._calibration_button = Button(calibrate_ax, "Calibrate", hovercolor="0.95")
         self._calibration_button.on_clicked(self._toggle_calibration)
+        self._panel_interactive_widgets[panel_key].append(self._calibration_button)
         self._set_vertical_button = Button(
             set_vertical_ax, "Set vertical", hovercolor="0.95"
         )
         self._set_vertical_button.on_clicked(self._handle_set_vertical)
+        self._panel_interactive_widgets[panel_key].append(self._set_vertical_button)
         self._raw_angle_button = Button(raw_toggle_ax, "Show raw", hovercolor="0.95")
         self._raw_angle_button.on_clicked(self._toggle_raw_angle_display)
+        self._panel_interactive_widgets[panel_key].append(self._raw_angle_button)
 
         self._update_calibration_button_visual()
         self._update_raw_angle_button_visual()
@@ -1001,6 +1021,7 @@ class InteractiveArm:
         return axes
 
     def _build_waypoint_panel(self) -> list:
+        panel_key = "waypoints"
         axes: list = []
 
         title_ax = self._panel_axes(
@@ -1033,6 +1054,7 @@ class InteractiveArm:
             duration_ax, "Duration (s)", initial="2.0"
         )
         self._waypoint_duration_box.on_submit(self._handle_duration_submit)
+        self._panel_interactive_widgets[panel_key].append(self._waypoint_duration_box)
         axes.append(duration_ax)
 
         button_height = 0.08
@@ -1063,10 +1085,13 @@ class InteractiveArm:
 
         self._add_waypoint_button = Button(add_ax, "Add waypoint", hovercolor="0.95")
         self._add_waypoint_button.on_clicked(self._handle_add_waypoint)
+        self._panel_interactive_widgets[panel_key].append(self._add_waypoint_button)
         self._play_waypoints_button = Button(play_ax, "Play path", hovercolor="0.95")
         self._play_waypoints_button.on_clicked(self._handle_play_waypoints)
+        self._panel_interactive_widgets[panel_key].append(self._play_waypoints_button)
         self._clear_waypoints_button = Button(clear_ax, "Clear path", hovercolor="0.95")
         self._clear_waypoints_button.on_clicked(self._handle_clear_waypoints)
+        self._panel_interactive_widgets[panel_key].append(self._clear_waypoints_button)
 
         axes.extend([add_ax, play_ax, clear_ax])
 
