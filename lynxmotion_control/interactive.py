@@ -8,6 +8,7 @@ import queue
 import threading
 import time
 from copy import deepcopy
+from typing import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -198,6 +199,8 @@ class InteractiveArm:
             target_position = np.array([0.18, 0.0, 0.18])
 
         self.target = np.array(target_position, dtype=float)
+        self._setpoint_position: np.ndarray | None = np.array(target_position, dtype=float)
+        self._setpoint_joints: list[float] | None = None
         self._load_workspace_limits_from_config()
         self._last_commanded_raw: tuple[float, ...] | None = tuple(
             self._apply_offsets(self.current_joints, direction="raw")
@@ -250,7 +253,17 @@ class InteractiveArm:
         self._recompute_camera_framing()
         self.ax.view_init(elev=25, azim=-60)
 
-        (self.base_line,) = self.ax.plot([], [], [], "-o", lw=3)
+        (self.base_line,) = self.ax.plot([], [], [], "-o", lw=3, label="Arm (actual)")
+        (self.setpoint_line,) = self.ax.plot(
+            [],
+            [],
+            [],
+            "--o",
+            lw=2,
+            color="#ff9f1c",
+            alpha=0.7,
+            label="Arm (setpoint)",
+        )
         self._gizmo_vectors = {
             "x": np.array([1.0, 0.0, 0.0]),
             "y": np.array([0.0, 1.0, 0.0]),
@@ -408,6 +421,9 @@ class InteractiveArm:
                     + self.current_joints[2]
                     + self.current_joints[3]
                 )
+                if len(self.current_joints) >= 4:
+                    self._setpoint_joints = list(self.current_joints[:4])
+                    self._setpoint_position = np.array(self.target)
                 self._update_visuals(self.current_joints)
 
         self.feedback_joints = list(corrected)
@@ -427,9 +443,12 @@ class InteractiveArm:
             except Exception:  # pragma: no cover - runtime safety net
                 pose = None
             else:
-                self.target[:] = self._clamp_target(np.array(pose[:3, 3], dtype=float))
+                position = np.array(pose[:3, 3], dtype=float)
+                self.target[:] = self._clamp_target(position)
                 self.wrist_pitch = sum(clamped_home[1:4])
-                self._update_visuals(clamped_home[:4])
+                self._setpoint_joints = list(clamped_home[:4])
+                self._setpoint_position = np.array(self.target)
+                self._update_visuals(self.current_joints)
         if len(clamped_home) >= 5:
             self.wrist_rotation = clamped_home[4]
         if len(clamped_home) >= 6:
@@ -441,15 +460,23 @@ class InteractiveArm:
         )
 
     def update_robot(self) -> None:
-        self.target[:] = self._clamp_target(self.target)
-        joints = self.kin.inverse(self.target[[0, 1, 2]], self.wrist_pitch)
+        requested = self._clamp_target(self.target)
+        self.target[:] = requested
+        joints = self.kin.inverse(requested[[0, 1, 2]], self.wrist_pitch)
         joints = self._clamp_joint_list(list(joints))
         self.wrist_pitch = joints[1] + joints[2] + joints[3]
+        try:
+            pose = self.kin.forward(joints)
+        except Exception:
+            self._setpoint_position = None
+        else:
+            position = np.array(pose[:3, 3], dtype=float)
+            self._setpoint_position = position
+            self.target[:] = position
+        self._setpoint_joints = list(joints)
         full_joints = joints + [self.wrist_rotation, self.gripper_angle]
         full_joints = self._clamp_joint_list(full_joints)
         self.commanded_joints = list(full_joints)
-        self._update_visuals(joints)
-        self._update_servo_readouts()
         self._send_move_command(
             full_joints, move_time_ms=self.move_time_ms, soft_start=True
         )
@@ -1857,7 +1884,12 @@ class InteractiveArm:
         button.ax.set_facecolor(button.color)
         self.figure.canvas.draw_idle()
 
-    def _update_visuals(self, joints: list[float]) -> None:
+    def _compute_link_positions(
+        self, joints: Sequence[float]
+    ) -> tuple[list[float], list[float], list[float]]:
+        if len(joints) < 4:
+            raise ValueError("Expected at least 4 joint angles for visualisation")
+
         shoulder = joints[1]
         elbow = joints[2]
         wrist = joints[3]
@@ -1924,8 +1956,32 @@ class InteractiveArm:
             wrist_joint[2],
             tool_tip[2],
         ]
+        return xs, ys, zs
+
+    def _update_visuals(self, joints: list[float]) -> None:
+        if len(joints) < 4:
+            self.base_line.set_data([], [])
+            self.base_line.set_3d_properties([])
+            self.setpoint_line.set_data([], [])
+            self.setpoint_line.set_3d_properties([])
+            return
+
+        xs, ys, zs = self._compute_link_positions(joints)
         self.base_line.set_data(xs, ys)
         self.base_line.set_3d_properties(zs)
+
+        if self._setpoint_joints:
+            try:
+                sp_xs, sp_ys, sp_zs = self._compute_link_positions(self._setpoint_joints)
+            except Exception:
+                self.setpoint_line.set_data([], [])
+                self.setpoint_line.set_3d_properties([])
+            else:
+                self.setpoint_line.set_data(sp_xs, sp_ys)
+                self.setpoint_line.set_3d_properties(sp_zs)
+        else:
+            self.setpoint_line.set_data([], [])
+            self.setpoint_line.set_3d_properties([])
 
         self.target_artist._offsets3d = (
             [self.target[0]],
@@ -1933,10 +1989,25 @@ class InteractiveArm:
             [self.target[2]],
         )
         self._update_gizmo()
-        self.text.set_text(
-            f"Target: x={self.target[0]:.3f} m, y={self.target[1]:.3f} m, z={self.target[2]:.3f} m\n"
-            + f"Wrist pitch: {math.degrees(self.wrist_pitch):.1f}°"
+        actual_tip = (xs[-1], ys[-1], zs[-1])
+        target_text = (
+            f"Target: x={self.target[0]:.3f} m, y={self.target[1]:.3f} m, z={self.target[2]:.3f} m"
         )
+        if self._setpoint_position is not None:
+            target_text += (
+                "\nSetpoint tip: "
+                f"x={self._setpoint_position[0]:.3f} m, "
+                f"y={self._setpoint_position[1]:.3f} m, "
+                f"z={self._setpoint_position[2]:.3f} m"
+            )
+        target_text += (
+            "\nActual tip: "
+            f"x={actual_tip[0]:.3f} m, "
+            f"y={actual_tip[1]:.3f} m, "
+            f"z={actual_tip[2]:.3f} m"
+        )
+        target_text += f"\nWrist pitch: {math.degrees(self.wrist_pitch):.1f}°"
+        self.text.set_text(target_text)
 
     def _update_servo_readouts(self) -> None:
         if not self.servo_value_texts:
@@ -2032,6 +2103,23 @@ class InteractiveArm:
         self._update_servo_readouts()
         self._update_limit_box_display(index)
 
+    def _store_setpoint(self, joints: Sequence[float]) -> None:
+        if len(joints) < 4:
+            self._setpoint_joints = None
+            self._setpoint_position = None
+            return
+
+        self._setpoint_joints = list(joints[:4])
+        try:
+            pose = self.kin.forward(self._setpoint_joints)
+        except Exception:
+            self._setpoint_position = None
+            return
+
+        position = np.array(pose[:3, 3], dtype=float)
+        self._setpoint_position = position
+        self.target[:] = position
+
     def _command_worker(self) -> None:
         while True:
             joints_raw, move_time, soft_start = self._command_queue.get()
@@ -2124,9 +2212,11 @@ class InteractiveArm:
             else:
                 adjusted_move_time = max(adjusted_move_time, self._soft_start_min_time_ms)
 
+        self._store_setpoint(joints)
         self.commanded_joints = list(joints)
         if not self._calibration_active:
             self.feedback_joints = None
+        self._update_visuals(self.current_joints)
         self._update_servo_readouts()
 
         if self._calibration_active:
