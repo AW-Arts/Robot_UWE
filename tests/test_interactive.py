@@ -127,6 +127,46 @@ def test_set_vertical_persists_offsets(monkeypatch, interactive_module, tmp_path
         assert math.isclose(arm.servo_offsets.get(2, 0.0), expected_elbow, rel_tol=1e-6)
 
 
+def test_servo_limits_loaded_and_persisted(
+    monkeypatch, interactive_module, tmp_path
+) -> None:
+    calibration_file = tmp_path / "servo_offsets.json"
+    monkeypatch.setattr(
+        interactive_module,
+        "CALIBRATION_CONFIG_PATH",
+        calibration_file,
+        raising=False,
+    )
+    calibration_file.write_text(
+        json.dumps(
+            {
+                "servo_limits": {
+                    "0": {"min_deg": -45.0, "max_deg": 30.0},
+                    "3": {"min_deg": -100.0, "max_deg": 95.0},
+                }
+            }
+        )
+    )
+
+    controller = _BasicController()
+    with _prepare_arm(monkeypatch, interactive_module, controller) as arm:
+        config = arm.servo_configs[0]
+        assert math.isclose(
+            config.min_angle, math.radians(-45.0), rel_tol=1e-6
+        )
+        assert math.isclose(
+            config.max_angle, math.radians(30.0), rel_tol=1e-6
+        )
+
+        new_min = -55.0
+        arm._update_servo_limit(0, min_angle=math.radians(new_min))
+
+    stored = json.loads(calibration_file.read_text())
+    stored_limits = stored["servo_limits"]["0"]
+    assert math.isclose(float(stored_limits["min_deg"]), new_min, rel_tol=1e-6)
+    assert math.isclose(float(stored_limits["max_deg"]), 30.0, rel_tol=1e-6)
+
+
 def test_command_worker_processes_commands_without_feedback(
     monkeypatch, interactive_module
 ) -> None:
