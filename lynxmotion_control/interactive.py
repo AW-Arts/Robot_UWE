@@ -2305,6 +2305,17 @@ class InteractiveArm:
             self.servo_configs.get(index) or updated_base
         )
 
+        # Keep the loaded limits cache in sync so future persistence uses the
+        # most recent values. This is particularly important when the limits
+        # originated from a configuration file because users expect their
+        # adjustments to overwrite the stored values instead of reverting on
+        # restart.
+        self._loaded_servo_limits[index] = (new_min, new_max)
+
+        # Persist the calibration data immediately so the adjustments are not
+        # lost if the application exits before another save opportunity.
+        self._save_calibration_data()
+
         def _clamp_list(values: list[float] | None) -> None:
             if values is None:
                 return
