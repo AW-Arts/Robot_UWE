@@ -7,6 +7,7 @@ from .serial_comm import AL5ASerialController, PrintController
 
 
 def main() -> None:
+    """Parse CLI arguments and launch the interactive demo."""
     parser = argparse.ArgumentParser(description="Interactive Lynxmotion AL5A controller")
     parser.add_argument("--port", help="Serial port for SSC-32/SSC-32U controller")
     parser.add_argument(

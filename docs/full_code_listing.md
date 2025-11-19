@@ -1,3 +1,519 @@
+# Full Code Listing
+
+## lynxmotion_control/__main__.py
+
+```python
+from __future__ import annotations
+
+import argparse
+
+from .interactive import run_demo
+from .serial_comm import AL5ASerialController, PrintController
+
+
+def main() -> None:
+    """Parse CLI arguments and launch the interactive demo."""
+    parser = argparse.ArgumentParser(description="Interactive Lynxmotion AL5A controller")
+    parser.add_argument("--port", help="Serial port for SSC-32/SSC-32U controller")
+    parser.add_argument(
+        "--simulate",
+        action="store_true",
+        help="Use simulation mode (no hardware required)",
+    )
+    parser.add_argument(
+        "--time",
+        type=int,
+        default=1000,
+        help="Move duration in milliseconds for each command",
+    )
+    args = parser.parse_args()
+
+    if args.simulate or not args.port:
+        controller = PrintController()
+    else:
+        controller = AL5ASerialController(args.port)
+
+    run_demo(controller, move_time_ms=args.time)
+
+
+if __name__ == "__main__":
+    main()
+
+```
+
+## lynxmotion_control/__init__.py
+
+```python
+"""Utilities for interactive control of the Lynxmotion AL5A arm."""
+
+from importlib import import_module
+from typing import Any
+
+from .al5a_kinematics import (
+    AL5AKinematics,
+    AL5ALinkLengths,
+    DEFAULT_SERVO_CONFIGS,
+    DEFAULT_SERVO_CHANNELS,
+    ServoConfig,
+    joints_to_pulses,
+    pulses_to_joints,
+)
+from .serial_comm import AL5ASerialController, PrintController
+
+__all__ = [
+    "AL5AKinematics",
+    "AL5ALinkLengths",
+    "DEFAULT_SERVO_CONFIGS",
+    "DEFAULT_SERVO_CHANNELS",
+    "ServoConfig",
+    "joints_to_pulses",
+    "pulses_to_joints",
+    "InteractiveArm",
+    "run_demo",
+    "AL5ASerialController",
+    "PrintController",
+]
+
+
+def __getattr__(name: str) -> Any:
+    if name in {"InteractiveArm", "run_demo"}:
+        module = import_module(".interactive", __name__)
+        value = getattr(module, name)
+        globals()[name] = value
+        return value
+    raise AttributeError(name)
+
+```
+
+## lynxmotion_control/al5a_kinematics.py
+
+```python
+"""Kinematics and servo mapping utilities for the Lynxmotion AL5A arm."""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from math import acos, atan2, cos, sin, sqrt
+from typing import Iterable, Sequence
+
+import numpy as np
+
+
+INCH_TO_METRES = 0.0254
+
+
+@dataclass(frozen=True)
+class ServoConfig:
+    """Conversion between joint angles (radians) and servo pulses."""
+
+    min_angle: float
+    max_angle: float
+    min_pulse: int
+    max_pulse: int
+
+    def clamp_angle(self, angle: float) -> float:
+        return max(self.min_angle, min(self.max_angle, angle))
+
+    def angle_to_pulse(self, angle: float) -> int:
+        """Convert an angle in radians to a servo pulse width."""
+        clamped = self.clamp_angle(angle)
+        span_angle = self.max_angle - self.min_angle
+        span_pulse = self.max_pulse - self.min_pulse
+        if span_angle == 0:
+            raise ValueError("Servo configuration has zero angle span")
+        proportion = (clamped - self.min_angle) / span_angle
+        return int(round(self.min_pulse + proportion * span_pulse))
+
+    def pulse_to_angle(self, pulse: int) -> float:
+        span_angle = self.max_angle - self.min_angle
+        span_pulse = self.max_pulse - self.min_pulse
+        if span_pulse == 0:
+            raise ValueError("Servo configuration has zero pulse span")
+        proportion = (pulse - self.min_pulse) / span_pulse
+        return self.min_angle + proportion * span_angle
+
+
+@dataclass(frozen=True)
+class AL5ALinkLengths:
+    """Physical link dimensions for the AL5A arm (metres)."""
+
+    base_height: float = 0.070  # base rotation to shoulder pivot
+    shoulder: float = 3.75 * INCH_TO_METRES  # base-to-elbow axis length
+    elbow: float = 4.25 * INCH_TO_METRES  # elbow-to-wrist axis length
+    wrist: float = 0.082
+
+
+class AL5AKinematics:
+    """Planar kinematics for the Lynxmotion AL5A arm."""
+
+    def __init__(self, links: AL5ALinkLengths | None = None) -> None:
+        self.links = links or AL5ALinkLengths()
+
+    def forward(self, joints: Sequence[float]) -> np.ndarray:
+        """Return the 4x4 pose matrix of the tool tip."""
+        if len(joints) < 4:
+            raise ValueError("Expected at least 4 joint angles")
+        base, shoulder, elbow, wrist = joints[:4]
+        L = self.links
+
+        # Base rotation around Z
+        cb, sb = cos(base), sin(base)
+
+        # Position of the wrist relative to base frame in plane
+        shoulder_angle = shoulder
+        elbow_angle = elbow
+        wrist_angle = wrist
+
+        # Compute planar coordinates
+        z = L.base_height
+        r = 0.0
+
+        # Shoulder link
+        r += L.shoulder * cos(shoulder_angle)
+        z += L.shoulder * sin(shoulder_angle)
+
+        # Elbow link
+        r += L.elbow * cos(shoulder_angle + elbow_angle)
+        z += L.elbow * sin(shoulder_angle + elbow_angle)
+
+        # Wrist link / tool offset
+        r += L.wrist * cos(shoulder_angle + elbow_angle + wrist_angle)
+        z += L.wrist * sin(shoulder_angle + elbow_angle + wrist_angle)
+
+        x = cb * r
+        y = sb * r
+
+        # Orientation: yaw = base, pitch = total planar angle, roll = 0
+        pitch = shoulder_angle + elbow_angle + wrist_angle
+
+        ct = cos(pitch)
+        st = sin(pitch)
+
+        rot = np.array(
+            [
+                [cb * ct, -sb, cb * st, 0.0],
+                [sb * ct, cb, sb * st, 0.0],
+                [-st, 0.0, ct, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ]
+        )
+        rot[:3, 3] = [x, y, z]
+        return rot
+
+    def inverse(self, position: Iterable[float], wrist_pitch: float) -> list[float]:
+        """Inverse kinematics for XYZ position and wrist pitch.
+
+        Parameters
+        ----------
+        position:
+            Iterable of (x, y, z) coordinates in metres.
+        wrist_pitch:
+            Desired pitch of the wrist relative to the base frame (radians).
+        """
+
+        x, y, z = position
+        L = self.links
+
+        base = atan2(y, x)
+        planar_radius = sqrt(x * x + y * y)
+
+        # Position of the wrist centre after compensating the wrist link
+        wx = planar_radius - L.wrist * cos(wrist_pitch)
+        wz = z - L.base_height - L.wrist * sin(wrist_pitch)
+
+        d_sq = wx * wx + wz * wz
+        d = sqrt(d_sq)
+
+        # Guard against unreachable targets
+        max_reach = L.shoulder + L.elbow
+        if d > max_reach + 1e-9:
+            scale = max_reach / d if d != 0 else 0.0
+            wx *= scale
+            wz *= scale
+            d_sq = wx * wx + wz * wz
+            d = sqrt(d_sq)
+
+        # Law of cosines for elbow angle
+        cos_elbow = (d_sq - L.shoulder**2 - L.elbow**2) / (2 * L.shoulder * L.elbow)
+        cos_elbow = min(1.0, max(-1.0, cos_elbow))
+        elbow = -acos(cos_elbow)
+
+        # Compute shoulder angle
+        k1 = L.shoulder + L.elbow * cos(elbow)
+        k2 = L.elbow * sin(elbow)
+        shoulder = atan2(wz, wx) - atan2(k2, k1)
+
+        wrist = wrist_pitch - shoulder - elbow
+
+        return [base, shoulder, elbow, wrist]
+
+
+DEFAULT_SERVO_CONFIGS: dict[int, ServoConfig] = {
+    # Servo index: ServoConfig(min_angle, max_angle, min_pulse, max_pulse)
+    0: ServoConfig(min_angle=-np.pi / 2, max_angle=np.pi / 2, min_pulse=500, max_pulse=2500),
+    1: ServoConfig(min_angle=-0.35, max_angle=2.0, min_pulse=500, max_pulse=2500),
+    2: ServoConfig(min_angle=-2.4, max_angle=0.35, min_pulse=500, max_pulse=2500),
+    3: ServoConfig(min_angle=-2.0, max_angle=2.0, min_pulse=500, max_pulse=2500),
+    4: ServoConfig(min_angle=-np.pi, max_angle=np.pi, min_pulse=500, max_pulse=2500),
+    5: ServoConfig(min_angle=-1.0, max_angle=1.0, min_pulse=800, max_pulse=2200),
+}
+
+
+# Mapping from logical servo index to SSC-32 controller channel
+DEFAULT_SERVO_CHANNELS: dict[int, int] = {
+    0: 0,
+    1: 1,
+    2: 2,
+    3: 3,
+    4: 5,  # Wrist rotation plugged into channel 5
+    5: 4,  # Gripper plugged into channel 4
+}
+
+
+def joints_to_pulses(
+    joints: Sequence[float],
+    servo_configs: dict[int, ServoConfig] | None = None,
+    servo_channels: dict[int, int] | None = None,
+) -> list[int | None]:
+    configs = servo_configs or DEFAULT_SERVO_CONFIGS
+    channels = servo_channels or DEFAULT_SERVO_CHANNELS
+    if not joints:
+        return []
+
+    channel_indices: list[int] = []
+    for index in range(len(joints)):
+        if index not in channels:
+            raise KeyError(f"No channel mapping for servo index {index}")
+        channel_indices.append(channels[index])
+
+    max_channel = max(channel_indices)
+    pulses: list[int | None] = [None] * (max_channel + 1)
+
+    for index, angle in enumerate(joints):
+        if index not in configs:
+            raise KeyError(f"No servo configuration for servo index {index}")
+        channel = channels[index]
+        pulses[channel] = configs[index].angle_to_pulse(angle)
+
+    return pulses
+
+
+def pulses_to_joints(
+    pulses: Sequence[int],
+    servo_configs: dict[int, ServoConfig] | None = None,
+    servo_channels: dict[int, int] | None = None,
+) -> list[float]:
+    configs = servo_configs or DEFAULT_SERVO_CONFIGS
+    channels = servo_channels or DEFAULT_SERVO_CHANNELS
+    if not pulses:
+        return []
+
+    inverse_channels = {channel: index for index, channel in channels.items()}
+    joints_map: dict[int, float] = {}
+
+    for channel, pulse in enumerate(pulses):
+        index = inverse_channels.get(channel)
+        if index is None:
+            continue
+        if index not in configs:
+            raise KeyError(f"No servo configuration for servo index {index}")
+        joints_map[index] = configs[index].pulse_to_angle(pulse)
+
+    if not joints_map:
+        return []
+
+    return [joints_map[i] for i in sorted(joints_map)]
+
+
+__all__ = [
+    "AL5AKinematics",
+    "AL5ALinkLengths",
+    "ServoConfig",
+    "DEFAULT_SERVO_CONFIGS",
+    "DEFAULT_SERVO_CHANNELS",
+    "joints_to_pulses",
+    "pulses_to_joints",
+]
+
+```
+
+## lynxmotion_control/serial_comm.py
+
+```python
+"""Serial communication helpers for the Lynxmotion AL5A arm."""
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+from typing import Protocol, Sequence
+
+from .al5a_kinematics import (
+    DEFAULT_SERVO_CHANNELS,
+    DEFAULT_SERVO_CONFIGS,
+    joints_to_pulses,
+    pulses_to_joints,
+)
+
+try:
+    import serial  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover - optional dependency at runtime
+    serial = None
+
+
+_LOGGER = logging.getLogger(__name__)
+
+
+class SerialLike(Protocol):
+    def write(self, data: bytes) -> int: ...
+
+    def read_until(self, terminator: bytes = b"\n") -> bytes: ...
+
+    def close(self) -> None: ...
+
+
+@dataclass
+class SSC32Command:
+    pulses: Sequence[int | None]
+    move_time_ms: int | None = None
+
+    def to_bytes(self) -> bytes:
+        parts: list[str] = []
+        for channel, pulse in enumerate(self.pulses):
+            if pulse is None:
+                continue
+            parts.append(f"#{channel}P{pulse}")
+        if self.move_time_ms is not None:
+            parts.append(f"T{self.move_time_ms}")
+        return ("".join(parts) + "\r").encode("ascii")
+
+
+class AL5ASerialController:
+    """High-level interface to the SSC-32/SSC-32U controller."""
+
+    AUTO_RELAX_ON_CALIBRATION = True
+
+    def __init__(self, port: str | None = None, baudrate: int = 115200) -> None:
+        self.port_name = port
+        self.baudrate = baudrate
+        self._serial: SerialLike | None = None
+
+    def connect(self) -> None:
+        if self._serial is not None:
+            return
+        if self.port_name is None:
+            raise RuntimeError("Serial port not specified")
+        if serial is None:
+            raise RuntimeError(
+                "pyserial is not available. Install it or run in simulation mode."
+            )
+        try:
+            self._serial = serial.Serial(self.port_name, self.baudrate, timeout=1)
+        except Exception as exc:  # pragma: no cover - depends on hardware state
+            serial_exception = getattr(serial, "SerialException", Exception)
+            if isinstance(exc, serial_exception):
+                raise RuntimeError(
+                    "Unable to open serial port "
+                    f"{self.port_name!r}. Ensure the controller is connected, "
+                    "the correct port is selected, and no other program is using "
+                    "the device."
+                ) from exc
+            raise
+
+    def disconnect(self) -> None:
+        if self._serial is not None:
+            self._serial.close()
+            self._serial = None
+
+    def ensure_connection(self) -> SerialLike:
+        if self._serial is None:
+            self.connect()
+        if self._serial is None:
+            raise RuntimeError("Unable to establish serial connection")
+        return self._serial
+
+    def move_joints(
+        self,
+        joints: Sequence[float],
+        move_time_ms: int | None = None,
+        servo_configs: dict[int, object] | None = None,
+        servo_channels: dict[int, int] | None = None,
+    ) -> None:
+        serial_port = self.ensure_connection()
+        pulses = joints_to_pulses(
+            joints,
+            servo_configs=servo_configs or DEFAULT_SERVO_CONFIGS,
+            servo_channels=servo_channels or DEFAULT_SERVO_CHANNELS,
+        )
+        command = SSC32Command(pulses, move_time_ms)
+        serial_port.write(command.to_bytes())
+
+    def relax_servos(
+        self,
+        servo_indices: Sequence[int] | None = None,
+        servo_channels: dict[int, int] | None = None,
+    ) -> None:
+        serial_port = self.ensure_connection()
+        channels_map = servo_channels or DEFAULT_SERVO_CHANNELS
+        indices = (
+            sorted(channels_map)
+            if servo_indices is None
+            else list(servo_indices)
+        )
+        try:
+            channels = [channels_map[index] for index in indices]
+        except KeyError as exc:  # pragma: no cover - defensive programming
+            raise KeyError(f"Unknown servo index: {exc.args[0]}") from exc
+        # ``#<channel>PO`` disables the PWM output for a servo channel on the
+        # SSC-32/SSC-32U controller which removes holding torque from the
+        # connected servo. ``#<channel>L`` only changes a digital output state
+        # and has no effect on active servo channels, so use ``PO`` instead of
+        # ``L`` when relaxing servos.
+        command = (
+            "".join(f"#{channel}PO" for channel in channels) + "\r"
+        ).encode("ascii")
+        serial_port.write(command)
+
+
+class PrintController:
+    """Fallback controller that prints commands instead of sending them."""
+
+    def move_joints(
+        self,
+        joints: Sequence[float],
+        move_time_ms: int | None = None,
+        servo_configs: dict[int, object] | None = None,
+        servo_channels: dict[int, int] | None = None,
+    ) -> None:
+        pulses = joints_to_pulses(
+            joints,
+            servo_configs=servo_configs or DEFAULT_SERVO_CONFIGS,
+            servo_channels=servo_channels or DEFAULT_SERVO_CHANNELS,
+        )
+        command = SSC32Command(pulses, move_time_ms)
+        print(command.to_bytes().decode("ascii").strip())
+
+    def relax_servos(
+        self,
+        servo_indices: Sequence[int] | None = None,
+        servo_channels: dict[int, int] | None = None,
+    ) -> None:
+        channels_map = servo_channels or DEFAULT_SERVO_CHANNELS
+        indices = (
+            sorted(channels_map)
+            if servo_indices is None
+            else list(servo_indices)
+        )
+        channels = [channels_map[index] for index in indices]
+        command = "".join(f"#{channel}PO" for channel in channels)
+        print(command)
+
+
+__all__ = ["AL5ASerialController", "PrintController", "SSC32Command"]
+
+```
+
+## lynxmotion_control/interactive.py
+
+```python
 """Interactive matplotlib UI for commanding the Lynxmotion AL5A."""
 from __future__ import annotations
 
@@ -3423,3 +3939,424 @@ def run_demo(controller, move_time_ms: int = 1000) -> None:
 
 
 __all__ = ["InteractiveArm", "run_demo"]
+
+```
+
+## tests/conftest.py
+
+```python
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+```
+
+## tests/test_interactive.py
+
+```python
+"""Tests for the interactive controller UI."""
+from __future__ import annotations
+
+import contextlib
+import json
+import importlib
+import math
+import sys
+from typing import Any
+
+import pytest
+
+matplotlib = pytest.importorskip("matplotlib")
+
+
+@pytest.fixture
+def interactive_module(monkeypatch):
+    """Import the interactive module with a benign backend and patched thread."""
+
+    monkeypatch.setattr(matplotlib, "get_backend", lambda: "nbagg")
+    sys.modules.pop("lynxmotion_control.interactive", None)
+    module = importlib.import_module("lynxmotion_control.interactive")
+
+    class DummyThread:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            self.args = args
+            self.kwargs = kwargs
+
+        def start(self) -> None:  # pragma: no cover - no behaviour to verify
+            return
+
+    monkeypatch.setattr(module.threading, "Thread", DummyThread)
+    return module
+
+
+class _BasicController:
+    def __init__(self) -> None:
+        self.moves: list[tuple[tuple[float, ...], int | None]] = []
+        self.relax_calls = 0
+
+    def move_joints(self, joints, **kwargs) -> None:  # pragma: no cover - simple recording
+        self.moves.append((tuple(joints), kwargs.get("move_time_ms")))
+
+    def relax_servos(self, *_args, **_kwargs) -> None:  # pragma: no cover - compatibility
+        self.relax_calls += 1
+
+
+@contextlib.contextmanager
+def _prepare_arm(monkeypatch, interactive_module, controller, *, move_time_ms: int = 1234):
+    class FakeQueue:
+        def __init__(self, *_, **__) -> None:
+            self.commands: list[tuple[tuple[float, ...], int | None]] = []
+
+        def put_nowait(self, item: tuple[tuple[float, ...], int | None]) -> None:
+            self.commands.append(item)
+
+        def get_nowait(self):  # pragma: no cover - defensive, unused in tests
+            raise interactive_module.queue.Empty
+
+        def task_done(self) -> None:  # pragma: no cover - compatibility stub
+            return
+
+        def get(self, *_args, **_kwargs):
+            if not self.commands:
+                raise AssertionError("Unexpected blocking get on fake queue")
+            return self.commands.pop(0)
+
+        def empty(self) -> bool:
+            return not self.commands
+
+    monkeypatch.setattr(interactive_module.queue, "Queue", FakeQueue)
+    arm = interactive_module.InteractiveArm(controller, move_time_ms=move_time_ms)
+    try:
+        yield arm
+    finally:
+        interactive_module.plt.close(arm.figure)
+
+
+def test_initialisation_queues_initial_move(monkeypatch, interactive_module) -> None:
+    controller = _BasicController()
+    with _prepare_arm(monkeypatch, interactive_module, controller) as arm:
+        assert arm._command_queue.commands  # type: ignore[attr-defined]
+        queued_move_time = arm._command_queue.commands[0][1]  # type: ignore[attr-defined]
+        assert queued_move_time == 1234
+
+
+def test_enter_calibration_mode_clears_pending_commands(
+    monkeypatch, interactive_module
+) -> None:
+    controller = _BasicController()
+    with _prepare_arm(monkeypatch, interactive_module, controller) as arm:
+        arm._command_queue.put_nowait(((0.0, 0.0, 0.0, 0.0, 0.0, 0.0), None))  # type: ignore[attr-defined]
+        arm._enter_calibration_mode()
+        assert arm._calibration_active
+        assert arm._command_queue.commands == []  # type: ignore[attr-defined]
+        assert controller.relax_calls == 0
+
+
+def test_set_vertical_persists_offsets(monkeypatch, interactive_module, tmp_path) -> None:
+    calibration_file = tmp_path / "servo_offsets.json"
+    monkeypatch.setattr(
+        interactive_module,
+        "CALIBRATION_CONFIG_PATH",
+        calibration_file,
+        raising=False,
+    )
+    controller = _BasicController()
+    with _prepare_arm(monkeypatch, interactive_module, controller) as arm:
+        arm._enter_calibration_mode()
+        arm.current_joints = [0.0, 0.4, -0.2, 0.1, 0.0, 0.0]
+        arm.commanded_joints = list(arm.current_joints)
+        arm._handle_set_vertical()
+        arm._exit_calibration_mode()
+
+    assert calibration_file.exists()
+    stored = json.loads(calibration_file.read_text())
+    expected_shoulder = math.pi / 2 - 0.4
+    expected_elbow = 0.0 - (-0.2)
+    assert math.isclose(float(stored["1"]), expected_shoulder, rel_tol=1e-6)
+    assert math.isclose(float(stored["2"]), expected_elbow, rel_tol=1e-6)
+
+    new_controller = _BasicController()
+    with _prepare_arm(monkeypatch, interactive_module, new_controller) as arm:
+        assert math.isclose(
+            arm.servo_offsets.get(1, 0.0), expected_shoulder, rel_tol=1e-6
+        )
+        assert math.isclose(arm.servo_offsets.get(2, 0.0), expected_elbow, rel_tol=1e-6)
+
+
+def test_set_vertical_aligns_base_zero_to_mid_pulse(monkeypatch, interactive_module) -> None:
+    controller = _BasicController()
+    with _prepare_arm(monkeypatch, interactive_module, controller) as arm:
+        arm._enter_calibration_mode()
+        arm.current_joints = [0.35, 0.4, -0.2, 0.1, 0.0, 0.0]
+        arm.commanded_joints = list(arm.current_joints)
+
+        base_config = arm.servo_configs[0]
+        arm._handle_set_vertical()
+
+        expected_mid_angle = base_config.min_angle + (
+            (base_config.max_angle - base_config.min_angle) / 2.0
+        )
+        expected_offset = 0.0 - expected_mid_angle
+
+        assert math.isclose(arm.servo_offsets[0], expected_offset, rel_tol=1e-6)
+        assert math.isclose(arm.zero_reference[0], 0.0, rel_tol=1e-6)
+        assert math.isclose(arm.current_joints[0], 0.0, rel_tol=1e-6)
+
+        zero_raw = arm._apply_offsets([0.0], direction="raw")[0]
+        min_raw = arm._apply_offsets([base_config.min_angle], direction="raw")[0]
+        max_raw = arm._apply_offsets([base_config.max_angle], direction="raw")[0]
+
+        assert math.isclose(zero_raw, expected_mid_angle, rel_tol=1e-6)
+        assert math.isclose(min_raw, base_config.min_angle, rel_tol=1e-6)
+        assert math.isclose(max_raw, base_config.max_angle, rel_tol=1e-6)
+
+        zero_pulse = base_config.angle_to_pulse(zero_raw)
+        expected_mid_pulse = int(round((base_config.min_pulse + base_config.max_pulse) / 2.0))
+        assert zero_pulse == expected_mid_pulse
+
+
+def test_set_vertical_preserves_asymmetric_base_limits(
+    monkeypatch, interactive_module, tmp_path
+) -> None:
+    calibration_file = tmp_path / "servo_offsets.json"
+    calibration_file.write_text(
+        json.dumps(
+            {
+                "servo_limits": {
+                    "0": {"min_deg": -45.0, "max_deg": 30.0},
+                }
+            }
+        )
+    )
+    monkeypatch.setattr(
+        interactive_module,
+        "CALIBRATION_CONFIG_PATH",
+        calibration_file,
+        raising=False,
+    )
+
+    controller = _BasicController()
+    with _prepare_arm(monkeypatch, interactive_module, controller) as arm:
+        arm._enter_calibration_mode()
+        original_base_angle = 0.35
+        arm.current_joints = [original_base_angle, 0.4, -0.2, 0.1, 0.0, 0.0]
+        arm.commanded_joints = list(arm.current_joints)
+
+        base_config = arm.servo_configs[0]
+        assert not math.isclose(
+            abs(base_config.min_angle), abs(base_config.max_angle), rel_tol=1e-6
+        )
+
+        arm._handle_set_vertical()
+
+        assert math.isclose(
+            arm.servo_offsets[0], -original_base_angle, rel_tol=1e-6
+        )
+        zero_raw = arm._apply_offsets([0.0], direction="raw")[0]
+        assert math.isclose(zero_raw, original_base_angle, rel_tol=1e-6)
+
+        max_raw = arm._apply_offsets([base_config.max_angle], direction="raw")[0]
+        assert max_raw >= base_config.max_angle
+
+def test_servo_limits_loaded_and_persisted(
+    monkeypatch, interactive_module, tmp_path
+) -> None:
+    calibration_file = tmp_path / "servo_offsets.json"
+    monkeypatch.setattr(
+        interactive_module,
+        "CALIBRATION_CONFIG_PATH",
+        calibration_file,
+        raising=False,
+    )
+    calibration_file.write_text(
+        json.dumps(
+            {
+                "servo_limits": {
+                    "0": {"min_deg": -45.0, "max_deg": 30.0},
+                    "3": {"min_deg": -100.0, "max_deg": 95.0},
+                }
+            }
+        )
+    )
+
+    controller = _BasicController()
+    with _prepare_arm(monkeypatch, interactive_module, controller) as arm:
+        config = arm.servo_configs[0]
+        assert math.isclose(
+            config.min_angle, math.radians(-45.0), rel_tol=1e-6
+        )
+        assert math.isclose(
+            config.max_angle, math.radians(30.0), rel_tol=1e-6
+        )
+
+        new_min = -55.0
+        arm._update_servo_limit(0, min_angle=math.radians(new_min))
+
+    stored = json.loads(calibration_file.read_text())
+    stored_limits = stored["servo_limits"]["0"]
+    assert math.isclose(float(stored_limits["min_deg"]), new_min, rel_tol=1e-6)
+    assert math.isclose(float(stored_limits["max_deg"]), 30.0, rel_tol=1e-6)
+
+
+def test_command_worker_processes_commands_without_feedback(
+    monkeypatch, interactive_module
+) -> None:
+    controller = _BasicController()
+    with _prepare_arm(monkeypatch, interactive_module, controller) as arm:
+        arm._command_queue.commands.clear()  # type: ignore[attr-defined]
+        baseline_current = list(arm.current_joints)
+        baseline_last_raw = arm._last_commanded_raw
+
+        target = [angle + 0.1 for angle in baseline_current]
+        arm._send_move_command(target, move_time_ms=250)
+
+        assert arm._command_queue.commands  # type: ignore[attr-defined]
+        original_get = arm._command_queue.get  # type: ignore[attr-defined]
+
+        def single_use_get(*args, **kwargs):
+            if single_use_get.calls == 0:
+                single_use_get.calls += 1
+                return original_get(*args, **kwargs)
+            raise KeyboardInterrupt
+
+        single_use_get.calls = 0
+
+        arm._command_queue.get = single_use_get  # type: ignore[attr-defined]
+
+        with pytest.raises(KeyboardInterrupt):
+            arm._command_worker()
+
+        arm._command_queue.get = original_get  # type: ignore[attr-defined]
+
+        assert controller.moves  # command sent to controller
+        assert controller.relax_calls == 0
+        assert arm._last_commanded_raw != baseline_last_raw
+        assert arm.commanded_joints != baseline_current
+        assert arm.current_joints != baseline_current
+
+```
+
+## tests/test_kinematics.py
+
+```python
+from __future__ import annotations
+
+import math
+
+import numpy as np
+
+from lynxmotion_control.al5a_kinematics import (
+    AL5AKinematics,
+    AL5ALinkLengths,
+    DEFAULT_SERVO_CONFIGS,
+    INCH_TO_METRES,
+    joints_to_pulses,
+)
+
+
+def test_forward_inverse_roundtrip():
+    kin = AL5AKinematics()
+    joints = [math.radians(angle) for angle in [0, 45, -30, 20]]
+    pose = kin.forward(joints)
+    result = kin.inverse(pose[:3, 3], wrist_pitch=joints[1] + joints[2] + joints[3])
+    np.testing.assert_allclose(result, joints, atol=1e-6)
+
+
+def test_joints_to_pulses_monotonic():
+    pulses = joints_to_pulses([0.0, 0.5, -1.0, 0.1, 0.0])
+    assert pulses[0] > 500
+    assert pulses[1] > 500
+    assert pulses[2] < 2000
+
+
+def test_wrist_and_gripper_channels_swapped():
+    wrist_angle = 0.3
+    gripper_angle = 0.4
+    pulses = joints_to_pulses([0.0, 0.0, 0.0, 0.0, wrist_angle, gripper_angle])
+    assert pulses[4] == DEFAULT_SERVO_CONFIGS[5].angle_to_pulse(gripper_angle)
+    assert pulses[5] == DEFAULT_SERVO_CONFIGS[4].angle_to_pulse(wrist_angle)
+
+
+def test_inverse_limits_reachable():
+    kin = AL5AKinematics()
+    pose = kin.inverse([0.15, 0.0, 0.12], wrist_pitch=math.radians(30))
+    assert len(pose) == 4
+    assert all(math.isfinite(angle) for angle in pose)
+
+
+def test_default_link_lengths_match_spec():
+    links = AL5ALinkLengths()
+    assert math.isclose(links.shoulder, 3.75 * INCH_TO_METRES)
+    assert math.isclose(links.elbow, 4.25 * INCH_TO_METRES)
+
+```
+
+## tests/test_serial_comm.py
+
+```python
+from __future__ import annotations
+
+from typing import Sequence
+
+import pytest
+
+from lynxmotion_control import serial_comm
+
+
+class FakeSerial:
+    def __init__(self) -> None:
+        self.writes: list[bytes] = []
+
+    def write(self, data: bytes) -> int:
+        self.writes.append(data)
+        return len(data)
+
+    def read_until(self, terminator: bytes = b"\n") -> bytes:  # pragma: no cover - unused in tests
+        return b""
+
+    def close(self) -> None:  # pragma: no cover - unused in tests
+        pass
+
+
+@pytest.fixture
+def patched_channels(monkeypatch: pytest.MonkeyPatch) -> dict[int, int]:
+    mapping = {0: 0, 1: 2, 2: 4}
+    monkeypatch.setattr(serial_comm, "DEFAULT_SERVO_CHANNELS", mapping)
+    return mapping
+
+
+@pytest.mark.parametrize("servo_indices", [None, [0, 2]])
+def test_relax_servos_generates_expected_command(
+    servo_indices: Sequence[int] | None, patched_channels: dict[int, int]
+) -> None:
+    controller = serial_comm.AL5ASerialController(port="loopback")
+    fake_serial = FakeSerial()
+    controller._serial = fake_serial
+
+    controller.relax_servos(servo_indices=servo_indices)
+
+    expected_order = (
+        [0, 1, 2] if servo_indices is None else list(servo_indices)
+    )
+    expected = (
+        "".join(f"#{patched_channels[index]}PO" for index in expected_order) + "\r"
+    ).encode(
+        "ascii"
+    )
+    assert fake_serial.writes == [expected]
+
+
+def test_print_controller_relax_outputs_command(
+    capsys: pytest.CaptureFixture[str], patched_channels: dict[int, int]
+) -> None:
+    controller = serial_comm.PrintController()
+
+    controller.relax_servos(servo_indices=[1])
+
+    captured = capsys.readouterr().out.strip()
+    assert captured == f"#{patched_channels[1]}PO"
+
+```
