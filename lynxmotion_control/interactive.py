@@ -2002,15 +2002,21 @@ class InteractiveArm:
         base_config = self.servo_configs.get(base_index)
         if base_index < len(desired) and base_config is not None:
             # The base joint is treated specially during vertical calibration so
-            # that a zero command always maps to the midpoint between the
-            # configured minimum and maximum pulse widths. This ignores the
-            # current pose and fixes the offset so ``angle - offset`` equals the
-            # midpoint of the servo configuration, preserving the mapping of the
-            # configured min/max angles to their corresponding pulse widths.
+            # that a zero command maps to the midpoint between the configured
+            # minimum and maximum pulse widths. This only applies when the
+            # limits are symmetric around zero; asymmetric limits should retain
+            # their configured extremes to avoid shrinking the usable workspace.
             base_mid_angle = base_config.min_angle + (
                 (base_config.max_angle - base_config.min_angle) / 2.0
             )
-            base_override_offset = desired[base_index] - base_mid_angle
+            limits_are_symmetric = math.isclose(
+                abs(base_config.min_angle),
+                abs(base_config.max_angle),
+                rel_tol=1e-6,
+                abs_tol=1e-6,
+            )
+            if limits_are_symmetric:
+                base_override_offset = desired[base_index] - base_mid_angle
         for idx, actual in enumerate(source):
             target_angle = desired[idx]
             if idx == base_index and base_override_offset is not None:
