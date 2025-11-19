@@ -536,9 +536,15 @@ class InteractiveArm:
             self.gripper_angle = clamped_home[5]
 
         self._update_servo_readouts()
+        # Ensure the home move is not skipped even if initial feedback failed.
+        self._skip_next_command = False
         self._send_move_command(
             clamped_home, move_time_ms=self._home_move_time_ms, soft_start=False
         )
+
+        # Refresh the plot using the commanded home pose so the displayed arm
+        # matches the setpoint immediately after homing.
+        self._update_visuals(clamped_home)
 
     def update_robot(self) -> None:
         requested = self._clamp_target(self.target)
