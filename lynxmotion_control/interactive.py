@@ -1285,11 +1285,26 @@ class InteractiveArm:
         panel_key = "timeline"
         axes: list = []
 
+        title_offset = 0.02
+        title_height = 0.05
+        name_gap = 0.015
+        name_height = 0.07
+        button_gap = 0.02
+        button_height = 0.07
+        subroutine_gap = 0.03
+        timeline_buttons_gap = 0.025
+        timeline_buttons_height = 0.07
+        slider_gap = 0.025
+        slider_height = 0.045
+        min_subroutine_height = 0.14
+        preferred_subroutine_height = 0.22
+        min_timeline_height = 0.12
+
         title_ax = self._panel_axes(
             self._panel_margin,
-            self._panel_content_top - 0.08,
+            self._panel_content_top - title_offset - title_height,
             1.0 - 2 * self._panel_margin,
-            0.06,
+            title_height,
         )
         title_ax.axis("off")
         title_ax.text(
@@ -1303,8 +1318,46 @@ class InteractiveArm:
         )
         axes.append(title_ax)
 
-        name_height = 0.08
-        name_bottom = self._panel_content_top - 0.16
+        timeline_bottom_base = self._panel_margin + 0.03
+        available_height = self._panel_content_top - timeline_bottom_base
+        base_height = (
+            title_offset
+            + title_height
+            + name_gap
+            + name_height
+            + button_gap
+            + button_height
+            + subroutine_gap
+            + timeline_buttons_gap
+            + timeline_buttons_height
+            + slider_gap
+            + slider_height
+        )
+
+        remaining_height = max(available_height - base_height, 0.0)
+        min_required_height = min_subroutine_height + min_timeline_height
+
+        if remaining_height < min_required_height:
+            scale = remaining_height / min_required_height if min_required_height else 1.0
+            subroutine_height = min_subroutine_height * scale
+            timeline_height = min_timeline_height * scale
+        else:
+            subroutine_height = np.clip(
+                remaining_height - min_timeline_height,
+                min_subroutine_height,
+                preferred_subroutine_height,
+            )
+            timeline_height = remaining_height - subroutine_height
+            if timeline_height < min_timeline_height:
+                timeline_height = min_timeline_height
+                subroutine_height = max(
+                    min_subroutine_height, remaining_height - timeline_height
+                )
+
+        y_cursor = self._panel_content_top
+
+        y_cursor -= title_offset + title_height
+        name_bottom = y_cursor - name_gap - name_height
         name_ax = self._panel_axes(
             self._panel_margin,
             name_bottom,
@@ -1315,12 +1368,11 @@ class InteractiveArm:
         self._panel_interactive_widgets[panel_key].append(self._subroutine_name_box)
         axes.append(name_ax)
 
-        button_gap = 0.02
-        button_height = 0.08
+        y_cursor = name_bottom
         button_width = (
             1.0 - 2 * self._panel_margin - 2 * button_gap
         ) / 3
-        button_bottom = name_bottom - button_height - 0.02
+        button_bottom = y_cursor - button_gap - button_height
         save_ax = self._panel_axes(
             self._panel_margin,
             button_bottom,
@@ -1356,8 +1408,8 @@ class InteractiveArm:
         )
         axes.extend([save_ax, load_ax, refresh_ax])
 
-        subroutine_height = 0.28
-        subroutine_bottom = button_bottom - subroutine_height - 0.03
+        y_cursor = button_bottom - subroutine_gap
+        subroutine_bottom = y_cursor - subroutine_height
         self._subroutine_list_ax = self._panel_axes(
             self._panel_margin,
             subroutine_bottom,
@@ -1372,42 +1424,42 @@ class InteractiveArm:
         self._subroutine_list_ax.set_title("Saved subroutines", pad=8)
         axes.append(self._subroutine_list_ax)
 
-        timeline_button_height = 0.08
-        timeline_button_gap = 0.02
         timeline_button_count = 5
         timeline_button_width = (
-            1.0 - 2 * self._panel_margin - (timeline_button_count - 1) * timeline_button_gap
+            1.0 - 2 * self._panel_margin - (timeline_button_count - 1) * timeline_buttons_gap
         ) / timeline_button_count
-        timeline_button_bottom = subroutine_bottom - timeline_button_height - 0.035
+        timeline_button_bottom = (
+            subroutine_bottom - timeline_buttons_gap - timeline_buttons_height
+        )
         add_ax = self._panel_axes(
             self._panel_margin,
             timeline_button_bottom,
             timeline_button_width,
-            timeline_button_height,
+            timeline_buttons_height,
         )
         remove_ax = self._panel_axes(
-            self._panel_margin + timeline_button_width + timeline_button_gap,
+            self._panel_margin + timeline_button_width + timeline_buttons_gap,
             timeline_button_bottom,
             timeline_button_width,
-            timeline_button_height,
+            timeline_buttons_height,
         )
         clear_ax = self._panel_axes(
-            self._panel_margin + 2 * (timeline_button_width + timeline_button_gap),
+            self._panel_margin + 2 * (timeline_button_width + timeline_buttons_gap),
             timeline_button_bottom,
             timeline_button_width,
-            timeline_button_height,
+            timeline_buttons_height,
         )
         play_ax = self._panel_axes(
-            self._panel_margin + 3 * (timeline_button_width + timeline_button_gap),
+            self._panel_margin + 3 * (timeline_button_width + timeline_buttons_gap),
             timeline_button_bottom,
             timeline_button_width,
-            timeline_button_height,
+            timeline_buttons_height,
         )
         repeat_ax = self._panel_axes(
-            self._panel_margin + 4 * (timeline_button_width + timeline_button_gap),
+            self._panel_margin + 4 * (timeline_button_width + timeline_buttons_gap),
             timeline_button_bottom,
             timeline_button_width,
-            timeline_button_height,
+            timeline_buttons_height,
         )
         self._add_timeline_button = Button(add_ax, "Add to timeline", hovercolor="0.95")
         self._add_timeline_button.on_clicked(self._handle_add_to_timeline)
@@ -1432,13 +1484,12 @@ class InteractiveArm:
         )
         axes.extend([add_ax, remove_ax, clear_ax, play_ax, repeat_ax])
 
-        speed_slider_height = 0.04
-        speed_slider_bottom = timeline_button_bottom - speed_slider_height - 0.03
+        speed_slider_bottom = timeline_button_bottom - slider_gap - slider_height
         speed_ax = self._panel_axes(
             self._panel_margin,
             speed_slider_bottom,
             1.0 - 2 * self._panel_margin,
-            speed_slider_height,
+            slider_height,
         )
         self._timeline_speed_slider = Slider(
             speed_ax,
@@ -1452,9 +1503,8 @@ class InteractiveArm:
         axes.append(speed_ax)
         self._update_timeline_repeat_button()
 
-        timeline_height = speed_slider_bottom - (self._panel_margin + 0.05)
-        timeline_bottom = self._panel_margin + 0.03
-        timeline_height = max(timeline_height, 0.15)
+        timeline_height = max(timeline_height, 0.05)
+        timeline_bottom = timeline_bottom_base
         self._timeline_ax = self._panel_axes(
             self._panel_margin,
             timeline_bottom,
