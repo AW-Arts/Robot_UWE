@@ -127,6 +127,81 @@ def test_set_vertical_persists_offsets(monkeypatch, interactive_module, tmp_path
         assert math.isclose(arm.servo_offsets.get(2, 0.0), expected_elbow, rel_tol=1e-6)
 
 
+def test_set_vertical_aligns_base_zero_to_mid_pulse(monkeypatch, interactive_module) -> None:
+    controller = _BasicController()
+    with _prepare_arm(monkeypatch, interactive_module, controller) as arm:
+        arm._enter_calibration_mode()
+        arm.current_joints = [0.35, 0.4, -0.2, 0.1, 0.0, 0.0]
+        arm.commanded_joints = list(arm.current_joints)
+
+        base_config = arm.servo_configs[0]
+        arm._handle_set_vertical()
+
+        expected_mid_angle = base_config.min_angle + (
+            (base_config.max_angle - base_config.min_angle) / 2.0
+        )
+        expected_offset = 0.0 - expected_mid_angle
+
+        assert math.isclose(arm.servo_offsets[0], expected_offset, rel_tol=1e-6)
+        assert math.isclose(arm.zero_reference[0], 0.0, rel_tol=1e-6)
+        assert math.isclose(arm.current_joints[0], 0.0, rel_tol=1e-6)
+
+        zero_raw = arm._apply_offsets([0.0], direction="raw")[0]
+        min_raw = arm._apply_offsets([base_config.min_angle], direction="raw")[0]
+        max_raw = arm._apply_offsets([base_config.max_angle], direction="raw")[0]
+
+        assert math.isclose(zero_raw, expected_mid_angle, rel_tol=1e-6)
+        assert math.isclose(min_raw, base_config.min_angle, rel_tol=1e-6)
+        assert math.isclose(max_raw, base_config.max_angle, rel_tol=1e-6)
+
+        zero_pulse = base_config.angle_to_pulse(zero_raw)
+        expected_mid_pulse = int(round((base_config.min_pulse + base_config.max_pulse) / 2.0))
+        assert zero_pulse == expected_mid_pulse
+
+
+def test_set_vertical_preserves_asymmetric_base_limits(
+    monkeypatch, interactive_module, tmp_path
+) -> None:
+    calibration_file = tmp_path / "servo_offsets.json"
+    calibration_file.write_text(
+        json.dumps(
+            {
+                "servo_limits": {
+                    "0": {"min_deg": -45.0, "max_deg": 30.0},
+                }
+            }
+        )
+    )
+    monkeypatch.setattr(
+        interactive_module,
+        "CALIBRATION_CONFIG_PATH",
+        calibration_file,
+        raising=False,
+    )
+
+    controller = _BasicController()
+    with _prepare_arm(monkeypatch, interactive_module, controller) as arm:
+        arm._enter_calibration_mode()
+        original_base_angle = 0.35
+        arm.current_joints = [original_base_angle, 0.4, -0.2, 0.1, 0.0, 0.0]
+        arm.commanded_joints = list(arm.current_joints)
+
+        base_config = arm.servo_configs[0]
+        assert not math.isclose(
+            abs(base_config.min_angle), abs(base_config.max_angle), rel_tol=1e-6
+        )
+
+        arm._handle_set_vertical()
+
+        assert math.isclose(
+            arm.servo_offsets[0], -original_base_angle, rel_tol=1e-6
+        )
+        zero_raw = arm._apply_offsets([0.0], direction="raw")[0]
+        assert math.isclose(zero_raw, original_base_angle, rel_tol=1e-6)
+
+        max_raw = arm._apply_offsets([base_config.max_angle], direction="raw")[0]
+        assert max_raw >= base_config.max_angle
+
 def test_servo_limits_loaded_and_persisted(
     monkeypatch, interactive_module, tmp_path
 ) -> None:
