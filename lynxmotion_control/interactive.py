@@ -296,6 +296,10 @@ class InteractiveArm:
         self._selected_timeline_index: int | None = None
         self._timeline_playback_thread: threading.Thread | None = None
         self._timeline_stop_event = threading.Event()
+        self._timeline_repeat = False
+        self._timeline_speed = 1.0
+        self._timeline_repeat_button: Button | None = None
+        self._timeline_speed_slider: Slider | None = None
         self.figure = plt.figure("Lynxmotion AL5A Controller")
         try:
             # Provide extra breathing room for the on-figure panels while keeping the
@@ -1364,9 +1368,10 @@ class InteractiveArm:
 
         timeline_button_height = 0.08
         timeline_button_gap = 0.02
+        timeline_button_count = 5
         timeline_button_width = (
-            1.0 - 2 * self._panel_margin - 3 * timeline_button_gap
-        ) / 4
+            1.0 - 2 * self._panel_margin - (timeline_button_count - 1) * timeline_button_gap
+        ) / timeline_button_count
         timeline_button_bottom = subroutine_bottom - timeline_button_height - 0.035
         add_ax = self._panel_axes(
             self._panel_margin,
@@ -1392,6 +1397,12 @@ class InteractiveArm:
             timeline_button_width,
             timeline_button_height,
         )
+        repeat_ax = self._panel_axes(
+            self._panel_margin + 4 * (timeline_button_width + timeline_button_gap),
+            timeline_button_bottom,
+            timeline_button_width,
+            timeline_button_height,
+        )
         self._add_timeline_button = Button(add_ax, "Add to timeline", hovercolor="0.95")
         self._add_timeline_button.on_clicked(self._handle_add_to_timeline)
         self._remove_timeline_button = Button(remove_ax, "Remove entry", hovercolor="0.95")
@@ -1400,17 +1411,42 @@ class InteractiveArm:
         self._clear_timeline_button.on_clicked(self._handle_clear_timeline)
         self._play_timeline_button = Button(play_ax, "Play timeline", hovercolor="0.95")
         self._play_timeline_button.on_clicked(self._handle_play_timeline)
+        self._timeline_repeat_button = Button(
+            repeat_ax, "Repeat: Off", hovercolor="0.95"
+        )
+        self._timeline_repeat_button.on_clicked(self._handle_toggle_timeline_repeat)
         self._panel_interactive_widgets[panel_key].extend(
             [
                 self._add_timeline_button,
                 self._remove_timeline_button,
                 self._clear_timeline_button,
                 self._play_timeline_button,
+                self._timeline_repeat_button,
             ]
         )
-        axes.extend([add_ax, remove_ax, clear_ax, play_ax])
+        axes.extend([add_ax, remove_ax, clear_ax, play_ax, repeat_ax])
 
-        timeline_height = timeline_button_bottom - (self._panel_margin + 0.05)
+        speed_slider_height = 0.04
+        speed_slider_bottom = timeline_button_bottom - speed_slider_height - 0.03
+        speed_ax = self._panel_axes(
+            self._panel_margin,
+            speed_slider_bottom,
+            1.0 - 2 * self._panel_margin,
+            speed_slider_height,
+        )
+        self._timeline_speed_slider = Slider(
+            speed_ax,
+            "Speed",
+            0.1,
+            5.0,
+            valinit=self._timeline_speed,
+            valfmt="%0.1fx",
+        )
+        self._timeline_speed_slider.on_changed(self._handle_timeline_speed_change)
+        axes.append(speed_ax)
+        self._update_timeline_repeat_button()
+
+        timeline_height = speed_slider_bottom - (self._panel_margin + 0.05)
         timeline_bottom = self._panel_margin + 0.03
         timeline_height = max(timeline_height, 0.15)
         self._timeline_ax = self._panel_axes(
@@ -2428,6 +2464,13 @@ class InteractiveArm:
         self._timeline_playback_thread.start()
         self._update_timeline_play_button(running=True)
 
+    def _handle_toggle_timeline_repeat(self, _event=None) -> None:  # pragma: no cover - UI interaction
+        self._timeline_repeat = not self._timeline_repeat
+        self._update_timeline_repeat_button()
+
+    def _handle_timeline_speed_change(self, value: float) -> None:
+        self._timeline_speed = float(np.clip(value, 0.1, 5.0))
+
     def _handle_play_waypoints(self, _event=None) -> None:  # pragma: no cover - UI interaction
         if self._waypoint_playback_thread and self._waypoint_playback_thread.is_alive():
             self._stop_waypoint_playback()
@@ -2488,6 +2531,16 @@ class InteractiveArm:
         button.label.set_text(label)
         button.ax.figure.canvas.draw_idle()
 
+    def _update_timeline_repeat_button(self) -> None:
+        button = self._timeline_repeat_button
+        if button is None:
+            return
+        label = "Repeat: On" if self._timeline_repeat else "Repeat: Off"
+        facecolor = "#cfe8fc" if self._timeline_repeat else "0.85"
+        button.label.set_text(label)
+        button.ax.set_facecolor(facecolor)
+        button.ax.figure.canvas.draw_idle()
+
     def _stop_timeline_playback(self) -> None:
         if self._timeline_playback_thread and self._timeline_playback_thread.is_alive():
             self._timeline_stop_event.set()
@@ -2498,28 +2551,32 @@ class InteractiveArm:
 
     def _timeline_playback_worker(self) -> None:
         try:
-            for index, entry in enumerate(list(self._timeline_entries)):
-                if self._timeline_stop_event.is_set():
-                    break
-                if entry.missing:
-                    continue
-                waypoints = self._load_subroutine_waypoints(entry.slug)
-                if not waypoints:
-                    _LOGGER.warning(
-                        "Skipping timeline entry %s; subroutine file missing", entry.name
+            while not self._timeline_stop_event.is_set():
+                for index, entry in enumerate(list(self._timeline_entries)):
+                    if self._timeline_stop_event.is_set():
+                        break
+                    if entry.missing:
+                        continue
+                    waypoints = self._load_subroutine_waypoints(entry.slug)
+                    if not waypoints:
+                        _LOGGER.warning(
+                            "Skipping timeline entry %s; subroutine file missing", entry.name
+                        )
+                        continue
+                    self._selected_timeline_index = index
+                    self._highlight_selected_timeline()
+                    self._selected_subroutine_slug = entry.slug
+                    self._highlight_selected_subroutine()
+                    self._update_subroutine_name_box()
+                    self._execute_waypoint_sequence(
+                        waypoints,
+                        stop_event=self._timeline_stop_event,
+                        selection_callback=None,
+                        playback_speed=self._timeline_speed,
                     )
-                    continue
-                self._selected_timeline_index = index
-                self._highlight_selected_timeline()
-                self._selected_subroutine_slug = entry.slug
-                self._highlight_selected_subroutine()
-                self._update_subroutine_name_box()
-                self._execute_waypoint_sequence(
-                    waypoints,
-                    stop_event=self._timeline_stop_event,
-                    selection_callback=None,
-                )
-                if self._timeline_stop_event.is_set():
+                    if self._timeline_stop_event.is_set():
+                        break
+                if not self._timeline_repeat:
                     break
         finally:
             self._timeline_stop_event.clear()
@@ -2532,12 +2589,14 @@ class InteractiveArm:
         *,
         stop_event: threading.Event,
         selection_callback: Callable[[int, Waypoint], None] | None = None,
+        playback_speed: float = 1.0,
     ) -> None:
         for index, waypoint in enumerate(waypoints):
             if stop_event.is_set():
                 break
             target = self._clamp_target(np.array(waypoint.position, dtype=float))
-            duration_ms = int(max(0.1, waypoint.duration) * 1000)
+            scaled_duration = waypoint.duration / max(playback_speed, 0.1)
+            duration_ms = int(max(0.02, scaled_duration) * 1000)
             desired_pitch = float(np.clip(waypoint.wrist_pitch, *self._wrist_pitch_limits))
             self._set_wrist_pitch_target(desired_pitch, update_slider=False)
             try:
