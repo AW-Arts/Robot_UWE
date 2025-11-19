@@ -1558,26 +1558,26 @@ class InteractiveArm:
         workspace_raw: dict[str, object] | None = None
         limits_raw: dict[str, object] | None = None
 
-        if isinstance(data, dict) and (
-            "offsets" in data or "vertical_angles" in data
-        ):
-            offsets_candidate = data.get("offsets")
-            if isinstance(offsets_candidate, dict):
-                offsets_raw = offsets_candidate
-            vertical_candidate = data.get("vertical_angles")
-            if isinstance(vertical_candidate, dict):
-                vertical_raw = vertical_candidate
-            inversion_candidate = data.get("inverted")
-            if isinstance(inversion_candidate, dict):
-                inversion_raw = inversion_candidate
-            workspace_candidate = data.get("workspace")
-            if isinstance(workspace_candidate, dict):
-                workspace_raw = workspace_candidate
+        if isinstance(data, dict):
+            if "offsets" in data or "vertical_angles" in data:
+                offsets_candidate = data.get("offsets")
+                if isinstance(offsets_candidate, dict):
+                    offsets_raw = offsets_candidate
+                vertical_candidate = data.get("vertical_angles")
+                if isinstance(vertical_candidate, dict):
+                    vertical_raw = vertical_candidate
+                inversion_candidate = data.get("inverted")
+                if isinstance(inversion_candidate, dict):
+                    inversion_raw = inversion_candidate
+                workspace_candidate = data.get("workspace")
+                if isinstance(workspace_candidate, dict):
+                    workspace_raw = workspace_candidate
+            else:
+                offsets_raw = data
+
             limits_candidate = data.get("servo_limits")
             if isinstance(limits_candidate, dict):
                 limits_raw = limits_candidate
-        elif isinstance(data, dict):
-            offsets_raw = data
 
         offsets: dict[int, float] = {}
         if offsets_raw:
@@ -1997,8 +1997,26 @@ class InteractiveArm:
                 desired.append(0.0)
 
         updated_feedback: list[float] = []
+        base_override_offset: float | None = None
+        base_index = 0
+        base_config = self.servo_configs.get(base_index)
+        if base_index < len(desired) and base_config is not None:
+            # The base joint is treated specially during vertical calibration so
+            # that a zero command always maps to the midpoint between the
+            # configured minimum and maximum pulse widths. This ignores the
+            # current pose and fixes the offset so ``angle - offset`` equals the
+            # midpoint of the servo configuration, preserving the mapping of the
+            # configured min/max angles to their corresponding pulse widths.
+            base_mid_angle = base_config.min_angle + (
+                (base_config.max_angle - base_config.min_angle) / 2.0
+            )
+            base_override_offset = desired[base_index] - base_mid_angle
         for idx, actual in enumerate(source):
             target_angle = desired[idx]
+            if idx == base_index and base_override_offset is not None:
+                self.servo_offsets[idx] = base_override_offset
+                updated_feedback.append(target_angle)
+                continue
             delta = target_angle - actual
             self.servo_offsets[idx] = self.servo_offsets.get(idx, 0.0) + delta
             updated_feedback.append(actual + delta)
