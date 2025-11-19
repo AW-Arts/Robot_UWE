@@ -8,7 +8,7 @@ import queue
 import threading
 import time
 from copy import deepcopy
-from typing import Sequence
+from typing import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -32,6 +32,8 @@ _LOGGER = logging.getLogger(__name__)
 
 CALIBRATION_CONFIG_PATH = Path.home() / ".config" / "lynxmotion_al5a" / "servo_offsets.json"
 PATH_STORAGE_PATH = CALIBRATION_CONFIG_PATH.with_name("saved_path.json")
+SUBROUTINE_STORAGE_DIR = PATH_STORAGE_PATH.with_name("subroutines")
+TIMELINE_STORAGE_PATH = PATH_STORAGE_PATH.with_name("timeline.json")
 
 
 _DEFAULT_VERTICAL_JOINTS = [
@@ -101,6 +103,29 @@ class Waypoint:
 
 @dataclass
 class WaypointDragState:
+    index: int | None = None
+    offset: float = 0.0
+
+
+@dataclass
+class SubroutineSummary:
+    name: str
+    slug: str
+    path: Path
+    duration: float
+    waypoint_count: int
+
+
+@dataclass
+class TimelineEntry:
+    name: str
+    slug: str
+    duration: float
+    missing: bool = False
+
+
+@dataclass
+class TimelineDragState:
     index: int | None = None
     offset: float = 0.0
 
@@ -252,6 +277,25 @@ class InteractiveArm:
         self._waypoint_playback_thread: threading.Thread | None = None
         self._waypoint_stop_event = threading.Event()
         self._updating_duration_box = False
+        self._subroutine_catalog: dict[str, SubroutineSummary] = {}
+        self._subroutine_list_ax = None
+        self._subroutine_patches: list[Rectangle] = []
+        self._subroutine_texts: list = []
+        self._subroutine_display_slugs: list[str] = []
+        self._subroutine_item_height = 0.16
+        self._subroutine_item_gap = 0.05
+        self._selected_subroutine_slug: str | None = None
+        self._timeline_entries: list[TimelineEntry] = []
+        self._timeline_ax = None
+        self._timeline_patches: list[Rectangle] = []
+        self._timeline_texts: list = []
+        self._timeline_item_height = 0.16
+        self._timeline_item_gap = 0.05
+        self._timeline_drag = TimelineDragState()
+        self._timeline_reordered = False
+        self._selected_timeline_index: int | None = None
+        self._timeline_playback_thread: threading.Thread | None = None
+        self._timeline_stop_event = threading.Event()
         self.figure = plt.figure("Lynxmotion AL5A Controller")
         try:
             # Provide extra breathing room for the on-figure panels while keeping the
@@ -329,9 +373,19 @@ class InteractiveArm:
         self._add_waypoint_button: Button | None = None
         self._play_waypoints_button: Button | None = None
         self._clear_waypoints_button: Button | None = None
+        self._subroutine_name_box: TextBox | None = None
+        self._save_subroutine_button: Button | None = None
+        self._load_subroutine_button: Button | None = None
+        self._refresh_subroutine_button: Button | None = None
+        self._add_timeline_button: Button | None = None
+        self._remove_timeline_button: Button | None = None
+        self._clear_timeline_button: Button | None = None
+        self._play_timeline_button: Button | None = None
         self.waypoint_ax = None
 
         self._load_saved_waypoints()
+        self._load_subroutine_catalog()
+        self._load_saved_timeline()
 
         if build_matplotlib_controls:
             self._create_controls()
@@ -566,6 +620,10 @@ class InteractiveArm:
         self.figure.canvas.draw_idle()
 
     def _on_press(self, event) -> None:
+        if self._handle_subroutine_press(event):
+            return
+        if self._handle_timeline_press(event):
+            return
         if self._handle_waypoint_press(event):
             return
         if event.inaxes != self.ax:
@@ -605,6 +663,8 @@ class InteractiveArm:
         self.update_robot()
 
     def _on_release(self, event) -> None:
+        if self._handle_timeline_release(event):
+            return
         if self._handle_waypoint_release(event):
             return
         self.drag_state.dragging = False
@@ -613,6 +673,8 @@ class InteractiveArm:
         self.drag_state.start_target = None
 
     def _on_motion(self, event) -> None:
+        if self._handle_timeline_motion(event):
+            return
         if self._handle_waypoint_motion(event):
             return
         if not self.drag_state.dragging or event.inaxes != self.ax:
@@ -740,6 +802,7 @@ class InteractiveArm:
             ("Movement", "movement"),
             ("Servos", "servos"),
             ("Path", "waypoints"),
+            ("Timeline", "timeline"),
         ]
 
         self._panel_widgets = {key: [] for _, key in menu_entries}
@@ -775,6 +838,7 @@ class InteractiveArm:
         self._panel_widgets["movement"] = self._build_movement_panel()
         self._panel_widgets["servos"] = self._build_servo_panel()
         self._panel_widgets["waypoints"] = self._build_waypoint_panel()
+        self._panel_widgets["timeline"] = self._build_timeline_panel()
 
         self._set_active_panel("movement")
         self._refresh_waypoint_display()
@@ -1207,6 +1271,320 @@ class InteractiveArm:
 
         return axes
 
+    def _build_timeline_panel(self) -> list:
+        panel_key = "timeline"
+        axes: list = []
+
+        title_ax = self._panel_axes(
+            self._panel_margin,
+            self._panel_content_top - 0.08,
+            1.0 - 2 * self._panel_margin,
+            0.06,
+        )
+        title_ax.axis("off")
+        title_ax.text(
+            0.0,
+            0.5,
+            "Subroutines & timeline",
+            va="center",
+            ha="left",
+            fontsize=10,
+            fontweight="bold",
+        )
+        axes.append(title_ax)
+
+        name_height = 0.08
+        name_bottom = self._panel_content_top - 0.16
+        name_ax = self._panel_axes(
+            self._panel_margin,
+            name_bottom,
+            1.0 - 2 * self._panel_margin,
+            name_height,
+        )
+        self._subroutine_name_box = TextBox(name_ax, "Subroutine", initial="")
+        self._panel_interactive_widgets[panel_key].append(self._subroutine_name_box)
+        axes.append(name_ax)
+
+        button_gap = 0.02
+        button_height = 0.08
+        button_width = (
+            1.0 - 2 * self._panel_margin - 2 * button_gap
+        ) / 3
+        button_bottom = name_bottom - button_height - 0.02
+        save_ax = self._panel_axes(
+            self._panel_margin,
+            button_bottom,
+            button_width,
+            button_height,
+        )
+        load_ax = self._panel_axes(
+            self._panel_margin + button_width + button_gap,
+            button_bottom,
+            button_width,
+            button_height,
+        )
+        refresh_ax = self._panel_axes(
+            self._panel_margin + 2 * (button_width + button_gap),
+            button_bottom,
+            button_width,
+            button_height,
+        )
+        self._save_subroutine_button = Button(save_ax, "Save current", hovercolor="0.95")
+        self._save_subroutine_button.on_clicked(self._handle_save_subroutine)
+        self._load_subroutine_button = Button(load_ax, "Load subroutine", hovercolor="0.95")
+        self._load_subroutine_button.on_clicked(self._handle_load_subroutine)
+        self._refresh_subroutine_button = Button(
+            refresh_ax, "Refresh list", hovercolor="0.95"
+        )
+        self._refresh_subroutine_button.on_clicked(self._handle_refresh_subroutines)
+        self._panel_interactive_widgets[panel_key].extend(
+            [
+                self._save_subroutine_button,
+                self._load_subroutine_button,
+                self._refresh_subroutine_button,
+            ]
+        )
+        axes.extend([save_ax, load_ax, refresh_ax])
+
+        subroutine_height = 0.28
+        subroutine_bottom = button_bottom - subroutine_height - 0.03
+        self._subroutine_list_ax = self._panel_axes(
+            self._panel_margin,
+            subroutine_bottom,
+            1.0 - 2 * self._panel_margin,
+            subroutine_height,
+        )
+        self._subroutine_list_ax.set_xlim(0, 1)
+        self._subroutine_list_ax.set_ylim(0, 1)
+        self._subroutine_list_ax.set_xticks([])
+        self._subroutine_list_ax.set_yticks([])
+        self._subroutine_list_ax.set_facecolor("#f7f7f7")
+        self._subroutine_list_ax.set_title("Saved subroutines", pad=8)
+        axes.append(self._subroutine_list_ax)
+
+        timeline_button_height = 0.08
+        timeline_button_gap = 0.02
+        timeline_button_width = (
+            1.0 - 2 * self._panel_margin - 3 * timeline_button_gap
+        ) / 4
+        timeline_button_bottom = subroutine_bottom - timeline_button_height - 0.035
+        add_ax = self._panel_axes(
+            self._panel_margin,
+            timeline_button_bottom,
+            timeline_button_width,
+            timeline_button_height,
+        )
+        remove_ax = self._panel_axes(
+            self._panel_margin + timeline_button_width + timeline_button_gap,
+            timeline_button_bottom,
+            timeline_button_width,
+            timeline_button_height,
+        )
+        clear_ax = self._panel_axes(
+            self._panel_margin + 2 * (timeline_button_width + timeline_button_gap),
+            timeline_button_bottom,
+            timeline_button_width,
+            timeline_button_height,
+        )
+        play_ax = self._panel_axes(
+            self._panel_margin + 3 * (timeline_button_width + timeline_button_gap),
+            timeline_button_bottom,
+            timeline_button_width,
+            timeline_button_height,
+        )
+        self._add_timeline_button = Button(add_ax, "Add to timeline", hovercolor="0.95")
+        self._add_timeline_button.on_clicked(self._handle_add_to_timeline)
+        self._remove_timeline_button = Button(remove_ax, "Remove entry", hovercolor="0.95")
+        self._remove_timeline_button.on_clicked(self._handle_remove_timeline_entry)
+        self._clear_timeline_button = Button(clear_ax, "Clear timeline", hovercolor="0.95")
+        self._clear_timeline_button.on_clicked(self._handle_clear_timeline)
+        self._play_timeline_button = Button(play_ax, "Play timeline", hovercolor="0.95")
+        self._play_timeline_button.on_clicked(self._handle_play_timeline)
+        self._panel_interactive_widgets[panel_key].extend(
+            [
+                self._add_timeline_button,
+                self._remove_timeline_button,
+                self._clear_timeline_button,
+                self._play_timeline_button,
+            ]
+        )
+        axes.extend([add_ax, remove_ax, clear_ax, play_ax])
+
+        timeline_height = timeline_button_bottom - (self._panel_margin + 0.05)
+        timeline_bottom = self._panel_margin + 0.03
+        timeline_height = max(timeline_height, 0.15)
+        self._timeline_ax = self._panel_axes(
+            self._panel_margin,
+            timeline_bottom,
+            1.0 - 2 * self._panel_margin,
+            timeline_height,
+        )
+        self._timeline_ax.set_xlim(0, 1)
+        self._timeline_ax.set_ylim(0, 1)
+        self._timeline_ax.set_xticks([])
+        self._timeline_ax.set_yticks([])
+        self._timeline_ax.set_facecolor("#f7f7f7")
+        self._timeline_ax.set_title("Timeline schedule", pad=8)
+        axes.append(self._timeline_ax)
+
+        self._refresh_subroutine_list_display()
+        self._refresh_timeline_display()
+
+        return axes
+
+    def _refresh_subroutine_list_display(self) -> None:
+        if self._subroutine_list_ax is None:
+            return
+        ax = self._subroutine_list_ax
+        ax.cla()
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_facecolor("#f7f7f7")
+        ax.set_title("Saved subroutines", pad=8)
+        self._subroutine_patches = []
+        self._subroutine_texts = []
+        self._subroutine_display_slugs = []
+
+        summaries = sorted(
+            self._subroutine_catalog.values(), key=lambda item: item.name.lower()
+        )
+        if not summaries:
+            ax.text(
+                0.5,
+                0.5,
+                "No subroutines saved",
+                ha="center",
+                va="center",
+                fontsize=10,
+                color="#666666",
+            )
+            self.figure.canvas.draw_idle()
+            return
+
+        for index, summary in enumerate(summaries):
+            y = 1.0 - (index + 1) * self._subroutine_item_height
+            y -= index * self._subroutine_item_gap
+            y = max(y, 0.02)
+            rect = Rectangle(
+                (0.02, y),
+                0.96,
+                min(self._subroutine_item_height, 0.9),
+                facecolor="#ffffff",
+                edgecolor="#cccccc",
+                linewidth=1,
+            )
+            if summary.slug == self._selected_subroutine_slug:
+                rect.set_facecolor("#cfe8fc")
+            ax.add_patch(rect)
+            text = ax.text(
+                0.04,
+                y + self._subroutine_item_height / 2,
+                f"{summary.name}\n{summary.waypoint_count} keyframes, {summary.duration:.2f} s",
+                va="center",
+                ha="left",
+                fontsize=9,
+                color="#333333",
+            )
+            self._subroutine_patches.append(rect)
+            self._subroutine_texts.append(text)
+            self._subroutine_display_slugs.append(summary.slug)
+
+        self.figure.canvas.draw_idle()
+
+    def _refresh_timeline_display(self) -> None:
+        if self._timeline_ax is None:
+            return
+        ax = self._timeline_ax
+        ax.cla()
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_facecolor("#f7f7f7")
+        ax.set_title("Timeline schedule", pad=8)
+        self._timeline_patches = []
+        self._timeline_texts = []
+
+        if not self._timeline_entries:
+            ax.text(
+                0.5,
+                0.5,
+                "No scheduled subroutines",
+                ha="center",
+                va="center",
+                fontsize=10,
+                color="#666666",
+            )
+            self.figure.canvas.draw_idle()
+            return
+
+        for index, entry in enumerate(self._timeline_entries):
+            y = 1.0 - (index + 1) * self._timeline_item_height
+            y -= index * self._timeline_item_gap
+            y = max(y, 0.02)
+            rect = Rectangle(
+                (0.02, y),
+                0.96,
+                min(self._timeline_item_height, 0.9),
+                facecolor="#ffffff",
+                edgecolor="#cccccc",
+                linewidth=1,
+            )
+            if index == self._selected_timeline_index:
+                rect.set_facecolor("#cfe8fc")
+            ax.add_patch(rect)
+            duration_label = f"{entry.duration:.2f} s"
+            if entry.missing:
+                status = "Missing file"
+                text_color = "#b00020"
+            else:
+                status = "Ready"
+                text_color = "#333333"
+            text = ax.text(
+                0.04,
+                y + self._timeline_item_height / 2,
+                f"#{index + 1}: {entry.name}\n{duration_label} • {status}",
+                va="center",
+                ha="left",
+                fontsize=9,
+                color=text_color,
+            )
+            self._timeline_patches.append(rect)
+            self._timeline_texts.append(text)
+
+        self.figure.canvas.draw_idle()
+
+    def _highlight_selected_subroutine(self) -> None:
+        for slug, patch in zip(self._subroutine_display_slugs, self._subroutine_patches):
+            if slug == self._selected_subroutine_slug:
+                patch.set_facecolor("#cfe8fc")
+            else:
+                patch.set_facecolor("#ffffff")
+        self.figure.canvas.draw_idle()
+
+    def _highlight_selected_timeline(self) -> None:
+        for idx, patch in enumerate(self._timeline_patches):
+            if idx == self._selected_timeline_index:
+                patch.set_facecolor("#cfe8fc")
+            else:
+                patch.set_facecolor("#ffffff")
+        self.figure.canvas.draw_idle()
+
+    def _update_subroutine_name_box(self) -> None:
+        if self._subroutine_name_box is None:
+            return
+        target = ""
+        if self._selected_subroutine_slug:
+            summary = self._subroutine_catalog.get(self._selected_subroutine_slug)
+            if summary is not None:
+                target = summary.name
+        try:
+            self._subroutine_name_box.set_val(target)
+        except Exception:
+            pass
+
     def _refresh_waypoint_display(self) -> None:
         if not hasattr(self, "waypoint_ax"):
             return
@@ -1296,19 +1674,9 @@ class InteractiveArm:
         finally:
             self._updating_duration_box = False
 
-    def _load_saved_waypoints(self) -> None:
-        try:
-            if not PATH_STORAGE_PATH.exists():
-                return
-            data = json.loads(PATH_STORAGE_PATH.read_text())
-        except Exception:
-            _LOGGER.warning(
-                "Failed to load saved path from %s", PATH_STORAGE_PATH, exc_info=True
-            )
-            return
-
+    def _waypoints_from_serialised(self, data: object) -> list[Waypoint]:
         if not isinstance(data, list):
-            return
+            return []
 
         loaded: list[Waypoint] = []
         for entry in data:
@@ -1332,28 +1700,164 @@ class InteractiveArm:
                     wrist_pitch=float(np.clip(pitch_value, *self._wrist_pitch_limits)),
                 )
             )
+        return loaded
 
-        if loaded:
-            self.waypoints = loaded
-        else:
-            self.waypoints = []
+    def _load_saved_waypoints(self) -> None:
+        try:
+            if not PATH_STORAGE_PATH.exists():
+                return
+            data = json.loads(PATH_STORAGE_PATH.read_text())
+        except Exception:
+            _LOGGER.warning(
+                "Failed to load saved path from %s", PATH_STORAGE_PATH, exc_info=True
+            )
+            return
+
+        loaded = self._waypoints_from_serialised(data)
+        self.waypoints = loaded if loaded else []
+
+    def _compute_waypoint_total_duration(self, waypoints: list[Waypoint]) -> float:
+        return sum(max(0.1, waypoint.duration) for waypoint in waypoints)
+
+    def _slugify_subroutine_name(self, name: str) -> str:
+        cleaned = " ".join(str(name or "").split())
+        cleaned = cleaned.strip()
+        safe = "".join(
+            ch if ch.isalnum() or ch in {"_", "-"} else "_" for ch in cleaned
+        )
+        safe = safe.strip("_")
+        if not safe:
+            safe = "subroutine"
+        return safe.lower()
+
+    def _load_subroutine_catalog(self) -> None:
+        catalog: dict[str, SubroutineSummary] = {}
+        if SUBROUTINE_STORAGE_DIR.exists():
+            for path in sorted(SUBROUTINE_STORAGE_DIR.glob("*.json")):
+                slug = path.stem
+                try:
+                    data = json.loads(path.read_text())
+                except Exception:
+                    _LOGGER.warning("Failed to read subroutine %s", path, exc_info=True)
+                    continue
+                waypoints = self._waypoints_from_serialised(data.get("waypoints"))
+                if not waypoints:
+                    continue
+                name = str(data.get("name") or slug)
+                summary = SubroutineSummary(
+                    name=name,
+                    slug=slug,
+                    path=path,
+                    duration=self._compute_waypoint_total_duration(waypoints),
+                    waypoint_count=len(waypoints),
+                )
+                catalog[slug] = summary
+        self._subroutine_catalog = catalog
+        if self._selected_subroutine_slug not in self._subroutine_catalog:
+            self._selected_subroutine_slug = None
+        self._refresh_subroutine_list_display()
+
+    def _load_subroutine_waypoints(self, slug: str) -> list[Waypoint]:
+        if not slug:
+            return []
+        path = SUBROUTINE_STORAGE_DIR / f"{slug}.json"
+        try:
+            data = json.loads(path.read_text())
+        except Exception:
+            _LOGGER.warning("Failed to load subroutine %s", path, exc_info=True)
+            return []
+        return self._waypoints_from_serialised(data.get("waypoints"))
+
+    def _load_saved_timeline(self) -> None:
+        entries: list[TimelineEntry] = []
+        if TIMELINE_STORAGE_PATH.exists():
+            try:
+                data = json.loads(TIMELINE_STORAGE_PATH.read_text())
+            except Exception:
+                _LOGGER.warning(
+                    "Failed to load saved timeline from %s",
+                    TIMELINE_STORAGE_PATH,
+                    exc_info=True,
+                )
+            else:
+                if isinstance(data, list):
+                    for entry in data:
+                        if not isinstance(entry, dict):
+                            continue
+                        slug = str(entry.get("slug") or "").strip()
+                        if not slug:
+                            continue
+                        summary = self._subroutine_catalog.get(slug)
+                        if summary is not None:
+                            entries.append(
+                                TimelineEntry(
+                                    name=summary.name,
+                                    slug=slug,
+                                    duration=summary.duration,
+                                    missing=False,
+                                )
+                            )
+                        else:
+                            entries.append(
+                                TimelineEntry(
+                                    name=str(entry.get("name") or slug),
+                                    slug=slug,
+                                    duration=float(entry.get("duration") or 0.0),
+                                    missing=True,
+                                )
+                            )
+        self._timeline_entries = entries
+        self._selected_timeline_index = None
+        self._refresh_timeline_display()
+
+    def _save_timeline(self) -> None:
+        try:
+            TIMELINE_STORAGE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            serialisable = [
+                {"name": entry.name, "slug": entry.slug} for entry in self._timeline_entries
+            ]
+            TIMELINE_STORAGE_PATH.write_text(json.dumps(serialisable, indent=2))
+        except Exception:
+            _LOGGER.warning(
+                "Failed to persist timeline data to %s",
+                TIMELINE_STORAGE_PATH,
+                exc_info=True,
+            )
+
+    def _update_timeline_entries_for_slug(self, slug: str) -> None:
+        summary = self._subroutine_catalog.get(slug)
+        if summary is None:
+            return
+        changed = False
+        for entry in self._timeline_entries:
+            if entry.slug == slug:
+                entry.name = summary.name
+                entry.duration = summary.duration
+                entry.missing = False
+                changed = True
+        if changed:
+            self._refresh_timeline_display()
+            self._save_timeline()
 
     def _save_waypoints(self) -> None:
         try:
             PATH_STORAGE_PATH.parent.mkdir(parents=True, exist_ok=True)
-            serialisable = [
-                {
-                    "position": waypoint.position.tolist(),
-                    "duration": float(waypoint.duration),
-                    "wrist_pitch": float(waypoint.wrist_pitch),
-                }
-                for waypoint in self.waypoints
-            ]
+            serialisable = self._serialise_waypoints(self.waypoints)
             PATH_STORAGE_PATH.write_text(json.dumps(serialisable, indent=2))
         except Exception:
             _LOGGER.warning(
                 "Failed to persist path data to %s", PATH_STORAGE_PATH, exc_info=True
             )
+
+    def _serialise_waypoints(self, waypoints: list[Waypoint]) -> list[dict[str, object]]:
+        return [
+            {
+                "position": waypoint.position.tolist(),
+                "duration": float(waypoint.duration),
+                "wrist_pitch": float(waypoint.wrist_pitch),
+            }
+            for waypoint in waypoints
+        ]
 
 
     def _make_move_callback(self, delta: tuple[float, float, float]):
@@ -1811,6 +2315,119 @@ class InteractiveArm:
         self._update_waypoint_duration_box()
         self._save_waypoints()
 
+    def _handle_save_subroutine(self, _event=None) -> None:  # pragma: no cover - UI interaction
+        if not self.waypoints:
+            _LOGGER.info("No waypoints available to save as a subroutine")
+            return
+        name = ""
+        if self._subroutine_name_box is not None:
+            name = self._subroutine_name_box.text
+        if not name.strip():
+            name = "Subroutine"
+        slug = self._slugify_subroutine_name(name)
+        serialised = self._serialise_waypoints(self.waypoints)
+        data = {"name": name, "slug": slug, "waypoints": serialised}
+        try:
+            SUBROUTINE_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+            path = SUBROUTINE_STORAGE_DIR / f"{slug}.json"
+            path.write_text(json.dumps(data, indent=2))
+        except Exception:
+            _LOGGER.warning("Failed to save subroutine %s", name, exc_info=True)
+            return
+        self._selected_subroutine_slug = slug
+        self._load_subroutine_catalog()
+        self._update_subroutine_name_box()
+        self._highlight_selected_subroutine()
+        self._update_timeline_entries_for_slug(slug)
+
+    def _handle_load_subroutine(self, _event=None) -> None:  # pragma: no cover - UI interaction
+        slug = self._selected_subroutine_slug
+        name_text = self._subroutine_name_box.text if self._subroutine_name_box else ""
+        if not slug and name_text.strip():
+            slug = self._slugify_subroutine_name(name_text)
+        if not slug:
+            _LOGGER.info("Select or name a subroutine before loading")
+            return
+        waypoints = self._load_subroutine_waypoints(slug)
+        if not waypoints:
+            _LOGGER.warning("No subroutine data found for %s", slug)
+            return
+        self.waypoints = list(waypoints)
+        self._selected_waypoint_index = None
+        self._refresh_waypoint_display()
+        self._update_waypoint_duration_box()
+        self._selected_subroutine_slug = slug
+        self._highlight_selected_subroutine()
+        self._update_subroutine_name_box()
+
+    def _handle_refresh_subroutines(self, _event=None) -> None:  # pragma: no cover - UI interaction
+        self._load_subroutine_catalog()
+
+    def _handle_add_to_timeline(self, _event=None) -> None:  # pragma: no cover - UI interaction
+        slug = self._selected_subroutine_slug
+        name_text = self._subroutine_name_box.text if self._subroutine_name_box else ""
+        if not slug and name_text.strip():
+            slug = self._slugify_subroutine_name(name_text)
+        if not slug:
+            _LOGGER.info("Select or name a subroutine to schedule")
+            return
+        summary = self._subroutine_catalog.get(slug)
+        if summary is None:
+            _LOGGER.warning("Unknown subroutine '%s'", name_text or slug)
+            return
+        entry = TimelineEntry(
+            name=summary.name,
+            slug=summary.slug,
+            duration=summary.duration,
+            missing=False,
+        )
+        self._timeline_entries.append(entry)
+        self._selected_timeline_index = len(self._timeline_entries) - 1
+        self._refresh_timeline_display()
+        self._highlight_selected_timeline()
+        self._save_timeline()
+
+    def _handle_remove_timeline_entry(self, _event=None) -> None:  # pragma: no cover - UI interaction
+        if self._selected_timeline_index is None:
+            _LOGGER.info("Select a timeline entry to remove")
+            return
+        if not (0 <= self._selected_timeline_index < len(self._timeline_entries)):
+            return
+        self._timeline_entries.pop(self._selected_timeline_index)
+        if self._selected_timeline_index >= len(self._timeline_entries):
+            self._selected_timeline_index = len(self._timeline_entries) - 1
+        if self._selected_timeline_index < 0:
+            self._selected_timeline_index = None
+        self._refresh_timeline_display()
+        self._highlight_selected_timeline()
+        self._save_timeline()
+
+    def _handle_clear_timeline(self, _event=None) -> None:  # pragma: no cover - UI interaction
+        self._stop_timeline_playback()
+        self._timeline_entries.clear()
+        self._selected_timeline_index = None
+        self._refresh_timeline_display()
+        self._highlight_selected_timeline()
+        self._save_timeline()
+
+    def _handle_play_timeline(self, _event=None) -> None:  # pragma: no cover - UI interaction
+        if self._timeline_playback_thread and self._timeline_playback_thread.is_alive():
+            self._stop_timeline_playback()
+            return
+        valid_entries = [entry for entry in self._timeline_entries if not entry.missing]
+        if not valid_entries:
+            _LOGGER.info("No playable timeline entries; add subroutines first")
+            return
+        self._stop_waypoint_playback()
+        self._timeline_stop_event.clear()
+        self._timeline_playback_thread = threading.Thread(
+            target=self._timeline_playback_worker,
+            name="al5a-timeline-playback",
+            daemon=True,
+        )
+        self._timeline_playback_thread.start()
+        self._update_timeline_play_button(running=True)
+
     def _handle_play_waypoints(self, _event=None) -> None:  # pragma: no cover - UI interaction
         if self._waypoint_playback_thread and self._waypoint_playback_thread.is_alive():
             self._stop_waypoint_playback()
@@ -1848,40 +2465,149 @@ class InteractiveArm:
 
     def _waypoint_playback_worker(self) -> None:
         try:
-            for index, waypoint in enumerate(list(self.waypoints)):
-                if self._waypoint_stop_event.is_set():
-                    break
-                target = self._clamp_target(np.array(waypoint.position, dtype=float))
-                duration_ms = int(max(0.1, waypoint.duration) * 1000)
-                desired_pitch = float(
-                    np.clip(waypoint.wrist_pitch, *self._wrist_pitch_limits)
-                )
-                self._set_wrist_pitch_target(desired_pitch, update_slider=False)
-                try:
-                    joints = list(self.kin.inverse(target[[0, 1, 2]], desired_pitch))
-                except Exception:
-                    _LOGGER.exception("Failed to solve IK for waypoint %d", index + 1)
-                    continue
-                self._last_wrist_pitch = joints[1] + joints[2] + joints[3]
-                full_joints = joints + [self.wrist_rotation, self.gripper_angle]
-                full_joints = self._clamp_joint_list(full_joints)
-                self.target[:] = target
-                self._send_move_command(
-                    full_joints,
-                    move_time_ms=duration_ms,
-                    soft_start=True,
-                    replace=False,
-                )
-                self._command_queue.join()
-                if self._waypoint_stop_event.is_set():
-                    break
-                self._selected_waypoint_index = index
-                self._highlight_selected_waypoint()
-                self._update_waypoint_duration_box()
+            self._execute_waypoint_sequence(
+                list(self.waypoints),
+                stop_event=self._waypoint_stop_event,
+                selection_callback=self._handle_waypoint_playback_step,
+            )
         finally:
             self._update_play_button_label(running=False)
             self._waypoint_stop_event.clear()
             self._waypoint_playback_thread = None
+
+    def _handle_waypoint_playback_step(self, index: int, _waypoint: Waypoint) -> None:
+        self._selected_waypoint_index = index
+        self._highlight_selected_waypoint()
+        self._update_waypoint_duration_box()
+
+    def _update_timeline_play_button(self, *, running: bool) -> None:
+        button = self._play_timeline_button
+        if button is None:
+            return
+        label = "Stop" if running else "Play timeline"
+        button.label.set_text(label)
+        button.ax.figure.canvas.draw_idle()
+
+    def _stop_timeline_playback(self) -> None:
+        if self._timeline_playback_thread and self._timeline_playback_thread.is_alive():
+            self._timeline_stop_event.set()
+            self._timeline_playback_thread.join(timeout=1.0)
+        self._timeline_playback_thread = None
+        self._timeline_stop_event.clear()
+        self._update_timeline_play_button(running=False)
+
+    def _timeline_playback_worker(self) -> None:
+        try:
+            for index, entry in enumerate(list(self._timeline_entries)):
+                if self._timeline_stop_event.is_set():
+                    break
+                if entry.missing:
+                    continue
+                waypoints = self._load_subroutine_waypoints(entry.slug)
+                if not waypoints:
+                    _LOGGER.warning(
+                        "Skipping timeline entry %s; subroutine file missing", entry.name
+                    )
+                    continue
+                self._selected_timeline_index = index
+                self._highlight_selected_timeline()
+                self._selected_subroutine_slug = entry.slug
+                self._highlight_selected_subroutine()
+                self._update_subroutine_name_box()
+                self._execute_waypoint_sequence(
+                    waypoints,
+                    stop_event=self._timeline_stop_event,
+                    selection_callback=None,
+                )
+                if self._timeline_stop_event.is_set():
+                    break
+        finally:
+            self._timeline_stop_event.clear()
+            self._timeline_playback_thread = None
+            self._update_timeline_play_button(running=False)
+
+    def _execute_waypoint_sequence(
+        self,
+        waypoints: list[Waypoint],
+        *,
+        stop_event: threading.Event,
+        selection_callback: Callable[[int, Waypoint], None] | None = None,
+    ) -> None:
+        for index, waypoint in enumerate(waypoints):
+            if stop_event.is_set():
+                break
+            target = self._clamp_target(np.array(waypoint.position, dtype=float))
+            duration_ms = int(max(0.1, waypoint.duration) * 1000)
+            desired_pitch = float(np.clip(waypoint.wrist_pitch, *self._wrist_pitch_limits))
+            self._set_wrist_pitch_target(desired_pitch, update_slider=False)
+            try:
+                joints = list(self.kin.inverse(target[[0, 1, 2]], desired_pitch))
+            except Exception:
+                _LOGGER.exception("Failed to solve IK for scheduled waypoint %d", index + 1)
+                continue
+            self._last_wrist_pitch = joints[1] + joints[2] + joints[3]
+            full_joints = joints + [self.wrist_rotation, self.gripper_angle]
+            full_joints = self._clamp_joint_list(full_joints)
+            self.target[:] = target
+            self._send_move_command(
+                full_joints,
+                move_time_ms=duration_ms,
+                soft_start=True,
+                replace=False,
+            )
+            self._command_queue.join()
+            if stop_event.is_set():
+                break
+            if selection_callback is not None:
+                try:
+                    selection_callback(index, waypoint)
+                except Exception:
+                    pass
+
+    def _handle_subroutine_press(self, event) -> bool:
+        if self._subroutine_list_ax is None or event.inaxes != self._subroutine_list_ax:
+            return False
+        if event.xdata is None or event.ydata is None:
+            return True
+        handled = False
+        for slug, patch in zip(self._subroutine_display_slugs, self._subroutine_patches):
+            contains, _ = patch.contains(event)
+            if contains:
+                self._selected_subroutine_slug = slug
+                self._highlight_selected_subroutine()
+                self._update_subroutine_name_box()
+                handled = True
+                break
+        if not handled:
+            self._selected_subroutine_slug = None
+            self._highlight_selected_subroutine()
+            self._update_subroutine_name_box()
+        return True
+
+    def _handle_timeline_press(self, event) -> bool:
+        if self._timeline_ax is None or event.inaxes != self._timeline_ax:
+            return False
+        if event.xdata is None or event.ydata is None:
+            return True
+        handled = False
+        for idx, patch in enumerate(self._timeline_patches):
+            contains, _ = patch.contains(event)
+            if contains:
+                self._timeline_drag = TimelineDragState(index=idx, offset=event.ydata)
+                self._selected_timeline_index = idx
+                self._timeline_reordered = False
+                if 0 <= idx < len(self._timeline_entries):
+                    self._selected_subroutine_slug = self._timeline_entries[idx].slug
+                self._highlight_selected_timeline()
+                self._highlight_selected_subroutine()
+                self._update_subroutine_name_box()
+                handled = True
+                break
+        if not handled:
+            self._timeline_drag = TimelineDragState()
+            self._selected_timeline_index = None
+            self._highlight_selected_timeline()
+        return True
 
     def _handle_waypoint_press(self, event) -> bool:
         waypoint_ax = getattr(self, "waypoint_ax", None)
@@ -1909,6 +2635,30 @@ class InteractiveArm:
             self._update_waypoint_duration_box()
         return True
 
+    def _handle_timeline_motion(self, event) -> bool:
+        if self._timeline_drag.index is None:
+            return False
+        if self._timeline_ax is None or event.inaxes != self._timeline_ax:
+            return True
+        if event.ydata is None or not self._timeline_entries:
+            return True
+        centers = [
+            patch.get_y() + self._timeline_item_height / 2 for patch in self._timeline_patches
+        ]
+        if not centers:
+            return True
+        distances = [abs(event.ydata - center) for center in centers]
+        new_index = int(min(range(len(distances)), key=distances.__getitem__))
+        old_index = self._timeline_drag.index
+        if new_index != old_index:
+            entry = self._timeline_entries.pop(old_index)
+            self._timeline_entries.insert(new_index, entry)
+            self._timeline_drag.index = new_index
+            self._selected_timeline_index = new_index
+            self._refresh_timeline_display()
+            self._timeline_reordered = True
+        return True
+
     def _handle_waypoint_motion(self, event) -> bool:
         if self._waypoint_drag.index is None:
             return False
@@ -1933,6 +2683,15 @@ class InteractiveArm:
             self._refresh_waypoint_display()
             self._update_waypoint_duration_box()
             self._waypoint_reordered = True
+        return True
+
+    def _handle_timeline_release(self, event) -> bool:
+        if self._timeline_drag.index is None:
+            return False
+        self._timeline_drag = TimelineDragState()
+        if self._timeline_reordered:
+            self._timeline_reordered = False
+            self._save_timeline()
         return True
 
     def _handle_waypoint_release(self, event) -> bool:
