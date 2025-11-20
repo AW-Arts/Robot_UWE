@@ -1185,7 +1185,32 @@ class InteractiveArm:
         )
         axes.append(title_ax)
 
-        top_edge = self._panel_content_top - 0.12
+        guide_height = 0.085
+        guide_ax = self._panel_axes(
+            self._panel_margin,
+            self._panel_content_top - 0.16,
+            1.0 - 2 * self._panel_margin,
+            guide_height,
+        )
+        guide_ax.axis("off")
+        guide_ax.text(
+            0.0,
+            1.0,
+            "Calibration helper:\n"
+            "1) Tap Calibrate to relax the motors.\n"
+            "2) Move each servo with +/- or the Pulse slider until the arm looks right.\n"
+            "3) Press Set vertical to store that upright pose.\n"
+            "Soft min°/Soft max° below are safety stops only—"
+            "they do not change the calibration.",
+            va="top",
+            ha="left",
+            fontsize=8,
+            wrap=True,
+            linespacing=1.4,
+        )
+        axes.append(guide_ax)
+
+        top_edge = self._panel_content_top - guide_height - 0.13
         bottom_edge = self._panel_margin + 0.12
         row_gap = 0.02
         available_height = max(
@@ -1270,8 +1295,8 @@ class InteractiveArm:
                 row_height * 0.5,
             )
 
-            min_box = TextBox(min_ax, "Min°", initial="0.0")
-            max_box = TextBox(max_ax, "Max°", initial="0.0")
+            min_box = TextBox(min_ax, "Soft min°", initial="0.0")
+            max_box = TextBox(max_ax, "Soft max°", initial="0.0")
             min_box.on_submit(self._make_limit_submit_callback(index, "min"))
             max_box.on_submit(self._make_limit_submit_callback(index, "max"))
 
@@ -2077,7 +2102,9 @@ class InteractiveArm:
                 value = float(text)
             except ValueError:
                 name, model, _ = self._SERVO_METADATA[index]
-                _LOGGER.warning("Ignoring invalid %s limit for %s (%s)", bound, name, model)
+                _LOGGER.warning(
+                    "Ignoring invalid soft %s limit for %s (%s)", bound, name, model
+                )
                 self._update_limit_box_display(index)
                 return
 
@@ -3336,6 +3363,7 @@ class InteractiveArm:
         min_angle: float | None = None,
         max_angle: float | None = None,
     ) -> None:
+        """Apply soft safety limits without altering the pulse calibration."""
         base_config = self._base_servo_configs.get(index)
         if base_config is None:
             return
