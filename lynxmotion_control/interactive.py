@@ -372,6 +372,7 @@ class InteractiveArm:
         self.servo_invert_buttons: list[Button] = []
         self.servo_limit_boxes_min: list[TextBox] = []
         self.servo_limit_boxes_max: list[TextBox] = []
+        self.servo_pulse_sliders: list[Slider] = []
         self._home_button: Button | None = None
         self._waypoint_duration_box: TextBox | None = None
         self._add_waypoint_button: Button | None = None
@@ -811,6 +812,7 @@ class InteractiveArm:
         menu_entries = [
             ("Movement", "movement"),
             ("Servos", "servos"),
+            ("Motor config", "motor_config"),
             ("Path", "waypoints"),
             ("Timeline", "timeline"),
         ]
@@ -844,9 +846,11 @@ class InteractiveArm:
         self.servo_invert_buttons = []
         self.servo_limit_boxes_min = []
         self.servo_limit_boxes_max = []
+        self.servo_pulse_sliders = []
 
         self._panel_widgets["movement"] = self._build_movement_panel()
         self._panel_widgets["servos"] = self._build_servo_panel()
+        self._panel_widgets["motor_config"] = self._build_motor_config_panel()
         self._panel_widgets["waypoints"] = self._build_waypoint_panel()
         self._panel_widgets["timeline"] = self._build_timeline_panel()
 
@@ -1042,13 +1046,12 @@ class InteractiveArm:
         row_height = available_height / max(len(self._SERVO_METADATA), 1)
 
         value_left = self._panel_margin
-        value_width = 0.48
-        gap_small = 0.014
-        invert_gap = 0.02
-        minus_width = 0.07
-        plus_width = 0.07
-        invert_width = 0.085
-        limit_width = 0.1
+        value_width = 0.52
+        gap_small = 0.02
+        invert_gap = 0.03
+        minus_width = 0.08
+        plus_width = 0.08
+        invert_width = 0.1
 
         for index, (name, model, location) in enumerate(self._SERVO_METADATA):
             row_bottom = bottom_edge + (
@@ -1080,9 +1083,6 @@ class InteractiveArm:
             minus_left = value_left + value_width + gap_small
             plus_left = minus_left + minus_width + gap_small
             invert_left = plus_left + plus_width + gap_small
-            min_left = invert_left + invert_width + invert_gap
-            max_left = min_left + limit_width + gap_small
-
             minus_ax = self._panel_axes(
                 minus_left,
                 row_bottom,
@@ -1101,42 +1101,22 @@ class InteractiveArm:
                 invert_width,
                 control_height,
             )
-            min_ax = self._panel_axes(
-                min_left,
-                row_bottom,
-                limit_width,
-                control_height,
-            )
-            max_ax = self._panel_axes(
-                max_left,
-                row_bottom,
-                limit_width,
-                control_height,
-            )
-
             minus_button = Button(minus_ax, "-", hovercolor="0.975")
             plus_button = Button(plus_ax, "+", hovercolor="0.975")
             invert_button = Button(invert_ax, "Inv", hovercolor="0.975")
-            min_box = TextBox(min_ax, "Min°", initial="0.0")
-            max_box = TextBox(max_ax, "Max°", initial="0.0")
 
             minus_button.on_clicked(self._make_servo_adjust_callback(index, -math.radians(5)))
             plus_button.on_clicked(self._make_servo_adjust_callback(index, math.radians(5)))
             invert_button.on_clicked(self._make_inversion_toggle_callback(index))
-            min_box.on_submit(self._make_limit_submit_callback(index, "min"))
-            max_box.on_submit(self._make_limit_submit_callback(index, "max"))
 
             self.servo_buttons.extend([minus_button, plus_button])
             self.servo_invert_buttons.append(invert_button)
-            self.servo_limit_boxes_min.append(min_box)
-            self.servo_limit_boxes_max.append(max_box)
             self._panel_interactive_widgets[panel_key].extend(
-                [minus_button, plus_button, invert_button, min_box, max_box]
+                [minus_button, plus_button, invert_button]
             )
             self._update_inversion_button_visual(index)
-            self._update_limit_box_display(index)
 
-            axes.extend([minus_ax, plus_ax, invert_ax, min_ax, max_ax])
+            axes.extend([minus_ax, plus_ax, invert_ax])
 
         control_bottom = self._panel_margin + 0.06
         control_height = 0.085
@@ -1180,6 +1160,127 @@ class InteractiveArm:
         self._update_raw_angle_button_visual()
 
         axes.extend([calibrate_ax, set_vertical_ax, raw_toggle_ax])
+
+        return axes
+
+    def _build_motor_config_panel(self) -> list:
+        panel_key = "motor_config"
+        axes: list = []
+
+        title_ax = self._panel_axes(
+            self._panel_margin,
+            self._panel_content_top - 0.08,
+            1.0 - 2 * self._panel_margin,
+            0.06,
+        )
+        title_ax.axis("off")
+        title_ax.text(
+            0.0,
+            0.5,
+            "Motor configuration",
+            va="center",
+            ha="left",
+            fontsize=10,
+            fontweight="bold",
+        )
+        axes.append(title_ax)
+
+        top_edge = self._panel_content_top - 0.12
+        bottom_edge = self._panel_margin + 0.12
+        row_gap = 0.02
+        available_height = max(
+            top_edge - bottom_edge - (len(self._SERVO_METADATA) - 1) * row_gap, 0.001
+        )
+        row_height = available_height / max(len(self._SERVO_METADATA), 1)
+
+        label_width = 0.32
+        slider_width = 0.38
+        limit_width = 0.1
+        gap_small = 0.012
+
+        for index, (name, model, location) in enumerate(self._SERVO_METADATA):
+            row_bottom = bottom_edge + (
+                len(self._SERVO_METADATA) - index - 1
+            ) * (row_height + row_gap)
+
+            label_ax = self._panel_axes(
+                self._panel_margin,
+                row_bottom + row_height * 0.45,
+                label_width,
+                row_height * 0.5,
+            )
+            label_ax.axis("off")
+            label_ax.text(
+                0.0,
+                0.5,
+                f"{name} ({model})\n{location}",
+                va="center",
+                ha="left",
+                fontsize=9,
+                linespacing=1.5,
+                wrap=True,
+                transform=label_ax.transAxes,
+            )
+            axes.append(label_ax)
+
+            slider_left = self._panel_margin + label_width + gap_small
+            slider_ax = self._panel_axes(
+                slider_left,
+                row_bottom + row_height * 0.05,
+                slider_width,
+                row_height * 0.55,
+            )
+
+            config = self.servo_configs.get(index)
+            current_source = self.feedback_joints or self.current_joints
+            current_angle = (
+                current_source[index]
+                if current_source and index < len(current_source)
+                else 0.0
+            )
+            current_pulse = (
+                config.angle_to_pulse(current_angle) if config is not None else 0.0
+            )
+            slider = Slider(
+                slider_ax,
+                "Pulse (µs)",
+                valmin=min(config.min_pulse, config.max_pulse) if config else 0.0,
+                valmax=max(config.min_pulse, config.max_pulse) if config else 0.0,
+                valinit=current_pulse,
+                valfmt="%0.0f µs",
+            )
+            slider.on_changed(self._make_pulse_slider_callback(index))
+            self.servo_pulse_sliders.append(slider)
+            self._panel_interactive_widgets[panel_key].append(slider)
+            axes.append(slider_ax)
+
+            min_left = slider_left + slider_width + gap_small
+            max_left = min_left + limit_width + gap_small
+
+            min_ax = self._panel_axes(
+                min_left,
+                row_bottom + row_height * 0.05,
+                limit_width,
+                row_height * 0.5,
+            )
+            max_ax = self._panel_axes(
+                max_left,
+                row_bottom + row_height * 0.05,
+                limit_width,
+                row_height * 0.5,
+            )
+
+            min_box = TextBox(min_ax, "Min°", initial="0.0")
+            max_box = TextBox(max_ax, "Max°", initial="0.0")
+            min_box.on_submit(self._make_limit_submit_callback(index, "min"))
+            max_box.on_submit(self._make_limit_submit_callback(index, "max"))
+
+            self.servo_limit_boxes_min.append(min_box)
+            self.servo_limit_boxes_max.append(max_box)
+            self._panel_interactive_widgets[panel_key].extend([min_box, max_box])
+            self._update_limit_box_display(index)
+
+            axes.extend([min_ax, max_ax])
 
         return axes
 
@@ -1988,6 +2089,15 @@ class InteractiveArm:
 
         return _callback
 
+    def _make_pulse_slider_callback(self, index: int):
+        def _callback(value: float) -> None:  # pragma: no cover - UI interaction
+            config = self.servo_configs.get(index)
+            if config is None:
+                return
+            self._set_servo_angle(index, config.pulse_to_angle(value))
+
+        return _callback
+
     def _nudge_target(self, dx: float, dy: float, dz: float) -> None:
         updated = self.target.copy()
         updated[0] += dx
@@ -1997,6 +2107,15 @@ class InteractiveArm:
         self.update_robot()
 
     def _adjust_servo(self, index: int, delta: float) -> None:
+        source = self.feedback_joints or self.current_joints
+        if not source:
+            return
+
+        updated = list(source)
+        new_angle = updated[index] + delta
+        self._set_servo_angle(index, new_angle)
+
+    def _set_servo_angle(self, index: int, angle: float) -> None:
         config = self.servo_configs.get(index)
         if config is None:
             return
@@ -2007,7 +2126,7 @@ class InteractiveArm:
 
         updated = list(source)
         old_angle = updated[index]
-        new_angle = config.clamp_angle(old_angle + delta)
+        new_angle = config.clamp_angle(angle)
         if math.isclose(new_angle, old_angle, abs_tol=1e-6):
             name, model, _ = self._SERVO_METADATA[index]
             _LOGGER.warning(
@@ -2078,6 +2197,7 @@ class InteractiveArm:
         else:
             self.servo_configs[index] = base_config
         self._update_limit_box_display(index)
+        self._update_pulse_slider_range(index)
 
     def _update_limit_box_display(self, index: int) -> None:
         if not hasattr(self, "servo_limit_boxes_min"):
@@ -2101,6 +2221,48 @@ class InteractiveArm:
             max_box.eventson = True
         except AttributeError:  # pragma: no cover - depends on Matplotlib
             pass
+
+    def _update_pulse_slider_display(self, index: int) -> None:
+        if not hasattr(self, "servo_pulse_sliders"):
+            return
+        if index >= len(self.servo_pulse_sliders):
+            return
+        slider = self.servo_pulse_sliders[index]
+        config = self.servo_configs.get(index)
+        if slider is None or config is None:
+            return
+        if not self.commanded_joints:
+            return
+        if index >= len(self.commanded_joints):
+            return
+        pulse = config.angle_to_pulse(self.commanded_joints[index])
+        low = min(slider.valmin, slider.valmax)
+        high = max(slider.valmin, slider.valmax)
+        try:
+            slider.eventson = False
+        except AttributeError:  # pragma: no cover - Matplotlib implementation detail
+            pass
+        try:
+            slider.set_val(float(np.clip(pulse, low, high)))
+        finally:
+            try:
+                slider.eventson = True
+            except AttributeError:  # pragma: no cover - Matplotlib implementation detail
+                pass
+
+    def _update_pulse_slider_range(self, index: int) -> None:
+        if not hasattr(self, "servo_pulse_sliders"):
+            return
+        if index >= len(self.servo_pulse_sliders):
+            return
+        slider = self.servo_pulse_sliders[index]
+        config = self.servo_configs.get(index)
+        if slider is None or config is None:
+            return
+        slider.valmin = min(config.min_pulse, config.max_pulse)
+        slider.valmax = max(config.min_pulse, config.max_pulse)
+        slider.ax.set_xlim(slider.valmin, slider.valmax)
+        self._update_pulse_slider_display(index)
 
     def _clamp_joint_list(
         self, joints: list[float] | tuple[float, ...]
@@ -3164,6 +3326,7 @@ class InteractiveArm:
                 f"{commanded_raw_suffix} | Actual: {actual_deg:.1f}°"
                 f"{actual_raw_suffix}{inversion_note}\n{limits_text}"
             )
+            self._update_pulse_slider_display(idx)
         self.figure.canvas.draw_idle()
 
     def _update_servo_limit(
