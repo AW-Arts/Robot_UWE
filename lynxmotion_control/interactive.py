@@ -15,7 +15,7 @@ from pathlib import Path
 import matplotlib
 import numpy as np
 from matplotlib.lines import Line2D
-from matplotlib.patches import Rectangle
+from matplotlib.patches import Rectangle, Wedge
 from matplotlib.widgets import Button, Slider, TextBox
 from mpl_toolkits.mplot3d import proj3d
 
@@ -378,6 +378,8 @@ class InteractiveArm:
             va="top",
             bbox=dict(facecolor="#eef6ff", edgecolor="#aac8ff", alpha=0.9),
         )
+        self._calibration_arc: Wedge | None = None
+        self._calibration_arc_text = None
 
         # UI placeholders populated when using the Matplotlib-based controls.
         self.buttons: dict[str, Button] = {}
@@ -3193,7 +3195,7 @@ class InteractiveArm:
         return True
 
     def _enter_calibration_mode(self) -> None:
-        if self._calibration_active:
+        if self._calibration_active and not self._calibration_guide_active:
             return
         self._calibration_active = True
         relax = getattr(self.controller, "relax_servos", None)
@@ -3352,11 +3354,64 @@ class InteractiveArm:
             self._calibration_progress_text.set_text(progress)
         self.figure.canvas.draw_idle()
 
+    def _clear_calibration_arc_display(self) -> None:
+        if self._calibration_arc is not None:
+            self._calibration_arc.set_visible(False)
+        if self._calibration_arc_text is not None:
+            self._calibration_arc_text.set_visible(False)
+
+    def _update_calibration_arc_display(
+        self, servo_index: int, target_angle: float
+    ) -> None:
+        zero_angle = self.zero_reference.get(
+            servo_index,
+            _DEFAULT_VERTICAL_JOINTS[servo_index]
+            if servo_index < len(_DEFAULT_VERTICAL_JOINTS)
+            else 0.0,
+        )
+        relative_deg = math.degrees(target_angle - zero_angle)
+        theta_start = 90.0
+        theta_end = theta_start + relative_deg
+
+        if self._calibration_arc is None:
+            self._calibration_arc = Wedge(
+                (0.85, 0.18),
+                0.08,
+                theta_start,
+                theta_end,
+                width=0.03,
+                facecolor="#dfe8ff",
+                edgecolor="#6c8cd5",
+                alpha=0.75,
+                transform=self.ax.transAxes,
+            )
+            self.ax.add_patch(self._calibration_arc)
+        else:
+            self._calibration_arc.set_theta1(theta_start)
+            self._calibration_arc.set_theta2(theta_end)
+            self._calibration_arc.set_visible(True)
+
+        if self._calibration_arc_text is None:
+            self._calibration_arc_text = self.ax.text(
+                0.85,
+                0.18,
+                "",
+                ha="center",
+                va="center",
+                fontsize=8,
+                transform=self.ax.transAxes,
+                bbox=dict(facecolor="white", edgecolor="#aac8ff", alpha=0.8),
+            )
+
+        self._calibration_arc_text.set_text(f"{relative_deg:+.1f}°")
+        self._calibration_arc_text.set_visible(True)
+
     def _update_calibration_overlay(self) -> None:
         if self._calibration_overlay is None:
             return
         if not self._calibration_guide_active or self._calibration_step_index is None:
             self._calibration_overlay.set_text("")
+            self._clear_calibration_arc_display()
             self.figure.canvas.draw_idle()
             return
 
@@ -3378,6 +3433,7 @@ class InteractiveArm:
         if actual_angle is not None:
             overlay_lines.append(f"Current {math.degrees(actual_angle):.1f}°")
         self._calibration_overlay.set_text("\n".join(overlay_lines))
+        self._update_calibration_arc_display(servo_index, target_angle)
         self.figure.canvas.draw_idle()
 
     def _nudge_current_calibration_step(self, delta: float) -> None:
@@ -3891,7 +3947,7 @@ class InteractiveArm:
         self._update_visuals(self.current_joints)
         self._update_servo_readouts()
 
-        if self._calibration_active:
+        if self._calibration_active and not self._calibration_guide_active:
             return
 
         if self._skip_next_command:
