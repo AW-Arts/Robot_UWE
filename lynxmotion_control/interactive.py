@@ -329,6 +329,16 @@ class InteractiveArm:
             alpha=0.7,
             label="Arm (setpoint)",
         )
+        self._zero_reference_lines: list[Line2D] = []
+        for _ in range(4):
+            (line,) = self.ax.plot(
+                [], [], [],
+                color="#6c757d",
+                linestyle=":",
+                lw=1.6,
+                alpha=0.9,
+            )
+            self._zero_reference_lines.append(line)
         self._gizmo_vectors = {
             "x": np.array([1.0, 0.0, 0.0]),
             "y": np.array([0.0, 1.0, 0.0]),
@@ -3659,12 +3669,69 @@ class InteractiveArm:
         ]
         return xs, ys, zs
 
+    def _zero_pose_joints(self) -> list[float]:
+        zeros: list[float] = []
+        for idx in range(4):
+            zeros.append(
+                self.zero_reference.get(
+                    idx,
+                    _DEFAULT_VERTICAL_JOINTS[idx]
+                    if idx < len(_DEFAULT_VERTICAL_JOINTS)
+                    else 0.0,
+                )
+            )
+        return zeros
+
+    def _update_zero_reference_lines(self) -> None:
+        if len(self._zero_reference_lines) < 4:
+            return
+
+        zero_joints = self._zero_pose_joints()
+        try:
+            zx, zy, zz = self._compute_link_positions(zero_joints)
+        except Exception:
+            for line in self._zero_reference_lines:
+                line.set_data([], [])
+                line.set_3d_properties([])
+            return
+
+        base_zero = zero_joints[0]
+        base_dir = np.array([math.cos(base_zero), math.sin(base_zero), 0.0])
+        base_start = np.array([0.0, 0.0, zz[1]])
+        base_length = max(self.kin.links.shoulder * 0.35, 0.04)
+        base_end = base_start + base_dir * base_length
+        self._zero_reference_lines[0].set_data(
+            [base_start[0], base_end[0]], [base_start[1], base_end[1]]
+        )
+        self._zero_reference_lines[0].set_3d_properties([base_start[2], base_end[2]])
+
+        joint_points = [
+            np.array([zx[1], zy[1], zz[1]]),
+            np.array([zx[2], zy[2], zz[2]]),
+            np.array([zx[3], zy[3], zz[3]]),
+        ]
+        next_points = [
+            np.array([zx[2], zy[2], zz[2]]),
+            np.array([zx[3], zy[3], zz[3]]),
+            np.array([zx[4], zy[4], zz[4]]),
+        ]
+        for line, start, end in zip(
+            self._zero_reference_lines[1:], joint_points, next_points
+        ):
+            direction = end - start
+            shortened = start + direction * 0.35
+            line.set_data([start[0], shortened[0]], [start[1], shortened[1]])
+            line.set_3d_properties([start[2], shortened[2]])
+
     def _update_visuals(self, joints: list[float]) -> None:
         if len(joints) < 4:
             self.base_line.set_data([], [])
             self.base_line.set_3d_properties([])
             self.setpoint_line.set_data([], [])
             self.setpoint_line.set_3d_properties([])
+            for line in self._zero_reference_lines:
+                line.set_data([], [])
+                line.set_3d_properties([])
             return
 
         xs, ys, zs = self._compute_link_positions(joints)
@@ -3711,6 +3778,7 @@ class InteractiveArm:
             f"\nWrist pitch: {self._slider_value_from_pitch(self.wrist_pitch):.1f}°"
         )
         self.text.set_text(target_text)
+        self._update_zero_reference_lines()
 
     def _update_servo_readouts(self) -> None:
         if not self.servo_value_texts:
