@@ -364,6 +364,20 @@ class InteractiveArm:
         self._calibration_button: Button | None = None
         self._set_vertical_button: Button | None = None
         self._calibration_timer = None
+        self._calibration_guide_active = False
+        self._calibration_steps: list[tuple[int, str]] = []
+        self._calibration_step_index: int | None = None
+        self._calibration_status_text = None
+        self._calibration_progress_text = None
+        self._calibration_overlay = self.ax.text2D(
+            0.98,
+            0.95,
+            "",
+            transform=self.ax.transAxes,
+            ha="right",
+            va="top",
+            bbox=dict(facecolor="#eef6ff", edgecolor="#aac8ff", alpha=0.9),
+        )
 
         # UI placeholders populated when using the Matplotlib-based controls.
         self.buttons: dict[str, Button] = {}
@@ -550,8 +564,9 @@ class InteractiveArm:
     def update_robot(self) -> None:
         requested = self._clamp_target(self.target)
         self.target[:] = requested
-        joints = self.kin.inverse(requested[[0, 1, 2]], self.wrist_pitch)
-        joints = self._clamp_joint_list(list(joints))
+        joints = self._apply_soft_limits_to_ik(
+            list(self.kin.inverse(requested[[0, 1, 2]], self.wrist_pitch))
+        )
         self._last_wrist_pitch = joints[1] + joints[2] + joints[3]
         try:
             pose = self.kin.forward(joints)
@@ -813,6 +828,7 @@ class InteractiveArm:
             ("Movement", "movement"),
             ("Servos", "servos"),
             ("Motor config", "motor_config"),
+            ("Calibration tour", "calibration_tour"),
             ("Path", "waypoints"),
             ("Timeline", "timeline"),
         ]
@@ -851,6 +867,9 @@ class InteractiveArm:
         self._panel_widgets["movement"] = self._build_movement_panel()
         self._panel_widgets["servos"] = self._build_servo_panel()
         self._panel_widgets["motor_config"] = self._build_motor_config_panel()
+        self._panel_widgets["calibration_tour"] = (
+            self._build_calibration_tour_panel()
+        )
         self._panel_widgets["waypoints"] = self._build_waypoint_panel()
         self._panel_widgets["timeline"] = self._build_timeline_panel()
 
@@ -1160,6 +1179,147 @@ class InteractiveArm:
         self._update_raw_angle_button_visual()
 
         axes.extend([calibrate_ax, set_vertical_ax, raw_toggle_ax])
+
+        return axes
+
+    def _build_calibration_tour_panel(self) -> list:
+        panel_key = "calibration_tour"
+        axes: list = []
+
+        title_ax = self._panel_axes(
+            self._panel_margin,
+            self._panel_content_top - 0.08,
+            1.0 - 2 * self._panel_margin,
+            0.06,
+        )
+        title_ax.axis("off")
+        title_ax.text(
+            0.0,
+            0.5,
+            "Guided calibration",
+            va="center",
+            ha="left",
+            fontsize=10,
+            fontweight="bold",
+        )
+        axes.append(title_ax)
+
+        guide_height = 0.18
+        guide_ax = self._panel_axes(
+            self._panel_margin,
+            self._panel_content_top - 0.22,
+            1.0 - 2 * self._panel_margin,
+            guide_height,
+        )
+        guide_ax.axis("off")
+        guide_ax.text(
+            0.0,
+            1.0,
+            "Use the tour to step through each motor. The app will move to the\n"
+            "center, soft min, and soft max for every servo, showing the angle\n"
+            "on the IK diagram. Confirm each stage before continuing; if the\n"
+            "diagram does not match, nudge the joint until it does.",
+            va="top",
+            ha="left",
+            fontsize=8,
+            wrap=True,
+            linespacing=1.4,
+        )
+        axes.append(guide_ax)
+
+        status_height = 0.22
+        status_ax = self._panel_axes(
+            self._panel_margin,
+            self._panel_content_top - 0.22 - status_height - 0.02,
+            1.0 - 2 * self._panel_margin,
+            status_height,
+        )
+        status_ax.axis("off")
+        self._calibration_status_text = status_ax.text(
+            0.0,
+            0.75,
+            "Start the tour to begin motor-by-motor guidance.",
+            va="top",
+            ha="left",
+            fontsize=9,
+            wrap=True,
+            linespacing=1.5,
+        )
+        self._calibration_progress_text = status_ax.text(
+            0.0,
+            0.2,
+            "",
+            va="bottom",
+            ha="left",
+            fontsize=9,
+            color="#444444",
+        )
+        axes.append(status_ax)
+
+        button_height = 0.09
+        button_gap = 0.025
+        button_width = (
+            1.0 - 2 * self._panel_margin - 2 * button_gap
+        ) / 3
+        button_bottom = self._panel_margin + 0.18
+
+        start_ax = self._panel_axes(
+            self._panel_margin,
+            button_bottom,
+            button_width,
+            button_height,
+        )
+        confirm_ax = self._panel_axes(
+            self._panel_margin + button_width + button_gap,
+            button_bottom,
+            button_width,
+            button_height,
+        )
+        restart_ax = self._panel_axes(
+            self._panel_margin + 2 * (button_width + button_gap),
+            button_bottom,
+            button_width,
+            button_height,
+        )
+
+        start_button = Button(start_ax, "Start tour", hovercolor="0.95")
+        start_button.on_clicked(self._start_calibration_tour)
+        confirm_button = Button(confirm_ax, "Confirm step", hovercolor="0.95")
+        confirm_button.on_clicked(self._confirm_calibration_step)
+        restart_button = Button(restart_ax, "Restart", hovercolor="0.95")
+        restart_button.on_clicked(self._restart_calibration_tour)
+
+        self._panel_interactive_widgets[panel_key].extend(
+            [start_button, confirm_button, restart_button]
+        )
+        axes.extend([start_ax, confirm_ax, restart_ax])
+
+        nudge_height = 0.085
+        nudge_gap = 0.03
+        nudge_width = (
+            1.0 - 2 * self._panel_margin - nudge_gap
+        ) / 2
+        nudge_bottom = self._panel_margin + 0.04
+
+        nudge_minus_ax = self._panel_axes(
+            self._panel_margin,
+            nudge_bottom,
+            nudge_width,
+            nudge_height,
+        )
+        nudge_plus_ax = self._panel_axes(
+            self._panel_margin + nudge_width + nudge_gap,
+            nudge_bottom,
+            nudge_width,
+            nudge_height,
+        )
+
+        nudge_minus = Button(nudge_minus_ax, "Nudge -1°", hovercolor="0.95")
+        nudge_minus.on_clicked(self._make_calibration_nudge_callback(-1.0))
+        nudge_plus = Button(nudge_plus_ax, "Nudge +1°", hovercolor="0.95")
+        nudge_plus.on_clicked(self._make_calibration_nudge_callback(1.0))
+        self._panel_interactive_widgets[panel_key].extend([nudge_minus, nudge_plus])
+        axes.extend([nudge_minus_ax, nudge_plus_ax])
 
         return axes
 
@@ -2125,6 +2285,12 @@ class InteractiveArm:
 
         return _callback
 
+    def _make_calibration_nudge_callback(self, delta_degrees: float):
+        def _callback(_event=None) -> None:  # pragma: no cover - UI interaction
+            self._nudge_current_calibration_step(math.radians(delta_degrees))
+
+        return _callback
+
     def _nudge_target(self, dx: float, dy: float, dz: float) -> None:
         updated = self.target.copy()
         updated[0] += dx
@@ -2290,6 +2456,23 @@ class InteractiveArm:
         slider.valmax = max(config.min_pulse, config.max_pulse)
         slider.ax.set_xlim(slider.valmin, slider.valmax)
         self._update_pulse_slider_display(index)
+
+    def _apply_soft_limits_to_ik(self, joints: list[float]) -> list[float]:
+        clamped = self._clamp_joint_list(joints)
+        if len(clamped) != len(joints):
+            return clamped
+        for idx, (original, limited) in enumerate(zip(joints, clamped)):
+            if not math.isclose(original, limited, rel_tol=0.0, abs_tol=1e-6):
+                name, model, _ = self._SERVO_METADATA[idx]
+                _LOGGER.info(
+                    "%s (%s) IK solution clipped to soft limits (%.1f° → %.1f°)",
+                    name,
+                    model,
+                    math.degrees(original),
+                    math.degrees(limited),
+                )
+                break
+        return clamped
 
     def _clamp_joint_list(
         self, joints: list[float] | tuple[float, ...]
@@ -2845,7 +3028,9 @@ class InteractiveArm:
             desired_pitch = float(np.clip(waypoint.wrist_pitch, *self._wrist_pitch_limits))
             self._set_wrist_pitch_target(desired_pitch, update_slider=False)
             try:
-                joints = list(self.kin.inverse(target[[0, 1, 2]], desired_pitch))
+                joints = self._apply_soft_limits_to_ik(
+                    list(self.kin.inverse(target[[0, 1, 2]], desired_pitch))
+                )
             except Exception:
                 _LOGGER.exception("Failed to solve IK for scheduled waypoint %d", index + 1)
                 continue
@@ -3045,6 +3230,166 @@ class InteractiveArm:
             return
         self._calibration_active = False
         self._update_calibration_button_visual()
+
+    def _generate_calibration_steps(self) -> list[tuple[int, str]]:
+        steps: list[tuple[int, str]] = []
+        for idx in range(len(self._SERVO_METADATA)):
+            steps.extend([(idx, "center"), (idx, "min"), (idx, "max")])
+        return steps
+
+    def _target_angle_for_phase(self, index: int, phase: str) -> float:
+        config = self.servo_configs.get(index)
+        if phase == "center":
+            if index in self.zero_reference:
+                return self.zero_reference[index]
+            if config is not None:
+                return config.min_angle + (config.max_angle - config.min_angle) / 2.0
+            return 0.0
+        if config is None:
+            return 0.0
+        if phase == "min":
+            return config.min_angle
+        return config.max_angle
+
+    def _start_calibration_tour(self, _event=None) -> None:  # pragma: no cover - UI interaction
+        self._calibration_steps = self._generate_calibration_steps()
+        self._calibration_guide_active = True
+        self._calibration_step_index = None
+        self._enter_calibration_mode()
+        self._advance_calibration_step(force_index=0)
+
+    def _restart_calibration_tour(self, _event=None) -> None:  # pragma: no cover - UI interaction
+        self._start_calibration_tour()
+
+    def _confirm_calibration_step(self, _event=None) -> None:  # pragma: no cover - UI interaction
+        if not self._calibration_guide_active:
+            self._start_calibration_tour()
+            return
+        self._advance_calibration_step()
+
+    def _advance_calibration_step(self, *, force_index: int | None = None) -> None:
+        if not self._calibration_steps:
+            self._calibration_steps = self._generate_calibration_steps()
+        if force_index is None:
+            next_index = 0 if self._calibration_step_index is None else self._calibration_step_index + 1
+        else:
+            next_index = force_index
+
+        if next_index >= len(self._calibration_steps):
+            self._calibration_guide_active = False
+            self._calibration_step_index = None
+            self._update_calibration_status("Guided calibration complete.")
+            self._update_calibration_overlay()
+            self._exit_calibration_mode()
+            return
+
+        self._calibration_step_index = next_index
+        servo_index, phase = self._calibration_steps[next_index]
+        target_angle = self._target_angle_for_phase(servo_index, phase)
+        self._move_servo_for_calibration(servo_index, target_angle)
+        self._update_calibration_status()
+        self._update_calibration_overlay()
+
+    def _move_servo_for_calibration(self, index: int, target_angle: float) -> None:
+        source = self.feedback_joints or self.current_joints
+        if not source:
+            source = self._default_joint_configuration()
+        joints = list(source)
+        while len(joints) < len(self._SERVO_METADATA):
+            joints.append(0.0)
+
+        joints[index] = target_angle
+        joints = self._clamp_joint_list(joints)
+        self.commanded_joints = list(joints)
+        self.current_joints = list(joints)
+
+        if len(joints) >= 4:
+            try:
+                pose = self.kin.forward(self.commanded_joints)
+            except Exception:
+                pose = None
+            if pose is not None:
+                self.target[:3] = pose[:3, 3]
+                actual_pitch = (
+                    self.commanded_joints[1]
+                    + self.commanded_joints[2]
+                    + self.commanded_joints[3]
+                )
+                self._last_wrist_pitch = actual_pitch
+                self._set_wrist_pitch_target(actual_pitch)
+                self._update_visuals(self.commanded_joints[:4])
+
+        self._update_servo_readouts()
+        self._cancel_pending_commands()
+        self._send_move_command(
+            self.commanded_joints, move_time_ms=self.move_time_ms, soft_start=False
+        )
+
+    def _update_calibration_status(self, message: str | None = None) -> None:
+        if self._calibration_status_text is None:
+            return
+
+        if message is None and self._calibration_step_index is not None:
+            servo_index, phase = self._calibration_steps[self._calibration_step_index]
+            name, model, _ = self._SERVO_METADATA[servo_index]
+            target_angle = self._target_angle_for_phase(servo_index, phase)
+            message = (
+                f"{name} ({model}) — {phase.capitalize()}\n"
+                f"Target: {math.degrees(target_angle):.1f}°"
+            )
+        elif message is None:
+            message = "Start the tour to begin motor-by-motor guidance."
+
+        self._calibration_status_text.set_text(message)
+
+        if self._calibration_progress_text is not None:
+            if self._calibration_step_index is None:
+                progress = ""
+            else:
+                progress = (
+                    f"Step {self._calibration_step_index + 1} of {len(self._calibration_steps)}"
+                )
+            self._calibration_progress_text.set_text(progress)
+        self.figure.canvas.draw_idle()
+
+    def _update_calibration_overlay(self) -> None:
+        if self._calibration_overlay is None:
+            return
+        if not self._calibration_guide_active or self._calibration_step_index is None:
+            self._calibration_overlay.set_text("")
+            self.figure.canvas.draw_idle()
+            return
+
+        servo_index, phase = self._calibration_steps[self._calibration_step_index]
+        name, model, _ = self._SERVO_METADATA[servo_index]
+        target_angle = self._target_angle_for_phase(servo_index, phase)
+        actual_angle = None
+        source = self.feedback_joints or self.current_joints
+        if source and servo_index < len(source):
+            actual_angle = source[servo_index]
+        phase_label = {
+            "center": "Center", "min": "Soft min", "max": "Soft max"
+        }.get(phase, phase.capitalize())
+        overlay_lines = [
+            f"Calibration tour: {phase_label}",
+            f"{name} ({model})",
+            f"Target {math.degrees(target_angle):.1f}°",
+        ]
+        if actual_angle is not None:
+            overlay_lines.append(f"Current {math.degrees(actual_angle):.1f}°")
+        self._calibration_overlay.set_text("\n".join(overlay_lines))
+        self.figure.canvas.draw_idle()
+
+    def _nudge_current_calibration_step(self, delta: float) -> None:
+        if not self._calibration_guide_active or self._calibration_step_index is None:
+            return
+        source = self.feedback_joints or self.current_joints
+        if not source:
+            return
+        servo_index, _ = self._calibration_steps[self._calibration_step_index]
+        self._adjust_servo(servo_index, delta)
+        self._update_calibration_status()
+        self._update_calibration_overlay()
     def _handle_set_vertical(self, _event=None) -> None:  # pragma: no cover - UI interaction
         if not self._calibration_active:
             return
@@ -3355,6 +3700,7 @@ class InteractiveArm:
             )
             self._update_pulse_slider_display(idx)
         self.figure.canvas.draw_idle()
+        self._update_calibration_overlay()
 
     def _update_servo_limit(
         self,
