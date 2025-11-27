@@ -3687,6 +3687,12 @@ class InteractiveArm:
             return
 
         zero_joints = self._zero_pose_joints()
+        anchor_joints: Sequence[float] | None = None
+        if self.commanded_joints and len(self.commanded_joints) >= 4:
+            anchor_joints = self.commanded_joints
+        elif self.current_joints and len(self.current_joints) >= 4:
+            anchor_joints = self.current_joints
+
         try:
             zx, zy, zz = self._compute_link_positions(zero_joints)
         except Exception:
@@ -3695,9 +3701,25 @@ class InteractiveArm:
                 line.set_3d_properties([])
             return
 
+        anchor_points: list[np.ndarray] | None = None
+        anchor_base_height = zz[1]
+        if anchor_joints is not None:
+            try:
+                ax, ay, az = self._compute_link_positions(anchor_joints)
+            except Exception:
+                pass
+            else:
+                anchor_points = [
+                    np.array([ax[1], ay[1], az[1]]),
+                    np.array([ax[2], ay[2], az[2]]),
+                    np.array([ax[3], ay[3], az[3]]),
+                ]
+                anchor_base_height = az[1]
+
         base_zero = zero_joints[0]
         base_dir = np.array([math.cos(base_zero), math.sin(base_zero), 0.0])
         base_start = np.array([0.0, 0.0, zz[1]])
+        base_start[2] = anchor_base_height
         base_length = max(self.kin.links.shoulder * 0.35, 0.04)
         base_end = base_start + base_dir * base_length
         self._zero_reference_lines[0].set_data(
@@ -3715,8 +3737,11 @@ class InteractiveArm:
             np.array([zx[3], zy[3], zz[3]]),
             np.array([zx[4], zy[4], zz[4]]),
         ]
+        if anchor_points is None:
+            anchor_points = joint_points
+
         for line, start, end in zip(
-            self._zero_reference_lines[1:], joint_points, next_points
+            self._zero_reference_lines[1:], anchor_points, next_points
         ):
             direction = end - start
             shortened = start + direction * 0.35

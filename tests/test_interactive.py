@@ -202,6 +202,29 @@ def test_set_vertical_preserves_asymmetric_base_limits(
         max_raw = arm._apply_offsets([base_config.max_angle], direction="raw")[0]
         assert max_raw >= base_config.max_angle
 
+
+def test_zero_reference_lines_follow_current_pose(monkeypatch, interactive_module) -> None:
+    controller = _BasicController()
+    with _prepare_arm(monkeypatch, interactive_module, controller) as arm:
+        commanded = [
+            math.radians(30.0),
+            math.radians(20.0),
+            math.radians(-15.0),
+            math.radians(10.0),
+            0.0,
+            0.0,
+        ]
+        arm.commanded_joints = list(commanded)
+        arm._update_zero_reference_lines()
+
+        x_data, y_data, z_data = arm._zero_reference_lines[1].get_data_3d()
+        ax, ay, az = arm._compute_link_positions(commanded)
+
+        assert math.isclose(x_data[0], ax[1], rel_tol=0.0, abs_tol=1e-6)
+        assert math.isclose(y_data[0], ay[1], rel_tol=0.0, abs_tol=1e-6)
+        assert math.isclose(z_data[0], az[1], rel_tol=0.0, abs_tol=1e-6)
+
+
 def test_servo_limits_loaded_and_persisted(
     monkeypatch, interactive_module, tmp_path
 ) -> None:
