@@ -3373,26 +3373,24 @@ class InteractiveArm:
         theta_start = 90.0
         theta_end = theta_start + relative_deg
 
-        if self._calibration_arc is None:
-            self._calibration_arc = Wedge(
-                (0.85, 0.18),
-                0.08,
-                theta_start,
-                theta_end,
-                width=0.03,
-                facecolor="#dfe8ff",
-                edgecolor="#6c8cd5",
-                alpha=0.75,
-                transform=self.ax.transAxes,
-            )
-            self.ax.add_patch(self._calibration_arc)
-        else:
-            self._calibration_arc.set_theta1(theta_start)
-            self._calibration_arc.set_theta2(theta_end)
-            self._calibration_arc.set_visible(True)
+        # Matplotlib's 3D axes do not support 2D patch projection out of the
+        # box. Adding a Wedge triggered an AttributeError for
+        # ``do_3d_projection`` during draw, which cleared the figure when the
+        # calibration tour began. Keep the text indicator but skip the patch to
+        # avoid backend crashes.
+        if self._calibration_arc is not None:
+            try:
+                self._calibration_arc.remove()
+            except Exception:
+                pass
+            self._calibration_arc = None
 
         if self._calibration_arc_text is None:
-            self._calibration_arc_text = self.ax.text(
+            # Use text2D instead of text so we do not need to supply a Z value
+            # when annotating on a 3D axis. A missing Z argument caused a
+            # TypeError as soon as the calibration tour started, blanking the
+            # UI with an uncaught exception from the Matplotlib callback.
+            self._calibration_arc_text = self.ax.text2D(
                 0.85,
                 0.18,
                 "",
