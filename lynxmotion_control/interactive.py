@@ -176,10 +176,6 @@ class InteractiveArm:
         self.step_z = step_z
         self._base_servo_configs = deepcopy(DEFAULT_SERVO_CONFIGS)
         self.servo_configs: dict[int, ServoConfig] = dict(self._base_servo_configs)
-        self._soft_servo_limits: dict[int, tuple[float, float]] = {
-            idx: (config.min_angle, config.max_angle)
-            for idx, config in self._base_servo_configs.items()
-        }
         self.servo_inversions: list[bool] = [False] * len(self._SERVO_METADATA)
         self._invert_button_inactive_color = "0.85"
         self._invert_button_active_color = "#90ee90"
@@ -377,7 +373,6 @@ class InteractiveArm:
         self.servo_limit_boxes_min: list[TextBox] = []
         self.servo_limit_boxes_max: list[TextBox] = []
         self.servo_pulse_sliders: list[Slider] = []
-        self._pulse_slider_limit_lines: dict[int, dict[str, Line2D]] = {}
         self._home_button: Button | None = None
         self._waypoint_duration_box: TextBox | None = None
         self._add_waypoint_button: Button | None = None
@@ -1309,7 +1304,6 @@ class InteractiveArm:
             self.servo_limit_boxes_max.append(max_box)
             self._panel_interactive_widgets[panel_key].extend([min_box, max_box])
             self._update_limit_box_display(index)
-            self._refresh_pulse_slider_limits(index)
 
             axes.extend([min_ax, max_ax])
 
@@ -2127,9 +2121,7 @@ class InteractiveArm:
             config = self.servo_configs.get(index)
             if config is None:
                 return
-            self._set_servo_angle(
-                index, config.pulse_to_angle(value), use_soft_limits=False
-            )
+            self._set_servo_angle(index, config.pulse_to_angle(value))
 
         return _callback
 
@@ -2150,9 +2142,7 @@ class InteractiveArm:
         new_angle = updated[index] + delta
         self._set_servo_angle(index, new_angle)
 
-    def _set_servo_angle(
-        self, index: int, angle: float, *, use_soft_limits: bool = True
-    ) -> None:
+    def _set_servo_angle(self, index: int, angle: float) -> None:
         config = self.servo_configs.get(index)
         if config is None:
             return
@@ -2161,18 +2151,17 @@ class InteractiveArm:
         if not source:
             return
 
-        limits = self._active_angle_limits(index, use_soft_limits=use_soft_limits)
         updated = list(source)
         old_angle = updated[index]
-        new_angle = float(np.clip(angle, *limits))
+        new_angle = config.clamp_angle(angle)
         if math.isclose(new_angle, old_angle, abs_tol=1e-6):
             name, model, _ = self._SERVO_METADATA[index]
             _LOGGER.warning(
                 "%s (%s) servo adjustment hit the configured limit (%.1f° to %.1f°).",
                 name,
                 model,
-                math.degrees(limits[0]),
-                math.degrees(limits[1]),
+                math.degrees(config.min_angle),
+                math.degrees(config.max_angle),
             )
         updated[index] = new_angle
 
@@ -2236,7 +2225,6 @@ class InteractiveArm:
             self.servo_configs[index] = base_config
         self._update_limit_box_display(index)
         self._update_pulse_slider_range(index)
-        self._refresh_pulse_slider_limits(index)
 
     def _update_limit_box_display(self, index: int) -> None:
         if not hasattr(self, "servo_limit_boxes_min"):
@@ -2253,11 +2241,8 @@ class InteractiveArm:
             max_box.eventson = False
         except AttributeError:  # pragma: no cover - depends on Matplotlib
             pass
-        soft_limits = self._soft_servo_limits.get(
-            index, (base_config.min_angle, base_config.max_angle)
-        )
-        min_box.set_val(f"{math.degrees(soft_limits[0]):.1f}")
-        max_box.set_val(f"{math.degrees(soft_limits[1]):.1f}")
+        min_box.set_val(f"{math.degrees(base_config.min_angle):.1f}")
+        max_box.set_val(f"{math.degrees(base_config.max_angle):.1f}")
         try:
             min_box.eventson = True
             max_box.eventson = True
@@ -2305,109 +2290,15 @@ class InteractiveArm:
         slider.valmax = max(config.min_pulse, config.max_pulse)
         slider.ax.set_xlim(slider.valmin, slider.valmax)
         self._update_pulse_slider_display(index)
-        self._refresh_pulse_slider_limits(index)
-
-    def _refresh_pulse_slider_limits(self, index: int) -> None:
-        if not hasattr(self, "servo_pulse_sliders"):
-            return
-        if index >= len(self.servo_pulse_sliders):
-            return
-        slider = self.servo_pulse_sliders[index]
-        config = self.servo_configs.get(index)
-        if slider is None or config is None:
-            return
-
-        lines = self._pulse_slider_limit_lines.setdefault(index, {})
-
-        def _get_line(key: str, **line_kwargs) -> Line2D:
-            line = lines.get(key)
-            if line is None:
-                line = slider.ax.axvline(**line_kwargs)
-                lines[key] = line
-            else:
-                for attr, value in line_kwargs.items():
-                    setter = getattr(line, f"set_{attr}", None)
-                    if callable(setter):
-                        setter(value)
-            line.set_visible(True)
-            return line
-
-        motor_min = config.min_pulse
-        motor_max = config.max_pulse
-        _get_line(
-            "motor_min",
-            x=motor_min,
-            color="#8d99ae",
-            linestyle="-",
-            linewidth=1.2,
-            alpha=0.8,
-        )
-        _get_line(
-            "motor_max",
-            x=motor_max,
-            color="#8d99ae",
-            linestyle="-",
-            linewidth=1.2,
-            alpha=0.8,
-        )
-
-        soft_limits = self._soft_servo_limits.get(index)
-        if soft_limits is None:
-            return
-
-        try:
-            soft_min_pulse = config.angle_to_pulse(soft_limits[0])
-            soft_max_pulse = config.angle_to_pulse(soft_limits[1])
-        except ValueError:
-            return
-
-        _get_line(
-            "soft_min",
-            x=soft_min_pulse,
-            color="#ef476f",
-            linestyle="--",
-            linewidth=1.1,
-            alpha=0.9,
-        )
-        _get_line(
-            "soft_max",
-            x=soft_max_pulse,
-            color="#ef476f",
-            linestyle="--",
-            linewidth=1.1,
-            alpha=0.9,
-        )
-
-    def _active_angle_limits(
-        self, index: int, *, use_soft_limits: bool = True
-    ) -> tuple[float, float]:
-        config = self.servo_configs.get(index)
-        if config is None:
-            return (-math.inf, math.inf)
-
-        min_angle = config.min_angle
-        max_angle = config.max_angle
-
-        if use_soft_limits:
-            soft_limits = self._soft_servo_limits.get(index)
-            if soft_limits is not None:
-                min_angle = max(min_angle, soft_limits[0])
-                max_angle = min(max_angle, soft_limits[1])
-                if min_angle > max_angle:
-                    min_angle, max_angle = config.min_angle, config.max_angle
-
-        return (min_angle, max_angle)
 
     def _clamp_joint_list(
-        self,
-        joints: list[float] | tuple[float, ...],
-        *,
-        use_soft_limits: bool = True,
+        self, joints: list[float] | tuple[float, ...]
     ) -> list[float]:
         clamped = list(joints)
         for idx, angle in enumerate(clamped):
-            limits = self._active_angle_limits(idx, use_soft_limits=use_soft_limits)
-            clamped[idx] = float(np.clip(angle, *limits))
+            config = self.servo_configs.get(idx)
+            if config is not None:
+                clamped[idx] = config.clamp_angle(angle)
         return clamped
 
     def _clamp_target(self, target: np.ndarray | list[float]) -> np.ndarray:
@@ -2548,10 +2439,10 @@ class InteractiveArm:
             path.parent.mkdir(parents=True, exist_ok=True)
             servo_limits = {
                 str(idx): {
-                    "min_deg": math.degrees(limits[0]),
-                    "max_deg": math.degrees(limits[1]),
+                    "min_deg": math.degrees(config.min_angle),
+                    "max_deg": math.degrees(config.max_angle),
                 }
-                for idx, limits in self._soft_servo_limits.items()
+                for idx, config in self._base_servo_configs.items()
             }
             offsets_serialised = {
                 str(idx): offset for idx, offset in self.servo_offsets.items()
@@ -2602,11 +2493,19 @@ class InteractiveArm:
         if not self._loaded_servo_limits:
             return
         for idx, (min_angle, max_angle) in self._loaded_servo_limits.items():
+            base = self._base_servo_configs.get(idx)
+            if base is None:
+                continue
             if min_angle >= max_angle:
                 continue
-            self._soft_servo_limits[idx] = (min_angle, max_angle)
-            self._update_limit_box_display(idx)
-            self._refresh_pulse_slider_limits(idx)
+            updated = ServoConfig(
+                min_angle=min_angle,
+                max_angle=max_angle,
+                min_pulse=base.min_pulse,
+                max_pulse=base.max_pulse,
+            )
+            self._base_servo_configs[idx] = updated
+            self.servo_configs[idx] = updated
 
     def _update_calibration_button_visual(self) -> None:
         if self._calibration_button is None:
@@ -3436,15 +3335,9 @@ class InteractiveArm:
             commanded_deg = commanded_raw_deg - zero_deg
             actual_deg = actual_raw_deg - zero_deg
             inversion_note = " (inv)" if self.servo_inversions[idx] else ""
-            soft_limits = self._soft_servo_limits.get(idx)
             config = self._base_servo_configs.get(idx)
             limits_text = ""
-            if soft_limits is not None:
-                limits_text = (
-                    f"Limits: {math.degrees(soft_limits[0]):.0f}° to "
-                    f"{math.degrees(soft_limits[1]):.0f}°"
-                )
-            elif config is not None:
+            if config is not None:
                 limits_text = (
                     f"Limits: {math.degrees(config.min_angle):.0f}° to "
                     f"{math.degrees(config.max_angle):.0f}°"
@@ -3489,8 +3382,17 @@ class InteractiveArm:
             self._update_limit_box_display(index)
             return
 
-        self._soft_servo_limits[index] = (new_min, new_max)
-        self._refresh_pulse_slider_limits(index)
+        updated_base = ServoConfig(
+            min_angle=new_min,
+            max_angle=new_max,
+            min_pulse=base_config.min_pulse,
+            max_pulse=base_config.max_pulse,
+        )
+        self._base_servo_configs[index] = updated_base
+        self._apply_servo_inversion(index)
+        self.servo_configs[index] = (
+            self.servo_configs.get(index) or updated_base
+        )
 
         # Keep the loaded limits cache in sync so future persistence uses the
         # most recent values. This is particularly important when the limits
@@ -3508,8 +3410,7 @@ class InteractiveArm:
                 return
             if index >= len(values):
                 return
-            limits = self._active_angle_limits(index)
-            values[index] = float(np.clip(values[index], *limits))
+            values[index] = self.servo_configs[index].clamp_angle(values[index])
 
         _clamp_list(self.current_joints)
         _clamp_list(self.commanded_joints)
