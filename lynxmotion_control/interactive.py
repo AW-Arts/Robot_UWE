@@ -3306,13 +3306,14 @@ class InteractiveArm:
             self._exit_calibration_mode()
             return
 
+        previous_step_index = self._calibration_step_index
         self._calibration_step_index = next_index
         servo_index, phase = self._calibration_steps[next_index]
         baseline = None
-        if self._calibration_step_index is None:
+        if previous_step_index is None:
             baseline = self._calibration_neutral_joints()
         else:
-            previous_servo, _ = self._calibration_steps[self._calibration_step_index]
+            previous_servo, _ = self._calibration_steps[previous_step_index]
             if previous_servo != servo_index:
                 baseline = self._calibration_neutral_joints()
 
