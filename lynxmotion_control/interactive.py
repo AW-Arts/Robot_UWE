@@ -3263,6 +3263,17 @@ class InteractiveArm:
             return config.min_angle
         return config.max_angle
 
+    def _calibration_neutral_joints(self) -> list[float]:
+        neutral: list[float] = []
+        for idx in range(len(self._SERVO_METADATA)):
+            if idx in self.zero_reference:
+                neutral.append(self.zero_reference[idx])
+            elif idx < len(_DEFAULT_VERTICAL_JOINTS):
+                neutral.append(_DEFAULT_VERTICAL_JOINTS[idx])
+            else:
+                neutral.append(0.0)
+        return neutral
+
     def _start_calibration_tour(self, _event=None) -> None:  # pragma: no cover - UI interaction
         self._calibration_steps = self._generate_calibration_steps()
         self._calibration_guide_active = True
@@ -3297,13 +3308,25 @@ class InteractiveArm:
 
         self._calibration_step_index = next_index
         servo_index, phase = self._calibration_steps[next_index]
+        baseline = None
+        if self._calibration_step_index is None:
+            baseline = self._calibration_neutral_joints()
+        else:
+            previous_servo, _ = self._calibration_steps[self._calibration_step_index]
+            if previous_servo != servo_index:
+                baseline = self._calibration_neutral_joints()
+
         target_angle = self._target_angle_for_phase(servo_index, phase)
-        self._move_servo_for_calibration(servo_index, target_angle)
+        self._move_servo_for_calibration(
+            servo_index, target_angle, base_joints=baseline
+        )
         self._update_calibration_status()
         self._update_calibration_overlay()
 
-    def _move_servo_for_calibration(self, index: int, target_angle: float) -> None:
-        source = self.feedback_joints or self.current_joints
+    def _move_servo_for_calibration(
+        self, index: int, target_angle: float, *, base_joints: Sequence[float] | None = None
+    ) -> None:
+        source = base_joints or self.feedback_joints or self.current_joints
         if not source:
             source = self._default_joint_configuration()
         joints = list(source)
@@ -3345,10 +3368,17 @@ class InteractiveArm:
             servo_index, phase = self._calibration_steps[self._calibration_step_index]
             name, model, _ = self._SERVO_METADATA[servo_index]
             target_angle = self._target_angle_for_phase(servo_index, phase)
+            config = self.servo_configs.get(servo_index)
             message = (
                 f"{name} ({model}) — {phase.capitalize()}\n"
                 f"Target: {math.degrees(target_angle):.1f}°"
             )
+            if config is not None:
+                mid_pulse = (config.min_pulse + config.max_pulse) // 2
+                message += (
+                    f"\nPulse: {config.angle_to_pulse(target_angle)}µs"
+                    f" (min {config.min_pulse}µs / mid {mid_pulse}µs / max {config.max_pulse}µs)"
+                )
         elif message is None:
             message = "Start the tour to begin motor-by-motor guidance."
 
@@ -3430,6 +3460,7 @@ class InteractiveArm:
         source = self.feedback_joints or self.current_joints
         if source and servo_index < len(source):
             actual_angle = source[servo_index]
+        config = self.servo_configs.get(servo_index)
         phase_label = {
             "center": "Center", "min": "Soft min", "max": "Soft max"
         }.get(phase, phase.capitalize())
@@ -3440,6 +3471,14 @@ class InteractiveArm:
         ]
         if actual_angle is not None:
             overlay_lines.append(f"Current {math.degrees(actual_angle):.1f}°")
+        if config is not None:
+            mid_pulse = (config.min_pulse + config.max_pulse) // 2
+            overlay_lines.extend(
+                [
+                    f"Target pulse {config.angle_to_pulse(target_angle)}µs",
+                    f"Pulse range {config.min_pulse}–{config.max_pulse}µs (mid {mid_pulse}µs)",
+                ]
+            )
         self._calibration_overlay.set_text("\n".join(overlay_lines))
         self._update_calibration_arc_display(servo_index, target_angle)
         self.figure.canvas.draw_idle()
