@@ -365,7 +365,6 @@ class InteractiveArm:
         self.figure.canvas.mpl_connect("button_press_event", self._on_press)
         self.figure.canvas.mpl_connect("button_release_event", self._on_release)
         self.figure.canvas.mpl_connect("motion_notify_event", self._on_motion)
-        self.figure.canvas.mpl_connect("scroll_event", self._on_scroll)
         self.figure.canvas.mpl_connect("key_press_event", self._on_key_press)
         self.figure.canvas.mpl_connect("key_release_event", self._on_key_release)
         self.figure.canvas.mpl_connect("resize_event", self._on_canvas_resized)
@@ -741,15 +740,6 @@ class InteractiveArm:
         self.target[:] = new_target
         self.update_robot()
         self.drag_state.last_event = event
-
-    def _on_scroll(self, event) -> None:
-        if event.inaxes != self.ax:
-            return
-        step = 0.01 if event.button == "up" else -0.01
-        updated = self.target.copy()
-        updated[2] += step
-        self.target[:] = self._clamp_target(updated)
-        self.update_robot()
 
     def _on_key_press(self, event) -> None:
         if event.key is None:
