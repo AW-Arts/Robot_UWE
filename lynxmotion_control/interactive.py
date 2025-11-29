@@ -665,6 +665,10 @@ class InteractiveArm:
             return
         if event.inaxes != self.ax:
             return
+        # Manipulating the end-effector directly from the 3D graph led to frequent
+        # accidental drags. Ignore clicks in the IK viewport so movement comes
+        # solely from the dedicated controls instead of the plot.
+        return
         if event.button != 1:
             return
         if event.xdata is None or event.ydata is None:
