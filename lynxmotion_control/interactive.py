@@ -3982,7 +3982,7 @@ class InteractiveArm:
                 for segment_raw, segment_time in self._generate_smooth_segments(
                     self._last_commanded_raw, joints_raw, move_time, soft_start=soft_start
                 ):
-                    if self._calibration_active:
+                    if self._calibration_active and not self._calibration_guide_active:
                         relax = getattr(self.controller, "relax_servos", None)
                         if callable(relax):
                             try:
