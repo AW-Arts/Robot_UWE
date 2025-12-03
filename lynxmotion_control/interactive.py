@@ -1391,8 +1391,8 @@ class InteractiveArm:
             "1) Tap Calibrate to relax the motors.\n"
             "2) Move each servo with +/- or the Pulse slider until the arm looks right.\n"
             "3) Press Set vertical to store that upright pose.\n"
-            "Soft min°/Soft max° below are safety stops only—"
-            "they do not change the calibration.",
+            "Hard min°/Hard max° below update the same limits used during the"
+            " calibration tour.",
             va="top",
             ha="left",
             fontsize=8,
@@ -1486,8 +1486,8 @@ class InteractiveArm:
                 row_height * 0.5,
             )
 
-            min_box = TextBox(min_ax, "Soft min°", initial="0.0")
-            max_box = TextBox(max_ax, "Soft max°", initial="0.0")
+            min_box = TextBox(min_ax, "Hard min°", initial="0.0")
+            max_box = TextBox(max_ax, "Hard max°", initial="0.0")
             min_box.on_submit(self._make_limit_submit_callback(index, "min"))
             max_box.on_submit(self._make_limit_submit_callback(index, "max"))
 
@@ -3504,7 +3504,7 @@ class InteractiveArm:
             actual_angle = source[servo_index]
         config = self.servo_configs.get(servo_index)
         phase_label = {
-            "center": "Center", "min": "Soft min", "max": "Soft max"
+            "center": "Center", "min": "Hard min", "max": "Hard max"
         }.get(phase, phase.capitalize())
         zero_angle = self._zero_angle_for_servo(servo_index)
         relative_target_deg = math.degrees(target_angle - zero_angle)
