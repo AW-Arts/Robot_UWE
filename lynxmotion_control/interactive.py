@@ -378,6 +378,8 @@ class InteractiveArm:
         self._calibration_step_index: int | None = None
         self._calibration_status_text = None
         self._calibration_progress_text = None
+        self._calibration_angle_box: TextBox | None = None
+        self._updating_calibration_angle_box = False
         self._calibration_overlay = self.ax.text2D(
             0.98,
             0.95,
@@ -1300,6 +1302,21 @@ class InteractiveArm:
         )
         axes.extend([start_ax, confirm_ax, restart_ax])
 
+        angle_ax = self._panel_axes(
+            self._panel_margin,
+            self._panel_margin + 0.12,
+            1.0 - 2 * self._panel_margin,
+            0.055,
+        )
+        self._calibration_angle_box = TextBox(
+            angle_ax,
+            "Set angle (°)",
+            initial="",
+        )
+        self._calibration_angle_box.on_submit(self._apply_calibration_angle_from_text)
+        self._panel_interactive_widgets[panel_key].append(self._calibration_angle_box)
+        axes.append(angle_ax)
+
         nudge_height = 0.085
         nudge_gap = 0.03
         nudge_width = (
@@ -1320,10 +1337,10 @@ class InteractiveArm:
             nudge_height,
         )
 
-        nudge_minus = Button(nudge_minus_ax, "Nudge -1°", hovercolor="0.95")
-        nudge_minus.on_clicked(self._make_calibration_nudge_callback(-1.0))
-        nudge_plus = Button(nudge_plus_ax, "Nudge +1°", hovercolor="0.95")
-        nudge_plus.on_clicked(self._make_calibration_nudge_callback(1.0))
+        nudge_minus = Button(nudge_minus_ax, "Nudge -5°", hovercolor="0.95")
+        nudge_minus.on_clicked(self._make_calibration_nudge_callback(-5.0))
+        nudge_plus = Button(nudge_plus_ax, "Nudge +5°", hovercolor="0.95")
+        nudge_plus.on_clicked(self._make_calibration_nudge_callback(5.0))
         self._panel_interactive_widgets[panel_key].extend([nudge_minus, nudge_plus])
         axes.extend([nudge_minus_ax, nudge_plus_ax])
 
@@ -3439,12 +3456,26 @@ class InteractiveArm:
         self._calibration_arc_text.set_text(f"{relative_deg:+.1f}°")
         self._calibration_arc_text.set_visible(True)
 
+    def _update_calibration_angle_box(self, actual_angle: float | None) -> None:
+        if self._calibration_angle_box is None:
+            return
+
+        self._updating_calibration_angle_box = True
+        try:
+            if actual_angle is None:
+                self._calibration_angle_box.set_val("")
+            else:
+                self._calibration_angle_box.set_val(f"{math.degrees(actual_angle):.2f}")
+        finally:
+            self._updating_calibration_angle_box = False
+
     def _update_calibration_overlay(self) -> None:
         if self._calibration_overlay is None:
             return
         if not self._calibration_guide_active or self._calibration_step_index is None:
             self._calibration_overlay.set_text("")
             self._clear_calibration_arc_display()
+            self._update_calibration_angle_box(None)
             self.figure.canvas.draw_idle()
             return
 
@@ -3475,8 +3506,27 @@ class InteractiveArm:
                 ]
             )
         self._calibration_overlay.set_text("\n".join(overlay_lines))
+        self._update_calibration_angle_box(actual_angle)
         self._update_calibration_arc_display(servo_index, target_angle)
         self.figure.canvas.draw_idle()
+
+    def _apply_calibration_angle_from_text(self, text: str) -> None:
+        if self._updating_calibration_angle_box:
+            return
+        if not self._calibration_guide_active or self._calibration_step_index is None:
+            return
+
+        try:
+            value = float(text)
+        except ValueError:
+            _LOGGER.warning("Invalid calibration angle entry: %s", text)
+            return
+
+        radians_value = math.radians(value)
+        servo_index, _ = self._calibration_steps[self._calibration_step_index]
+        self._set_servo_angle(servo_index, radians_value)
+        self._update_calibration_status()
+        self._update_calibration_overlay()
 
     def _nudge_current_calibration_step(self, delta: float) -> None:
         if not self._calibration_guide_active or self._calibration_step_index is None:
