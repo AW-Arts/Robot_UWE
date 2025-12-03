@@ -190,7 +190,7 @@ class InteractiveArm:
         self._soft_start_min_time_ms = 4_000
         self._soft_start_min_segments = 18
         self._home_move_time_ms = move_time_ms
-        self._loaded_servo_limits: dict[int, tuple[float, float]] = {}
+        self._loaded_hard_limits: dict[int, tuple[float, float]] = {}
         self._loaded_workspace: dict[str, tuple[float, float]] = {}
         self.servo_offsets: dict[int, float] = self._load_calibration_data()
         self.workspace_limits = {
@@ -203,7 +203,7 @@ class InteractiveArm:
                 + self.kin.links.elbow,
             ),
         }
-        self._apply_loaded_servo_limits()
+        self._apply_loaded_hard_limits()
 
         for index, inverted in enumerate(self.servo_inversions):
             if inverted:
@@ -577,7 +577,7 @@ class InteractiveArm:
     def update_robot(self) -> None:
         requested = self._clamp_target(self.target)
         self.target[:] = requested
-        joints = self._apply_soft_limits_to_ik(
+        joints = self._apply_hard_limits_to_ik(
             list(self.kin.inverse(requested[[0, 1, 2]], self.wrist_pitch))
         )
         self._last_wrist_pitch = joints[1] + joints[2] + joints[3]
@@ -1224,7 +1224,7 @@ class InteractiveArm:
             0.0,
             1.0,
             "Use the tour to step through each motor. The app will move to the\n"
-            "center, soft min, and soft max for every servo, showing the angle\n"
+            "center and each hard limit for every servo, showing the angle\n"
             "on the IK diagram. Confirm each stage before continuing; if the\n"
             "diagram does not match, nudge the joint until it does.",
             va="top",
@@ -2286,7 +2286,7 @@ class InteractiveArm:
             except ValueError:
                 name, model, _ = self._SERVO_METADATA[index]
                 _LOGGER.warning(
-                    "Ignoring invalid soft %s limit for %s (%s)", bound, name, model
+                    "Ignoring invalid hard %s limit for %s (%s)", bound, name, model
                 )
                 self._update_limit_box_display(index)
                 return
@@ -2480,7 +2480,7 @@ class InteractiveArm:
         slider.ax.set_xlim(slider.valmin, slider.valmax)
         self._update_pulse_slider_display(index)
 
-    def _apply_soft_limits_to_ik(self, joints: list[float]) -> list[float]:
+    def _apply_hard_limits_to_ik(self, joints: list[float]) -> list[float]:
         clamped = self._clamp_joint_list(joints)
         if len(clamped) != len(joints):
             return clamped
@@ -2488,7 +2488,7 @@ class InteractiveArm:
             if not math.isclose(original, limited, rel_tol=0.0, abs_tol=1e-6):
                 name, model, _ = self._SERVO_METADATA[idx]
                 _LOGGER.info(
-                    "%s (%s) IK solution clipped to soft limits (%.1f° → %.1f°)",
+                    "%s (%s) IK solution clipped to hard limits (%.1f° → %.1f°)",
                     name,
                     model,
                     math.degrees(original),
@@ -2635,7 +2635,7 @@ class InteractiveArm:
                     math.radians(max_deg),
                 )
             if parsed_limits:
-                self._loaded_servo_limits.update(parsed_limits)
+                self._loaded_hard_limits.update(parsed_limits)
 
         return offsets
 
@@ -2695,10 +2695,10 @@ class InteractiveArm:
         if hasattr(self, "ax"):
             self._recompute_camera_framing()
 
-    def _apply_loaded_servo_limits(self) -> None:
-        if not self._loaded_servo_limits:
+    def _apply_loaded_hard_limits(self) -> None:
+        if not self._loaded_hard_limits:
             return
-        for idx, (min_angle, max_angle) in self._loaded_servo_limits.items():
+        for idx, (min_angle, max_angle) in self._loaded_hard_limits.items():
             base = self._base_servo_configs.get(idx)
             if base is None:
                 continue
@@ -3051,7 +3051,7 @@ class InteractiveArm:
             desired_pitch = float(np.clip(waypoint.wrist_pitch, *self._wrist_pitch_limits))
             self._set_wrist_pitch_target(desired_pitch, update_slider=False)
             try:
-                joints = self._apply_soft_limits_to_ik(
+                joints = self._apply_hard_limits_to_ik(
                     list(self.kin.inverse(target[[0, 1, 2]], desired_pitch))
                 )
             except Exception:
@@ -3940,7 +3940,7 @@ class InteractiveArm:
         min_angle: float | None = None,
         max_angle: float | None = None,
     ) -> None:
-        """Apply soft safety limits without altering the pulse calibration."""
+        """Update the calibrated hard limits without altering the pulse mapping."""
         base_config = self._base_servo_configs.get(index)
         if base_config is None:
             return
@@ -3976,7 +3976,7 @@ class InteractiveArm:
         # originated from a configuration file because users expect their
         # adjustments to overwrite the stored values instead of reverting on
         # restart.
-        self._loaded_servo_limits[index] = (new_min, new_max)
+        self._loaded_hard_limits[index] = (new_min, new_max)
 
         # Persist the calibration data immediately so the adjustments are not
         # lost if the application exits before another save opportunity.
