@@ -312,6 +312,95 @@ def test_hard_limit_clamping_uses_servo_configs(
         )
 
 
+def test_calibration_text_updates_limits_without_motion(
+    monkeypatch, interactive_module, tmp_path
+) -> None:
+    calibration_file = tmp_path / "servo_offsets.json"
+    monkeypatch.setattr(
+        interactive_module,
+        "CALIBRATION_CONFIG_PATH",
+        calibration_file,
+        raising=False,
+    )
+    controller = _BasicController()
+    with _prepare_arm(monkeypatch, interactive_module, controller) as arm:
+        arm._calibration_guide_active = True
+        arm._calibration_steps = [(0, "min")]
+        arm._calibration_step_index = 0
+        arm.current_joints = [0.0] * 6
+        arm.feedback_joints = list(arm.current_joints)
+
+        starting_zero = arm._zero_angle_for_servo(0)
+        arm._apply_calibration_angle_from_text("-15")
+
+        updated_config = arm.servo_configs[0]
+        expected_min = starting_zero + math.radians(-15)
+        assert math.isclose(updated_config.min_angle, expected_min, rel_tol=1e-6)
+        assert controller.moves == []
+        stored = json.loads(calibration_file.read_text())
+        assert stored["servo_limits"]["0"]["min_deg"] == pytest.approx(-15.0)
+
+
+def test_calibration_center_updates_zero_reference_only(
+    monkeypatch, interactive_module, tmp_path
+) -> None:
+    calibration_file = tmp_path / "servo_offsets.json"
+    monkeypatch.setattr(
+        interactive_module,
+        "CALIBRATION_CONFIG_PATH",
+        calibration_file,
+        raising=False,
+    )
+    controller = _BasicController()
+    with _prepare_arm(monkeypatch, interactive_module, controller) as arm:
+        arm._calibration_guide_active = True
+        arm._calibration_steps = [(1, "center")]
+        arm._calibration_step_index = 0
+        arm.current_joints = [0.0] * 6
+        arm.feedback_joints = list(arm.current_joints)
+
+        starting_zero = arm._zero_angle_for_servo(1)
+        arm._apply_calibration_angle_from_text("5")
+
+        expected_zero = starting_zero + math.radians(5)
+        assert math.isclose(arm.zero_reference[1], expected_zero, rel_tol=1e-6)
+        assert controller.moves == []
+        stored = json.loads(calibration_file.read_text())
+        assert stored["vertical_angles"]["1"] == pytest.approx(expected_zero)
+
+
+def test_calibration_nudge_updates_limits_without_motion(
+    monkeypatch, interactive_module, tmp_path
+) -> None:
+    calibration_file = tmp_path / "servo_offsets.json"
+    monkeypatch.setattr(
+        interactive_module,
+        "CALIBRATION_CONFIG_PATH",
+        calibration_file,
+        raising=False,
+    )
+    controller = _BasicController()
+    with _prepare_arm(monkeypatch, interactive_module, controller) as arm:
+        arm._calibration_guide_active = True
+        arm._calibration_steps = [(2, "max")]
+        arm._calibration_step_index = 0
+        arm.current_joints = [0.0] * 6
+        arm.feedback_joints = list(arm.current_joints)
+
+        starting_max = arm.servo_configs[2].max_angle
+        arm._nudge_current_calibration_step(math.radians(3))
+
+        updated_max = arm.servo_configs[2].max_angle
+        assert math.isclose(
+            updated_max, starting_max + math.radians(3), rel_tol=1e-6
+        )
+        assert controller.moves == []
+        stored = json.loads(calibration_file.read_text())
+        assert stored["servo_limits"]["2"]["max_deg"] == pytest.approx(
+            math.degrees(updated_max)
+        )
+
+
 def test_command_worker_processes_commands_without_feedback(
     monkeypatch, interactive_module
 ) -> None:

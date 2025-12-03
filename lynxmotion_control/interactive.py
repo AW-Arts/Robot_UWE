@@ -3547,8 +3547,20 @@ class InteractiveArm:
             return
 
         radians_value = math.radians(value)
-        servo_index, _ = self._calibration_steps[self._calibration_step_index]
-        self._set_servo_angle(servo_index, radians_value)
+        servo_index, phase = self._calibration_steps[self._calibration_step_index]
+        zero_angle = self._zero_angle_for_servo(servo_index)
+        absolute_angle = zero_angle + radians_value
+
+        if phase == "min":
+            self._update_servo_limit(servo_index, min_angle=absolute_angle)
+        elif phase == "max":
+            self._update_servo_limit(servo_index, max_angle=absolute_angle)
+        elif phase == "center":
+            self.zero_reference[servo_index] = absolute_angle
+            self._save_calibration_data()
+            self._update_zero_reference_lines()
+        else:
+            self._set_servo_angle(servo_index, absolute_angle)
         self._update_calibration_status()
         self._update_calibration_overlay()
 
@@ -3558,8 +3570,21 @@ class InteractiveArm:
         source = self.feedback_joints or self.current_joints
         if not source:
             return
-        servo_index, _ = self._calibration_steps[self._calibration_step_index]
-        self._adjust_servo(servo_index, delta)
+        servo_index, phase = self._calibration_steps[self._calibration_step_index]
+        zero_angle = self._zero_angle_for_servo(servo_index)
+        config = self.servo_configs.get(servo_index)
+
+        if phase == "min" and config is not None:
+            self._update_servo_limit(servo_index, min_angle=config.min_angle + delta)
+        elif phase == "max" and config is not None:
+            self._update_servo_limit(servo_index, max_angle=config.max_angle + delta)
+        elif phase == "center":
+            current_zero = self.zero_reference.get(servo_index, zero_angle)
+            self.zero_reference[servo_index] = current_zero + delta
+            self._save_calibration_data()
+            self._update_zero_reference_lines()
+        else:
+            self._adjust_servo(servo_index, delta)
         self._update_calibration_status()
         self._update_calibration_overlay()
     def _handle_set_vertical(self, _event=None) -> None:  # pragma: no cover - UI interaction
