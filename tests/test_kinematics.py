@@ -45,5 +45,5 @@ def test_inverse_limits_reachable():
 
 def test_default_link_lengths_match_spec():
     links = AL5ALinkLengths()
-    assert math.isclose(links.shoulder, 3.75 * INCH_TO_METRES)
-    assert math.isclose(links.elbow, 4.25 * INCH_TO_METRES)
+    assert math.isclose(links.shoulder, 4.75 * INCH_TO_METRES)
+    assert math.isclose(links.elbow, 5.0 * INCH_TO_METRES)

@@ -74,9 +74,9 @@ workflows aligned.
 
 ## Notes
 
-- The kinematic model uses approximate link lengths suitable for the stock
-  Lynxmotion AL5A.  If your hardware differs you can adjust the values in
-  `al5a_kinematics.py`.
+- The kinematic model uses the standard Lynxmotion AL5B link lengths (4.75"
+  shoulder-link, 5.00" forearm-link).  If your hardware differs you can adjust
+  the values in `al5a_kinematics.py`.
 - Servo ranges are approximate.  Calibrate the min/max pulse widths to match
   your individual servos.
 - The UI sends commands immediately when the target changes.  Consider slowing

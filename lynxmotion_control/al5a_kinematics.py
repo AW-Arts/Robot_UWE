@@ -44,11 +44,11 @@ class ServoConfig:
 
 @dataclass(frozen=True)
 class AL5ALinkLengths:
-    """Physical link dimensions for the AL5A arm (metres)."""
+    """Physical link dimensions for the AL5B arm (metres)."""
 
     base_height: float = 0.070  # base rotation to shoulder pivot
-    shoulder: float = 3.75 * INCH_TO_METRES  # base-to-elbow axis length
-    elbow: float = 4.25 * INCH_TO_METRES  # elbow-to-wrist axis length
+    shoulder: float = 4.75 * INCH_TO_METRES  # base-to-elbow axis length
+    elbow: float = 5.00 * INCH_TO_METRES  # elbow-to-wrist axis length
     wrist: float = 0.082
 
 
