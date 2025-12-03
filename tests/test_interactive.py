@@ -265,6 +265,53 @@ def test_servo_limits_loaded_and_persisted(
     assert math.isclose(float(stored_limits["max_deg"]), 30.0, rel_tol=1e-6)
 
 
+def test_hard_limit_clamping_uses_servo_configs(
+    monkeypatch, interactive_module, tmp_path
+) -> None:
+    calibration_file = tmp_path / "servo_offsets.json"
+    monkeypatch.setattr(
+        interactive_module,
+        "CALIBRATION_CONFIG_PATH",
+        calibration_file,
+        raising=False,
+    )
+    calibration_file.write_text(
+        json.dumps(
+            {
+                "servo_limits": {
+                    "1": {"min_deg": -10.0, "max_deg": 20.0},
+                }
+            }
+        )
+    )
+
+    controller = _BasicController()
+    with _prepare_arm(monkeypatch, interactive_module, controller) as arm:
+        config = arm.servo_configs[1]
+        assert math.isclose(
+            config.min_angle, math.radians(-10.0), rel_tol=1e-6
+        )
+        assert math.isclose(config.max_angle, math.radians(20.0), rel_tol=1e-6)
+
+        joints = [0.0, math.radians(90.0), 0.0, 0.0]
+        clamped = arm._apply_hard_limits_to_ik(joints)
+        assert math.isclose(
+            clamped[1], config.max_angle, rel_tol=0.0, abs_tol=1e-6
+        )
+
+        arm.current_joints = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        arm.commanded_joints = list(arm.current_joints)
+        arm._set_servo_angle(1, math.radians(-90.0))
+
+        assert math.isclose(
+            arm.current_joints[1], config.min_angle, rel_tol=0.0, abs_tol=1e-6
+        )
+        queued_command = arm._command_queue.commands[-1][0]  # type: ignore[attr-defined]
+        assert math.isclose(
+            queued_command[1], config.min_angle, rel_tol=0.0, abs_tol=1e-6
+        )
+
+
 def test_command_worker_processes_commands_without_feedback(
     monkeypatch, interactive_module
 ) -> None:

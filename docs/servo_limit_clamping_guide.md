@@ -19,6 +19,8 @@ The `ServoConfig` class drives every conversion between angles and pulse widths:
 - `angle_to_pulse(angle)` first clamps the angle, then linearly maps it into the pulse span using the proportion of the angle span.
 - `pulse_to_angle(pulse)` performs the inverse linear mapping from pulse width to angle.
 
+All runtime clamping in the interactive controller (inverse kinematics saturation, manual joint nudges, and calibration limit updates) routes through these `ServoConfig` entries. That keeps the IK solver, UI feedback, and persisted configuration on the same hard-limit system instead of duplicating bound logic elsewhere.
+
 Formally, for any joint:
 
 ```text
