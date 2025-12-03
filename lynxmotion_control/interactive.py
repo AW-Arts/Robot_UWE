@@ -455,6 +455,14 @@ class InteractiveArm:
         except AttributeError:  # Matplotlib < 3.4
             pass
 
+    def _zero_angle_for_servo(self, index: int) -> float:
+        default_zero = (
+            _DEFAULT_VERTICAL_JOINTS[index]
+            if index < len(_DEFAULT_VERTICAL_JOINTS)
+            else 0.0
+        )
+        return self.zero_reference.get(index, default_zero)
+
     def _default_joint_configuration(self) -> list[float]:
         joints: list[float] = []
         for idx in range(len(self._SERVO_METADATA)):
@@ -2291,7 +2299,8 @@ class InteractiveArm:
                 self._update_limit_box_display(index)
                 return
 
-            radians_value = math.radians(value)
+            zero_angle = self._zero_angle_for_servo(index)
+            radians_value = math.radians(value) + zero_angle
             if bound == "min":
                 self._update_servo_limit(index, min_angle=radians_value)
             else:
@@ -2345,12 +2354,13 @@ class InteractiveArm:
         new_angle = config.clamp_angle(angle)
         if math.isclose(new_angle, old_angle, abs_tol=1e-6):
             name, model, _ = self._SERVO_METADATA[index]
+            zero_angle = self._zero_angle_for_servo(index)
             _LOGGER.warning(
                 "%s (%s) servo adjustment hit the configured limit (%.1f° to %.1f°).",
                 name,
                 model,
-                math.degrees(config.min_angle),
-                math.degrees(config.max_angle),
+                math.degrees(config.min_angle - zero_angle),
+                math.degrees(config.max_angle - zero_angle),
             )
         updated[index] = new_angle
 
@@ -2430,8 +2440,9 @@ class InteractiveArm:
             max_box.eventson = False
         except AttributeError:  # pragma: no cover - depends on Matplotlib
             pass
-        min_box.set_val(f"{math.degrees(base_config.min_angle):.1f}")
-        max_box.set_val(f"{math.degrees(base_config.max_angle):.1f}")
+        zero_angle = self._zero_angle_for_servo(index)
+        min_box.set_val(f"{math.degrees(base_config.min_angle - zero_angle):.1f}")
+        max_box.set_val(f"{math.degrees(base_config.max_angle - zero_angle):.1f}")
         try:
             min_box.eventson = True
             max_box.eventson = True
@@ -2487,12 +2498,13 @@ class InteractiveArm:
         for idx, (original, limited) in enumerate(zip(joints, clamped)):
             if not math.isclose(original, limited, rel_tol=0.0, abs_tol=1e-6):
                 name, model, _ = self._SERVO_METADATA[idx]
+                zero_angle = self._zero_angle_for_servo(idx)
                 _LOGGER.info(
                     "%s (%s) IK solution clipped to hard limits (%.1f° → %.1f°)",
                     name,
                     model,
-                    math.degrees(original),
-                    math.degrees(limited),
+                    math.degrees(original - zero_angle),
+                    math.degrees(limited - zero_angle),
                 )
                 break
         return clamped
@@ -3381,10 +3393,14 @@ class InteractiveArm:
             name, model, _ = self._SERVO_METADATA[servo_index]
             target_angle = self._target_angle_for_phase(servo_index, phase)
             config = self.servo_configs.get(servo_index)
+            zero_angle = self._zero_angle_for_servo(servo_index)
+            relative_target_deg = math.degrees(target_angle - zero_angle)
             message = (
                 f"{name} ({model}) — {phase.capitalize()}\n"
-                f"Target: {math.degrees(target_angle):.1f}°"
+                f"Target: {relative_target_deg:.1f}°"
             )
+            if self._show_raw_angles:
+                message += f" (raw {math.degrees(target_angle):.1f}°)"
             if config is not None:
                 mid_pulse = (config.min_pulse + config.max_pulse) // 2
                 message += (
@@ -3415,12 +3431,7 @@ class InteractiveArm:
     def _update_calibration_arc_display(
         self, servo_index: int, target_angle: float
     ) -> None:
-        zero_angle = self.zero_reference.get(
-            servo_index,
-            _DEFAULT_VERTICAL_JOINTS[servo_index]
-            if servo_index < len(_DEFAULT_VERTICAL_JOINTS)
-            else 0.0,
-        )
+        zero_angle = self._zero_angle_for_servo(servo_index)
         relative_deg = math.degrees(target_angle - zero_angle)
         theta_start = 90.0
         theta_end = theta_start + relative_deg
@@ -3465,7 +3476,12 @@ class InteractiveArm:
             if actual_angle is None:
                 self._calibration_angle_box.set_val("")
             else:
-                self._calibration_angle_box.set_val(f"{math.degrees(actual_angle):.2f}")
+                zero_angle = 0.0
+                if self._calibration_step_index is not None:
+                    servo_index, _ = self._calibration_steps[self._calibration_step_index]
+                    zero_angle = self._zero_angle_for_servo(servo_index)
+                relative_angle_deg = math.degrees(actual_angle - zero_angle)
+                self._calibration_angle_box.set_val(f"{relative_angle_deg:.2f}")
         finally:
             self._updating_calibration_angle_box = False
 
@@ -3490,13 +3506,21 @@ class InteractiveArm:
         phase_label = {
             "center": "Center", "min": "Soft min", "max": "Soft max"
         }.get(phase, phase.capitalize())
+        zero_angle = self._zero_angle_for_servo(servo_index)
+        relative_target_deg = math.degrees(target_angle - zero_angle)
         overlay_lines = [
             f"Calibration tour: {phase_label}",
             f"{name} ({model})",
-            f"Target {math.degrees(target_angle):.1f}°",
+            f"Target {relative_target_deg:.1f}°",
         ]
+        if self._show_raw_angles:
+            overlay_lines[-1] += f" (raw {math.degrees(target_angle):.1f}°)"
         if actual_angle is not None:
-            overlay_lines.append(f"Current {math.degrees(actual_angle):.1f}°")
+            relative_actual_deg = math.degrees(actual_angle - zero_angle)
+            current_line = f"Current {relative_actual_deg:.1f}°"
+            if self._show_raw_angles:
+                current_line += f" (raw {math.degrees(actual_angle):.1f}°)"
+            overlay_lines.append(current_line)
         if config is not None:
             mid_pulse = (config.min_pulse + config.max_pulse) // 2
             overlay_lines.extend(
@@ -3894,12 +3918,7 @@ class InteractiveArm:
             return
         for idx, text in enumerate(self.servo_value_texts):
             name, model, location = self._SERVO_METADATA[idx]
-            zero_angle = self.zero_reference.get(
-                idx,
-                _DEFAULT_VERTICAL_JOINTS[idx]
-                if idx < len(_DEFAULT_VERTICAL_JOINTS)
-                else 0.0,
-            )
+            zero_angle = self._zero_angle_for_servo(idx)
             zero_deg = math.degrees(zero_angle)
             commanded_raw_deg = math.degrees(self.commanded_joints[idx])
             actual_source = (
@@ -3915,8 +3934,8 @@ class InteractiveArm:
             limits_text = ""
             if config is not None:
                 limits_text = (
-                    f"Limits: {math.degrees(config.min_angle):.0f}° to "
-                    f"{math.degrees(config.max_angle):.0f}°"
+                    f"Limits: {math.degrees(config.min_angle - zero_angle):.0f}° to "
+                    f"{math.degrees(config.max_angle - zero_angle):.0f}°"
                 )
             commanded_raw_suffix = (
                 f" (raw {commanded_raw_deg:.1f}°)" if self._show_raw_angles else ""
@@ -3949,12 +3968,13 @@ class InteractiveArm:
         new_max = base_config.max_angle if max_angle is None else max_angle
         if new_min >= new_max:
             name, model, _ = self._SERVO_METADATA[index]
+            zero_angle = self._zero_angle_for_servo(index)
             _LOGGER.warning(
                 "Ignored invalid limit update for %s (%s): min %.1f° >= max %.1f°",
                 name,
                 model,
-                math.degrees(new_min),
-                math.degrees(new_max),
+                math.degrees(new_min - zero_angle),
+                math.degrees(new_max - zero_angle),
             )
             self._update_limit_box_display(index)
             return
