@@ -456,12 +456,15 @@ class InteractiveArm:
             pass
 
     def _zero_angle_for_servo(self, index: int) -> float:
+        if index in self.zero_reference:
+            return self.zero_reference[index]
+
         default_zero = (
             _DEFAULT_VERTICAL_JOINTS[index]
             if index < len(_DEFAULT_VERTICAL_JOINTS)
             else 0.0
         )
-        return self.zero_reference.get(index, default_zero)
+        return default_zero
 
     def _default_joint_configuration(self) -> list[float]:
         joints: list[float] = []
@@ -3269,14 +3272,14 @@ class InteractiveArm:
     def _generate_calibration_steps(self) -> list[tuple[int, str]]:
         steps: list[tuple[int, str]] = []
         for idx in range(len(self._SERVO_METADATA)):
-            steps.extend([(idx, "center"), (idx, "min"), (idx, "max")])
+            steps.extend([(idx, "zero"), (idx, "min"), (idx, "max"), (idx, "center")])
         return steps
 
     def _target_angle_for_phase(self, index: int, phase: str) -> float:
         config = self.servo_configs.get(index)
+        if phase == "zero":
+            return self._zero_angle_for_servo(index)
         if phase == "center":
-            if index in self.zero_reference:
-                return self.zero_reference[index]
             if config is not None:
                 return config.min_angle + (config.max_angle - config.min_angle) / 2.0
             return 0.0
@@ -3322,6 +3325,14 @@ class InteractiveArm:
             next_index = force_index
 
         if next_index >= len(self._calibration_steps):
+            if self._calibration_step_index is not None:
+                previous_servo, _ = self._calibration_steps[self._calibration_step_index]
+                zero_angle = self._zero_angle_for_servo(previous_servo)
+                self._move_servo_for_calibration(
+                    previous_servo,
+                    zero_angle,
+                    base_joints=self._calibration_neutral_joints(),
+                )
             self._calibration_guide_active = False
             self._calibration_step_index = None
             self._update_calibration_status("Guided calibration complete.")
@@ -3338,6 +3349,12 @@ class InteractiveArm:
         else:
             previous_servo, _ = self._calibration_steps[previous_step_index]
             if previous_servo != servo_index:
+                zero_angle = self._zero_angle_for_servo(previous_servo)
+                self._move_servo_for_calibration(
+                    previous_servo,
+                    zero_angle,
+                    base_joints=self._calibration_neutral_joints(),
+                )
                 baseline = self._calibration_neutral_joints()
 
         target_angle = self._target_angle_for_phase(servo_index, phase)
@@ -3504,7 +3521,7 @@ class InteractiveArm:
             actual_angle = source[servo_index]
         config = self.servo_configs.get(servo_index)
         phase_label = {
-            "center": "Center", "min": "Hard min", "max": "Hard max"
+            "center": "Center", "min": "Hard min", "max": "Hard max", "zero": "Zero"
         }.get(phase, phase.capitalize())
         zero_angle = self._zero_angle_for_servo(servo_index)
         relative_target_deg = math.degrees(target_angle - zero_angle)
