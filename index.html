@@ -639,13 +639,13 @@ flowchart TD
 
   Enqueue --> Calib["Calibration active?<br/>(_calibration_active flag)"]
 
-  Calib -->|Yes| Relax[Relax all servos<br/>(AL5ASerialController.relax_servos)]
-  Relax --> Wait[Wait + block queue<br/>(_stop_for_calibration)]
+  Calib -->|Yes| Relax["Relax all servos<br/>(AL5ASerialController.relax_servos)"]
+  Relax --> Wait["Wait + block queue<br/>(_stop_for_calibration)"]
   Wait --> Limits
 
-  Calib -->|No| Execute[Send move_joints to controller]
-  Execute --> Persist[Auto-save offsets/paths]
-  Persist --> Monitor[Mirror joint feedback]
+  Calib -->|No| Execute["Send move_joints to controller"]
+  Execute --> Persist["Auto-save offsets/paths"]
+  Persist --> Monitor["Mirror joint feedback"]
   Monitor --> Cmd
             </script>
           </div>
