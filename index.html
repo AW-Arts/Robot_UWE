@@ -396,6 +396,7 @@
       <a href="#timeline">Timeline</a>
       <a href="#safety">Safety</a>
       <a href="#state">State machine</a>
+      <a href="#functions">Functions</a>
       <a href="#classes">Classes</a>
       <a href="#journey">Mega journey</a>
     </nav>
@@ -734,6 +735,221 @@ stateDiagram-v2
             </script>
           </div>
           <div class="refs">Refs: <code>interactive.py</code> state transitions, <code>serial_comm.py:AL5ASerialController.AUTO_RELAX_ON_CALIBRATION</code></div>
+        </div>
+      </section>
+
+      <!-- Functions -->
+      <section class="card" id="functions">
+        <div class="card-inner">
+          <div class="card-header">
+            <h2>Complete Function Inventory</h2>
+            <span class="tag">Mindmap · Every function/decision</span>
+          </div>
+          <div class="card-meta">
+            <span class="pill">Covers __main__, interactive UI, kinematics, serial comms</span>
+            <span class="pill">Mindmap nodes mirror def names for traceability</span>
+          </div>
+          <div class="diagram-wrapper">
+            <button class="fullscreen-btn" type="button"
+                    onclick="openDiagramFullscreen('diagram-functions','Complete Function Inventory')">
+              ⤢ Fullscreen
+            </button>
+            <div class="mermaid mermaid-inline" id="diagram-functions"></div>
+            <script type="text/plain" class="mermaid-src" id="src-diagram-functions">
+mindmap
+  root((AL5A software functions))
+    __main__.py
+      main
+    al5a_kinematics.py
+      ServoConfig
+        clamp_angle
+        angle_to_pulse
+        pulse_to_angle
+      AL5ALinkLengths
+      AL5AKinematics
+        __init__
+        forward
+        inverse
+      joints_to_pulses
+      pulses_to_joints
+    serial_comm.py
+      SerialLike
+        write
+        read_until
+        close
+      SSC32Command
+        to_bytes
+      AL5ASerialController
+        __init__
+        connect
+        disconnect
+        ensure_connection
+        move_joints
+        relax_servos
+      PrintController
+        move_joints
+        relax_servos
+    interactive.py
+      _ensure_interactive_backend
+      run_demo
+      InteractiveArm
+        Setup & feedback
+          __init__
+          _on_canvas_resized
+          _recompute_camera_framing
+          _zero_angle_for_servo
+          _default_joint_configuration
+          _get_home_joints
+          _initialise_from_feedback
+          _run_home_sequence
+          update_robot
+          _apply_feedback
+          _read_feedback_from_controller
+        Wrist and axes controls
+          _slider_value_from_pitch
+          _pitch_from_slider_value
+          _set_wrist_pitch_target
+          _handle_wrist_slider_change
+          _update_wrist_slider_display
+          _update_raw_angle_button_visual
+          _toggle_raw_angle_display
+        Input handling & gizmo
+          _on_press
+          _on_release
+          _on_motion
+          _on_key_press
+          _on_key_release
+          _create_gizmo
+          _update_gizmo
+          _project_point
+          _pick_gizmo_axis
+        Panel construction
+          _create_controls
+          _panel_axes
+          _set_active_panel
+          _build_movement_panel
+          _build_servo_panel
+          _build_calibration_tour_panel
+          _build_motor_config_panel
+          _build_waypoint_panel
+          _build_timeline_panel
+        Panel refresh & highlights
+          _refresh_subroutine_list_display
+          _refresh_timeline_display
+          _highlight_selected_subroutine
+          _highlight_selected_timeline
+          _update_subroutine_name_box
+          _refresh_waypoint_display
+          _highlight_selected_waypoint
+          _update_waypoint_duration_box
+        Persistence helpers
+          _waypoints_from_serialised
+          _load_saved_waypoints
+          _compute_waypoint_total_duration
+          _slugify_subroutine_name
+          _load_subroutine_catalog
+          _load_subroutine_waypoints
+          _load_saved_timeline
+          _save_timeline
+          _update_timeline_entries_for_slug
+          _save_waypoints
+          _serialise_waypoints
+        Callback factories
+          _make_move_callback
+          _make_servo_adjust_callback
+          _make_inversion_toggle_callback
+          _make_limit_submit_callback
+          _make_pulse_slider_callback
+          _make_calibration_nudge_callback
+        Direct manipulations
+          _nudge_target
+          _adjust_servo
+          _set_servo_angle
+          _toggle_servo_inversion
+          _apply_servo_inversion
+          _update_limit_box_display
+          _update_pulse_slider_display
+          _update_pulse_slider_range
+        Limits & offsets
+          _apply_hard_limits_to_ik
+          _clamp_joint_list
+          _clamp_target
+          _apply_offsets
+          _load_calibration_data
+          _save_calibration_data
+          _load_workspace_limits_from_config
+          _apply_loaded_hard_limits
+          _update_calibration_button_visual
+          _toggle_calibration
+        Buttons & timeline controls
+          _handle_home_button
+          _handle_duration_submit
+          _handle_add_waypoint
+          _handle_clear_waypoints
+          _handle_save_subroutine
+          _handle_load_subroutine
+          _handle_refresh_subroutines
+          _handle_add_to_timeline
+          _handle_remove_timeline_entry
+          _handle_clear_timeline
+          _handle_play_timeline
+          _handle_toggle_timeline_repeat
+          _handle_timeline_speed_change
+          _handle_play_waypoints
+          _update_play_button_label
+          _stop_waypoint_playback
+          _waypoint_playback_worker
+          _handle_waypoint_playback_step
+          _update_timeline_play_button
+          _update_timeline_repeat_button
+          _stop_timeline_playback
+          _timeline_playback_worker
+          _execute_waypoint_sequence
+          _handle_subroutine_press
+          _handle_timeline_press
+          _handle_waypoint_press
+          _handle_timeline_motion
+          _handle_waypoint_motion
+          _handle_timeline_release
+          _handle_waypoint_release
+        Calibration tour & decisions
+          _enter_calibration_mode
+          _exit_calibration_mode
+          _generate_calibration_steps
+          _target_angle_for_phase
+          _calibration_neutral_joints
+          _start_calibration_tour
+          _restart_calibration_tour
+          _confirm_calibration_step
+          _advance_calibration_step
+          _move_servo_for_calibration
+          _update_calibration_status
+          _clear_calibration_arc_display
+          _update_calibration_arc_display
+          _update_calibration_angle_box
+          _update_calibration_overlay
+          _apply_calibration_angle_from_text
+          _nudge_current_calibration_step
+          _handle_set_vertical
+        Visuals & telemetry
+          _update_inversion_button_visual
+          _compute_link_positions
+          _zero_pose_joints
+          _update_zero_reference_lines
+          _update_visuals
+          _update_servo_readouts
+          _update_servo_limit
+        Command queue & safety
+          _cancel_pending_commands
+          _store_setpoint
+          _command_worker
+          _send_move_command
+          _get_servo_configs_for_controller
+          _generate_smooth_segments
+          _wait_for_segment
+            </script>
+          </div>
+          <div class="refs">Refs: <code>lynxmotion_control/__main__.py</code>, <code>lynxmotion_control/interactive.py</code>, <code>lynxmotion_control/al5a_kinematics.py</code>, <code>lynxmotion_control/serial_comm.py</code></div>
         </div>
       </section>
 
