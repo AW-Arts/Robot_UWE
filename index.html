@@ -856,32 +856,45 @@ classDiagram
   <!-- JS: init Mermaid + fullscreen wiring -->
   <script>
     const SNIPPET_DEFS = {
-      mainEntry: { title: "CLI launcher → Interactive UI", file: "lynxmotion_control/__main__.py", marker: "def main", context: 16 },
-      interactiveInit: { title: "interactive.py:InteractiveArm.__init__", file: "lynxmotion_control/interactive.py", marker: "def __init__", context: 26 },
-      updateRobot: { title: "interactive.py:update_robot", file: "lynxmotion_control/interactive.py", marker: "def update_robot", context: 22 },
-      clampTarget: { title: "interactive.py:_clamp_target", file: "lynxmotion_control/interactive.py", marker: "def _clamp_target", context: 12 },
-      smoothSegments: { title: "interactive.py:_generate_smooth_segments", file: "lynxmotion_control/interactive.py", marker: "def _generate_smooth_segments", context: 20 },
-      commandWorker: { title: "interactive.py:_command_worker", file: "lynxmotion_control/interactive.py", marker: "def _command_worker", context: 26 },
-      addWaypoint: { title: "interactive.py:_handle_add_waypoint", file: "lynxmotion_control/interactive.py", marker: "def _handle_add_waypoint", context: 16 },
-      saveSubroutine: { title: "interactive.py:_handle_save_subroutine", file: "lynxmotion_control/interactive.py", marker: "def _handle_save_subroutine", context: 18 },
-      addToTimeline: { title: "interactive.py:_handle_add_to_timeline", file: "lynxmotion_control/interactive.py", marker: "def _handle_add_to_timeline", context: 18 },
-      loadTimeline: { title: "interactive.py:_load_saved_timeline", file: "lynxmotion_control/interactive.py", marker: "def _load_saved_timeline", context: 18 },
-      timelineWorker: { title: "interactive.py:_timeline_playback_worker", file: "lynxmotion_control/interactive.py", marker: "def _timeline_playback_worker", context: 22 },
-      relaxServos: { title: "serial_comm.py:relax_servos", file: "lynxmotion_control/serial_comm.py", marker: "def relax_servos", context: 16 },
-      serialMove: { title: "serial_comm.py:AL5ASerialController.move_joints", file: "lynxmotion_control/serial_comm.py", marker: "def move_joints", context: 18 },
-      printMove: { title: "serial_comm.py:PrintController.move_joints", file: "lynxmotion_control/serial_comm.py", marker: "class PrintController", context: 24 },
-      inverseIk: { title: "al5a_kinematics.py:AL5AKinematics.inverse", file: "lynxmotion_control/al5a_kinematics.py", marker: "def inverse", context: 24 },
-      forwardKinematics: { title: "al5a_kinematics.py:AL5AKinematics.forward", file: "lynxmotion_control/al5a_kinematics.py", marker: "def forward", context: 16 },
-      servoConfig: { title: "al5a_kinematics.py:ServoConfig", file: "lynxmotion_control/al5a_kinematics.py", marker: "class ServoConfig", context: 20 },
-      ssc32Bytes: { title: "serial_comm.py:SSC32Command.to_bytes", file: "lynxmotion_control/serial_comm.py", marker: "class SSC32Command", context: 24 },
-      waypoint: { title: "interactive.py:Waypoint", file: "lynxmotion_control/interactive.py", marker: "class Waypoint", context: 10 },
-      timelineEntry: { title: "interactive.py:TimelineEntry", file: "lynxmotion_control/interactive.py", marker: "class TimelineEntry", context: 12 }
+      mainEntry: { title: "CLI launcher → Interactive UI", file: "lynxmotion_control/__main__.py", marker: "def main", context: 900 },
+      interactiveInit: { title: "interactive.py:InteractiveArm.__init__", file: "lynxmotion_control/interactive.py", marker: "def __init__", context: 1200 },
+      interactiveClass: { title: "interactive.py:InteractiveArm class", file: "lynxmotion_control/interactive.py", marker: "class InteractiveArm", context: 1200 },
+      updateRobot: { title: "interactive.py:update_robot", file: "lynxmotion_control/interactive.py", marker: "def update_robot", context: 1100 },
+      homeSequence: { title: "interactive.py:_run_home_sequence", file: "lynxmotion_control/interactive.py", marker: "def _run_home_sequence", context: 900 },
+      onMotion: { title: "interactive.py:_on_motion", file: "lynxmotion_control/interactive.py", marker: "def _on_motion", context: 900 },
+      clampTarget: { title: "interactive.py:_clamp_target", file: "lynxmotion_control/interactive.py", marker: "def _clamp_target", context: 900 },
+      smoothSegments: { title: "interactive.py:_generate_smooth_segments", file: "lynxmotion_control/interactive.py", marker: "def _generate_smooth_segments", context: 900 },
+      commandWorker: { title: "interactive.py:_command_worker", file: "lynxmotion_control/interactive.py", marker: "def _command_worker", context: 1100 },
+      addWaypoint: { title: "interactive.py:_handle_add_waypoint", file: "lynxmotion_control/interactive.py", marker: "def _handle_add_waypoint", context: 900 },
+      slugifySubroutine: { title: "interactive.py:_slugify_subroutine_name", file: "lynxmotion_control/interactive.py", marker: "def _slugify_subroutine_name", context: 700 },
+      saveSubroutine: { title: "interactive.py:_handle_save_subroutine", file: "lynxmotion_control/interactive.py", marker: "def _handle_save_subroutine", context: 900 },
+      addToTimeline: { title: "interactive.py:_handle_add_to_timeline", file: "lynxmotion_control/interactive.py", marker: "def _handle_add_to_timeline", context: 900 },
+      loadTimeline: { title: "interactive.py:_load_saved_timeline", file: "lynxmotion_control/interactive.py", marker: "def _load_saved_timeline", context: 900 },
+      loadSubroutineWaypoints: { title: "interactive.py:_load_subroutine_waypoints", file: "lynxmotion_control/interactive.py", marker: "def _load_subroutine_waypoints", context: 900 },
+      timelineWorker: { title: "interactive.py:_timeline_playback_worker", file: "lynxmotion_control/interactive.py", marker: "def _timeline_playback_worker", context: 1100 },
+      waypointPlayback: { title: "interactive.py:_waypoint_playback_worker", file: "lynxmotion_control/interactive.py", marker: "def _waypoint_playback_worker", context: 900 },
+      executeSequence: { title: "interactive.py:_execute_waypoint_sequence", file: "lynxmotion_control/interactive.py", marker: "def _execute_waypoint_sequence", context: 1100 },
+      toggleCalibration: { title: "interactive.py:_toggle_calibration", file: "lynxmotion_control/interactive.py", marker: "def _toggle_calibration", context: 900 },
+      applyFeedback: { title: "interactive.py:_apply_feedback", file: "lynxmotion_control/interactive.py", marker: "def _apply_feedback", context: 900 },
+      sendMove: { title: "interactive.py:_send_move_command", file: "lynxmotion_control/interactive.py", marker: "def _send_move_command", context: 1000 },
+      saveTimeline: { title: "interactive.py:_save_timeline", file: "lynxmotion_control/interactive.py", marker: "def _save_timeline", context: 900 },
+      relaxServos: { title: "serial_comm.py:relax_servos", file: "lynxmotion_control/serial_comm.py", marker: "def relax_servos", context: 900 },
+      serialMove: { title: "serial_comm.py:AL5ASerialController.move_joints", file: "lynxmotion_control/serial_comm.py", marker: "def move_joints", context: 900 },
+      serialControllerClass: { title: "serial_comm.py:AL5ASerialController class", file: "lynxmotion_control/serial_comm.py", marker: "class AL5ASerialController", context: 900 },
+      printMove: { title: "serial_comm.py:PrintController", file: "lynxmotion_control/serial_comm.py", marker: "class PrintController", context: 900 },
+      inverseIk: { title: "al5a_kinematics.py:AL5AKinematics.inverse", file: "lynxmotion_control/al5a_kinematics.py", marker: "def inverse", context: 900 },
+      forwardKinematics: { title: "al5a_kinematics.py:AL5AKinematics.forward", file: "lynxmotion_control/al5a_kinematics.py", marker: "def forward", context: 900 },
+      kinematicsClass: { title: "al5a_kinematics.py:AL5AKinematics class", file: "lynxmotion_control/al5a_kinematics.py", marker: "class AL5AKinematics", context: 900 },
+      servoConfig: { title: "al5a_kinematics.py:ServoConfig", file: "lynxmotion_control/al5a_kinematics.py", marker: "class ServoConfig", context: 900 },
+      ssc32Bytes: { title: "serial_comm.py:SSC32Command", file: "lynxmotion_control/serial_comm.py", marker: "class SSC32Command", context: 900 },
+      waypoint: { title: "interactive.py:Waypoint", file: "lynxmotion_control/interactive.py", marker: "class Waypoint", context: 700 },
+      timelineEntry: { title: "interactive.py:TimelineEntry", file: "lynxmotion_control/interactive.py", marker: "class TimelineEntry", context: 700 },
+      testsKinematics: { title: "tests/test_kinematics.py::test_inverse_roundtrip", file: "tests/test_kinematics.py", marker: "def test_inverse_roundtrip", context: 700 }
     };
 
     const NODE_SNIPPET_KEYS = {
       "diagram-journey": {
         User: "mainEntry",
-        Operator: "mainEntry",
         CLI: "mainEntry",
         ControllerSel: "mainEntry",
         Print: "printMove",
@@ -889,54 +902,40 @@ classDiagram
         UI: "interactiveInit",
         Mode: "updateRobot",
         Teleop: "updateRobot",
-        TeleopState: "updateRobot",
+        TeleopState: "commandWorker",
         Teach: "addWaypoint",
         TeachState: "addWaypoint",
         Timeline: "loadTimeline",
         TimelineState: "timelineWorker",
-        Calibration: "commandWorker",
-        SafetyState: "commandWorker",
-        Inspect: "servoConfig",
-        Code: "updateRobot",
-        Listing: "ssc32Bytes",
-        Classes: "interactiveInit",
+        Calibration: "toggleCalibration",
+        SafetyState: "clampTarget",
+        Inspect: "interactiveClass",
+        Code: "mainEntry",
+        Listing: "mainEntry",
+        Classes: "interactiveClass",
         Architecture: "interactiveInit",
-        StateMachine: "commandWorker",
-        main: "mainEntry",
-        openDiagramFullscreen: "mainEntry",
-        __default: "mainEntry"
+        StateMachine: "commandWorker"
       },
       "diagram-architecture": {
         User: "mainEntry",
-        OperatorLayer: "mainEntry",
-        ApplicationLayer: "mainEntry",
-        Launcher: "mainEntry",
         CLI: "mainEntry",
-        UI: "interactiveInit",
         Interactive: "interactiveInit",
-        LogicLayer: "updateRobot",
-        Kinematics: "inverseIk",
+        Kinematics: "kinematicsClass",
         Queueing: "smoothSegments",
-        Persistence: "saveSubroutine",
-        ControllerLayer: "serialMove",
-        SerialCtrl: "serialMove",
+        Persistence: "saveTimeline",
+        SerialCtrl: "serialControllerClass",
         PrintCtrl: "printMove",
-        PersistenceLayer: "saveSubroutine",
-        LocalFiles: "saveSubroutine",
+        LocalFiles: "saveTimeline",
         Paths: "saveSubroutine",
         Timeline: "loadTimeline",
-        HardwareLayer: "relaxServos",
         Hardware: "relaxServos",
-        TestLayer: "inverseIk",
-        Tests: "inverseIk",
-        TimelineLayer: "loadTimeline",
-        __default: "mainEntry"
+        Tests: "testsKinematics"
       },
       "diagram-teleop": {
         Start: "interactiveInit",
-        HomePose: "interactiveInit",
-        InputCheck: "updateRobot",
-        TargetUpdate: "updateRobot",
+        HomePose: "homeSequence",
+        InputCheck: "onMotion",
+        TargetUpdate: "onMotion",
         Clamp: "clampTarget",
         IK: "inverseIk",
         ValidIK: "updateRobot",
@@ -945,57 +944,56 @@ classDiagram
         Queue: "commandWorker",
         Worker: "commandWorker",
         Controller: "serialMove",
-        Feedback: "commandWorker",
-        __default: "interactiveInit"
+        Feedback: "applyFeedback"
       },
       "diagram-teach": {
         Enter: "interactiveInit",
         Pose: "updateRobot",
         Capture: "addWaypoint",
         More: "addWaypoint",
-        Name: "saveSubroutine",
+        Name: "slugifySubroutine",
         Save: "saveSubroutine",
         Next: "addToTimeline",
-        Play: "addWaypoint",
-        Add: "addToTimeline",
-        subroutine: "saveSubroutine",
-        waypoint: "addWaypoint",
-        __default: "interactiveInit"
+        Play: "waypointPlayback",
+        Add: "addToTimeline"
       },
       "diagram-timeline": {
         Load: "loadTimeline",
         SelectEntry: "loadTimeline",
-        Hydrate: "loadTimeline",
-        QueuePath: "timelineWorker",
+        Hydrate: "loadSubroutineWaypoints",
+        QueuePath: "executeSequence",
         Monitor: "timelineWorker",
         Done: "timelineWorker",
-        Idle: "commandWorker",
-        __default: "loadTimeline"
+        Idle: "updateRobot"
       },
       "diagram-safety": {
         Cmd: "updateRobot",
         Limits: "clampTarget",
         SoftStart: "smoothSegments",
         Enqueue: "commandWorker",
-        Calib: "commandWorker",
+        Calib: "toggleCalibration",
         Relax: "relaxServos",
-        Wait: "commandWorker",
-        Execute: "serialMove",
-        Persist: "saveSubroutine",
-        Monitor: "commandWorker",
-        __default: "updateRobot"
+        Wait: "toggleCalibration",
+        Execute: "sendMove",
+        Persist: "saveTimeline",
+        Monitor: "applyFeedback"
       },
       "diagram-state": {
-        relax_servos: "relaxServos",
-        __default: "mainEntry"
+        Home: "homeSequence",
+        Idle: "updateRobot",
+        Teleop: "updateRobot",
+        Teaching: "addWaypoint",
+        Playback: "timelineWorker",
+        Calibration: "toggleCalibration",
+        Relaxed: "relaxServos"
       },
       "diagram-classes": {
-        InteractiveArm: "interactiveInit",
-        AL5AKinematics: "forwardKinematics",
-        AL5ASerialController: "serialMove",
+        InteractiveArm: "interactiveClass",
+        AL5AKinematics: "kinematicsClass",
+        AL5ASerialController: "serialControllerClass",
         PrintController: "printMove",
-        SSC32Command: "ssc32Bytes",
         ServoConfig: "servoConfig",
+        SSC32Command: "ssc32Bytes",
         Waypoint: "waypoint",
         TimelineEntry: "timelineEntry",
         angle_to_pulse: "servoConfig",
@@ -1010,9 +1008,8 @@ classDiagram
         _command_worker: "commandWorker",
         update_robot: "updateRobot",
         _load_saved_timeline: "loadTimeline",
-        _playback_subroutine: "timelineWorker",
-        _save_subroutine: "saveSubroutine",
-        __default: "interactiveInit"
+        _playback_subroutine: "executeSequence",
+        _save_subroutine: "saveSubroutine"
       }
     };
 
@@ -1044,7 +1041,7 @@ classDiagram
       return FILE_CACHE[path];
     }
 
-    function extractSnippet(text, marker, maxChars = 900) {
+    function extractSnippet(text, marker, maxChars = 1200) {
       if (!text) return "Code unavailable";
 
       const lines = text.split(/\r?\n/);
@@ -1060,30 +1057,34 @@ classDiagram
         }
       }
 
+      const startIndent = (lines[start].match(/^(\s*)/) || ["", ""])[1].length;
       const snippet = [];
       let length = 0;
-      for (let i = start; i < lines.length && length < maxChars; i++) {
-        snippet.push(lines[i]);
-        length += lines[i].length + 1; // include newline spacing
+      for (let i = start; i < lines.length; i++) {
+        const line = lines[i];
+        const indent = (line.match(/^(\s*)/) || ["", ""])[1].length;
+        const trimmed = line.trim();
 
-        // Stop early at the next top-level definition if we've already shown the marker
-        if (i > index && length >= maxChars * 0.75) {
-          const isBoundary = /^\s*(async\s+)?def\s+/.test(lines[i]) || /^\s*class\s+/.test(lines[i]);
-          const isDedent = lines[i].trim() === "" && lines[i + 1] && lines[i + 1].match(/^\S/);
-          if (isBoundary || isDedent) break;
+        if (i > start && trimmed && indent < startIndent) {
+          break;
         }
+
+        snippet.push(line);
+        length += line.length + 1; // include newline spacing
+        if (length >= maxChars) break;
       }
 
-      return snippet.join("\n");
+      return snippet.join("\n").trimEnd() || "Code unavailable";
     }
 
     async function resolveSnippet(key) {
       const def = SNIPPET_DEFS[key];
       if (!def) {
+        console.warn(`Missing snippet definition for key: ${key}`);
         return { title: "Unmapped node", file: "", code: "No snippet configured" };
       }
       const text = await loadFile(def.file);
-      const code = extractSnippet(text, def.marker, def.context);
+      const code = extractSnippet(text, def.marker, def.context || 1200);
       return { title: def.title, file: def.file, code };
     }
 
@@ -1092,11 +1093,12 @@ classDiagram
       for (const [diagramId, nodeMap] of Object.entries(NODE_SNIPPET_KEYS)) {
         refs[diagramId] = {};
         for (const [nodeId, snippetKey] of Object.entries(nodeMap)) {
-          if (nodeId === "__default") continue;
+          if (!snippetKey) {
+            console.warn(`No snippet key mapped for ${diagramId} node ${nodeId}`);
+            refs[diagramId][nodeId] = { title: "Unmapped node", file: "", code: "No snippet configured" };
+            continue;
+          }
           refs[diagramId][nodeId] = await resolveSnippet(snippetKey);
-        }
-        if (nodeMap.__default) {
-          refs[diagramId].__default = await resolveSnippet(nodeMap.__default);
         }
       }
       return refs;
@@ -1144,7 +1146,7 @@ classDiagram
       nodes.forEach(function (node) {
         const rawId = node.id || "";
         const baseId = rawId.includes("-") ? rawId.split("-").pop() : rawId;
-        const ref = refs[baseId] || refs.__default || {
+        const ref = refs[baseId] || {
           title: "Code reference",
           file: "",
           code: "Snippet not configured"
