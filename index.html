@@ -892,6 +892,8 @@ classDiagram
       testsKinematics: { title: "tests/test_kinematics.py::test_inverse_roundtrip", file: "tests/test_kinematics.py", marker: "def test_inverse_roundtrip", context: 700 }
     };
 
+    let SNIPPET_CACHE = {};
+
     const NODE_SNIPPET_KEYS = {
       "diagram-journey": {
         User: "mainEntry",
@@ -1078,7 +1080,23 @@ classDiagram
       return snippet.join("\n").trimEnd() || "Code unavailable";
     }
 
+    async function loadSnippetCache() {
+      try {
+        const res = await fetch("snippet_cache.json");
+        if (res.ok) {
+          SNIPPET_CACHE = await res.json();
+          return;
+        }
+        console.warn("snippet_cache.json missing; falling back to live file fetch");
+      } catch (err) {
+        console.warn("Unable to preload snippet cache", err);
+      }
+    }
+
     async function resolveSnippet(key) {
+      if (SNIPPET_CACHE[key]) {
+        return SNIPPET_CACHE[key];
+      }
       const def = SNIPPET_DEFS[key];
       if (!def) {
         console.warn(`Missing snippet definition for key: ${key}`);
@@ -1182,6 +1200,7 @@ classDiagram
     });
 
     document.addEventListener("DOMContentLoaded", async function () {
+      await loadSnippetCache();
       NODE_CODE_REFS = await buildNodeCodeRefs();
 
       // Load sources into inline mermaid divs
