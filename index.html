@@ -555,21 +555,20 @@ flowchart TD
               ⤢ Fullscreen
             </button>
             <div class="mermaid mermaid-inline" id="diagram-teach"></div>
-            <!-- Escape placeholders like <slug> so Mermaid doesn't misparse HTML tags -->
             <script type="text/plain" class="mermaid-src" id="src-diagram-teach">
 flowchart TD
-  Enter([Open Path panel]) --> Pose[Use sliders/drag to set pose]
-  Pose --> Capture[Capture waypoint (XYZ, wrist_pitch, duration)]
+  Enter([Open Path panel]) --> Pose["Use sliders/drag to set pose"]
+  Pose --> Capture["Capture waypoint (XYZ, wrist_pitch, duration)"]
   Capture --> More{More waypoints?}
 
   More -->|Yes| Pose
-  More -->|No| Name[Name subroutine → slug]
+  More -->|No| Name["Name subroutine (slug)"]
 
-  Name --> Save[Persist JSON under subroutines/&lt;slug&gt;.json]
+  Name --> Save["Persist JSON as subroutines/slug.json"]
 
   Save --> Next{Next action?}
-  Next -->|Play locally| Play[Queue waypoints now via _playback_path]
-  Next -->|Add to timeline| Add[Append slug/duration into timeline.json]
+  Next -->|Play locally| Play["Queue waypoints now via _playback_path"]
+  Next -->|Add to timeline| Add["Append slug/duration into timeline.json"]
             </script>
           </div>
           <div class="refs">Refs: <code>interactive.py:_record_current_waypoint</code>, <code>interactive.py:_save_subroutine</code>, <code>interactive.py:_playback_path</code>, <code>interactive.py:SUBROUTINE_STORAGE_DIR</code>, <code>interactive.py:TIMELINE_STORAGE_PATH</code></div>
