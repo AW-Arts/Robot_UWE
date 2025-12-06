@@ -1174,14 +1174,19 @@ classDiagram
       if (!rawId) return "";
       // Mermaid prefixes flowchart IDs with the diagram name, e.g. `flowchart-diagram-teleop-TargetUpdate`
       // and class diagrams with `classid-<Name>` or `classDiagram-...-<Name>`.
+      // In fullscreen renders Mermaid also appends numeric suffixes to enforce unique IDs (e.g. `...-TargetUpdate-42`).
       const parts = rawId.split("-").filter(Boolean);
       if (parts.length === 0) return rawId;
 
-      // Try the last segment first (common flowchart case)
-      const tail = parts[parts.length - 1];
-      if (tail) return tail;
+      // Prefer the last non-numeric segment so we ignore auto-increment suffixes.
+      for (let i = parts.length - 1; i >= 0; i--) {
+        if (!/^\d+$/.test(parts[i])) {
+          return parts[i];
+        }
+      }
 
-      return rawId;
+      // Fallback to the final segment if everything is numeric.
+      return parts[parts.length - 1];
     }
 
     async function resolveNodeRef(diagramId, rawId, refs) {
