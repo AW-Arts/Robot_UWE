@@ -1044,13 +1044,37 @@ classDiagram
       return FILE_CACHE[path];
     }
 
-    function extractSnippet(text, marker, context = 14) {
+    function extractSnippet(text, marker, maxChars = 900) {
       if (!text) return "Code unavailable";
-      const lines = text.split(/\n?\n+/);
-      const index = lines.findIndex((line) => line.includes(marker));
-      const start = Math.max(0, (index >= 0 ? index : 0) - 1);
-      const end = Math.min(lines.length, start + context);
-      return lines.slice(start, end).join("\n+");
+
+      const lines = text.split(/\r?\n/);
+      let index = lines.findIndex((line) => line.includes(marker));
+      if (index < 0) index = 0;
+
+      // Walk backwards to the start of the nearest function/class block
+      let start = index;
+      for (let i = index; i >= 0; i--) {
+        if (/^\s*(async\s+)?def\s+/.test(lines[i]) || /^\s*class\s+/.test(lines[i])) {
+          start = i;
+          break;
+        }
+      }
+
+      const snippet = [];
+      let length = 0;
+      for (let i = start; i < lines.length && length < maxChars; i++) {
+        snippet.push(lines[i]);
+        length += lines[i].length + 1; // include newline spacing
+
+        // Stop early at the next top-level definition if we've already shown the marker
+        if (i > index && length >= maxChars * 0.75) {
+          const isBoundary = /^\s*(async\s+)?def\s+/.test(lines[i]) || /^\s*class\s+/.test(lines[i]);
+          const isDedent = lines[i].trim() === "" && lines[i + 1] && lines[i + 1].match(/^\S/);
+          if (isBoundary || isDedent) break;
+        }
+      }
+
+      return snippet.join("\n");
     }
 
     async function resolveSnippet(key) {
@@ -1120,8 +1144,11 @@ classDiagram
       nodes.forEach(function (node) {
         const rawId = node.id || "";
         const baseId = rawId.includes("-") ? rawId.split("-").pop() : rawId;
-        const ref = refs[baseId] || refs.__default;
-        if (!ref) return;
+        const ref = refs[baseId] || refs.__default || {
+          title: "Code reference",
+          file: "",
+          code: "Snippet not configured"
+        };
         node.style.cursor = "help";
         node.addEventListener("mouseenter", function (evt) {
           showTooltip(evt, ref);
