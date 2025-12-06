@@ -518,8 +518,8 @@ flowchart TD
   InputCheck -->|Drag gizmo / scroll / sliders| TargetUpdate[Update target XYZ + wrist_pitch]
   InputCheck -->|Keyboard modifiers| TargetUpdate
 
-  TargetUpdate --> Clamp[Clamp to workspace &amp; hard servo limits]<br/>(_apply_workspace_limits)
-  Clamp --> IK[AL5AKinematics.inverse]<br/>(XYZ → base/shoulder/elbow/wrist)
+  TargetUpdate --> Clamp["Clamp to workspace &amp; hard servo limits<br/>(_apply_workspace_limits)"]
+  Clamp --> IK["AL5AKinematics.inverse<br/>(XYZ → base/shoulder/elbow/wrist)"]
 
   IK --> ValidIK{IK valid?}
   ValidIK -->|No| Reject[Reject move &amp; log warning]
@@ -563,7 +563,7 @@ flowchart TD
   More -->|Yes| Pose
   More -->|No| Name[Name subroutine → slug]
 
-  Name --> Save[Persist JSON under subroutines/<slug>.json]
+  Name --> Save[Persist JSON under subroutines/&lt;slug&gt;.json]
 
   Save --> Next{Next action?}
   Next -->|Play locally| Play[Queue waypoints now via _playback_path]
@@ -629,15 +629,15 @@ flowchart TD
             <div class="mermaid mermaid-inline" id="diagram-safety"></div>
             <script type="text/plain" class="mermaid-src" id="src-diagram-safety">
 flowchart TD
-  Cmd([Command requested]) --> Limits[Clamp workspace + servo hard limits]<br/>(_apply_workspace_limits)
+  Cmd([Command requested]) --> Limits["Clamp workspace + servo hard limits<br/>(_apply_workspace_limits)"]
 
-  Limits --> SoftStart[Soft-start + velocity smoothing]<br/>(_smooth_command)
-  SoftStart --> Enqueue[Push segments to queue]<br/>(_enqueue_command_segments)
+  Limits --> SoftStart["Soft-start + velocity smoothing<br/>(_smooth_command)"]
+  SoftStart --> Enqueue["Push segments to queue<br/>(_enqueue_command_segments)"]
 
-  Enqueue --> Calib{Calibration active?}<br/>(_calibration_active flag)
+  Enqueue --> Calib["Calibration active?<br/>(_calibration_active flag)"]
 
-  Calib -->|Yes| Relax[Relax all servos]<br/>(AL5ASerialController.relax_servos)
-  Relax --> Wait[Wait + block queue]<br/>(_stop_for_calibration)
+  Calib -->|Yes| Relax[Relax all servos<br/>(AL5ASerialController.relax_servos)]
+  Relax --> Wait[Wait + block queue<br/>(_stop_for_calibration)]
   Wait --> Limits
 
   Calib -->|No| Execute[Send move_joints to controller]
