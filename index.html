@@ -181,6 +181,48 @@
       padding: 0 0.35rem;
     }
 
+    .code-tooltip {
+      position: fixed;
+      display: none;
+      max-width: 520px;
+      z-index: 50;
+      background: rgba(15, 23, 42, 0.98);
+      border: 1px solid rgba(148,163,184,0.55);
+      border-radius: 10px;
+      box-shadow: 0 18px 40px rgba(0, 0, 0, 0.7);
+      padding: 0.75rem 0.9rem;
+      color: var(--text);
+      font-size: 0.82rem;
+      line-height: 1.45;
+    }
+
+    .code-tooltip h4 {
+      margin: 0 0 0.35rem;
+      font-size: 0.9rem;
+      font-weight: 550;
+      color: var(--text);
+    }
+
+    .code-tooltip .code-meta {
+      color: var(--text-soft);
+      margin-bottom: 0.35rem;
+      font-size: 0.78rem;
+    }
+
+    .code-tooltip pre {
+      margin: 0;
+      padding: 0.5rem 0.6rem;
+      background: rgba(2, 6, 23, 0.85);
+      border-radius: 8px;
+      border: 1px solid rgba(59, 130, 246, 0.25);
+      overflow: auto;
+      font-family: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: 0.78rem;
+      line-height: 1.4;
+      color: var(--text);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    }
+
     .card-meta {
       font-size: 0.8rem;
       color: var(--text-soft);
@@ -813,13 +855,297 @@ classDiagram
 
   <!-- JS: init Mermaid + fullscreen wiring -->
   <script>
+    const SNIPPET_DEFS = {
+      mainEntry: { title: "CLI launcher → Interactive UI", file: "lynxmotion_control/__main__.py", marker: "def main", context: 16 },
+      interactiveInit: { title: "interactive.py:InteractiveArm.__init__", file: "lynxmotion_control/interactive.py", marker: "def __init__", context: 26 },
+      updateRobot: { title: "interactive.py:update_robot", file: "lynxmotion_control/interactive.py", marker: "def update_robot", context: 22 },
+      clampTarget: { title: "interactive.py:_clamp_target", file: "lynxmotion_control/interactive.py", marker: "def _clamp_target", context: 12 },
+      smoothSegments: { title: "interactive.py:_generate_smooth_segments", file: "lynxmotion_control/interactive.py", marker: "def _generate_smooth_segments", context: 20 },
+      commandWorker: { title: "interactive.py:_command_worker", file: "lynxmotion_control/interactive.py", marker: "def _command_worker", context: 26 },
+      addWaypoint: { title: "interactive.py:_handle_add_waypoint", file: "lynxmotion_control/interactive.py", marker: "def _handle_add_waypoint", context: 16 },
+      saveSubroutine: { title: "interactive.py:_handle_save_subroutine", file: "lynxmotion_control/interactive.py", marker: "def _handle_save_subroutine", context: 18 },
+      addToTimeline: { title: "interactive.py:_handle_add_to_timeline", file: "lynxmotion_control/interactive.py", marker: "def _handle_add_to_timeline", context: 18 },
+      loadTimeline: { title: "interactive.py:_load_saved_timeline", file: "lynxmotion_control/interactive.py", marker: "def _load_saved_timeline", context: 18 },
+      timelineWorker: { title: "interactive.py:_timeline_playback_worker", file: "lynxmotion_control/interactive.py", marker: "def _timeline_playback_worker", context: 22 },
+      relaxServos: { title: "serial_comm.py:relax_servos", file: "lynxmotion_control/serial_comm.py", marker: "def relax_servos", context: 16 },
+      serialMove: { title: "serial_comm.py:AL5ASerialController.move_joints", file: "lynxmotion_control/serial_comm.py", marker: "def move_joints", context: 18 },
+      printMove: { title: "serial_comm.py:PrintController.move_joints", file: "lynxmotion_control/serial_comm.py", marker: "class PrintController", context: 24 },
+      inverseIk: { title: "al5a_kinematics.py:AL5AKinematics.inverse", file: "lynxmotion_control/al5a_kinematics.py", marker: "def inverse", context: 24 },
+      forwardKinematics: { title: "al5a_kinematics.py:AL5AKinematics.forward", file: "lynxmotion_control/al5a_kinematics.py", marker: "def forward", context: 16 },
+      servoConfig: { title: "al5a_kinematics.py:ServoConfig", file: "lynxmotion_control/al5a_kinematics.py", marker: "class ServoConfig", context: 20 },
+      ssc32Bytes: { title: "serial_comm.py:SSC32Command.to_bytes", file: "lynxmotion_control/serial_comm.py", marker: "class SSC32Command", context: 24 },
+      waypoint: { title: "interactive.py:Waypoint", file: "lynxmotion_control/interactive.py", marker: "class Waypoint", context: 10 },
+      timelineEntry: { title: "interactive.py:TimelineEntry", file: "lynxmotion_control/interactive.py", marker: "class TimelineEntry", context: 12 }
+    };
+
+    const NODE_SNIPPET_KEYS = {
+      "diagram-journey": {
+        User: "mainEntry",
+        Operator: "mainEntry",
+        CLI: "mainEntry",
+        ControllerSel: "mainEntry",
+        Print: "printMove",
+        Serial: "serialMove",
+        UI: "interactiveInit",
+        Mode: "updateRobot",
+        Teleop: "updateRobot",
+        TeleopState: "updateRobot",
+        Teach: "addWaypoint",
+        TeachState: "addWaypoint",
+        Timeline: "loadTimeline",
+        TimelineState: "timelineWorker",
+        Calibration: "commandWorker",
+        SafetyState: "commandWorker",
+        Inspect: "servoConfig",
+        Code: "updateRobot",
+        Listing: "ssc32Bytes",
+        Classes: "interactiveInit",
+        Architecture: "interactiveInit",
+        StateMachine: "commandWorker",
+        main: "mainEntry",
+        openDiagramFullscreen: "mainEntry",
+        __default: "mainEntry"
+      },
+      "diagram-architecture": {
+        User: "mainEntry",
+        OperatorLayer: "mainEntry",
+        ApplicationLayer: "mainEntry",
+        Launcher: "mainEntry",
+        CLI: "mainEntry",
+        UI: "interactiveInit",
+        Interactive: "interactiveInit",
+        LogicLayer: "updateRobot",
+        Kinematics: "inverseIk",
+        Queueing: "smoothSegments",
+        Persistence: "saveSubroutine",
+        ControllerLayer: "serialMove",
+        SerialCtrl: "serialMove",
+        PrintCtrl: "printMove",
+        PersistenceLayer: "saveSubroutine",
+        LocalFiles: "saveSubroutine",
+        Paths: "saveSubroutine",
+        Timeline: "loadTimeline",
+        HardwareLayer: "relaxServos",
+        Hardware: "relaxServos",
+        TestLayer: "inverseIk",
+        Tests: "inverseIk",
+        TimelineLayer: "loadTimeline",
+        __default: "mainEntry"
+      },
+      "diagram-teleop": {
+        Start: "interactiveInit",
+        HomePose: "interactiveInit",
+        InputCheck: "updateRobot",
+        TargetUpdate: "updateRobot",
+        Clamp: "clampTarget",
+        IK: "inverseIk",
+        ValidIK: "updateRobot",
+        Reject: "updateRobot",
+        Smooth: "smoothSegments",
+        Queue: "commandWorker",
+        Worker: "commandWorker",
+        Controller: "serialMove",
+        Feedback: "commandWorker",
+        __default: "interactiveInit"
+      },
+      "diagram-teach": {
+        Enter: "interactiveInit",
+        Pose: "updateRobot",
+        Capture: "addWaypoint",
+        More: "addWaypoint",
+        Name: "saveSubroutine",
+        Save: "saveSubroutine",
+        Next: "addToTimeline",
+        Play: "addWaypoint",
+        Add: "addToTimeline",
+        subroutine: "saveSubroutine",
+        waypoint: "addWaypoint",
+        __default: "interactiveInit"
+      },
+      "diagram-timeline": {
+        Load: "loadTimeline",
+        SelectEntry: "loadTimeline",
+        Hydrate: "loadTimeline",
+        QueuePath: "timelineWorker",
+        Monitor: "timelineWorker",
+        Done: "timelineWorker",
+        Idle: "commandWorker",
+        __default: "loadTimeline"
+      },
+      "diagram-safety": {
+        Cmd: "updateRobot",
+        Limits: "clampTarget",
+        SoftStart: "smoothSegments",
+        Enqueue: "commandWorker",
+        Calib: "commandWorker",
+        Relax: "relaxServos",
+        Wait: "commandWorker",
+        Execute: "serialMove",
+        Persist: "saveSubroutine",
+        Monitor: "commandWorker",
+        __default: "updateRobot"
+      },
+      "diagram-state": {
+        relax_servos: "relaxServos",
+        __default: "mainEntry"
+      },
+      "diagram-classes": {
+        InteractiveArm: "interactiveInit",
+        AL5AKinematics: "forwardKinematics",
+        AL5ASerialController: "serialMove",
+        PrintController: "printMove",
+        SSC32Command: "ssc32Bytes",
+        ServoConfig: "servoConfig",
+        Waypoint: "waypoint",
+        TimelineEntry: "timelineEntry",
+        angle_to_pulse: "servoConfig",
+        pulse_to_angle: "servoConfig",
+        forward: "forwardKinematics",
+        inverse: "inverseIk",
+        move_joints: "serialMove",
+        relax_servos: "relaxServos",
+        to_bytes: "ssc32Bytes",
+        _apply_workspace_limits: "clampTarget",
+        _smooth_command: "smoothSegments",
+        _command_worker: "commandWorker",
+        update_robot: "updateRobot",
+        _load_saved_timeline: "loadTimeline",
+        _playback_subroutine: "timelineWorker",
+        _save_subroutine: "saveSubroutine",
+        __default: "interactiveInit"
+      }
+    };
+
+    const FILE_CACHE = {};
+    let NODE_CODE_REFS = {};
+
+    function escapeHtml(str) {
+      return str
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    async function loadFile(path) {
+      if (!FILE_CACHE[path]) {
+        FILE_CACHE[path] = fetch(path)
+          .then((res) => {
+            if (!res.ok) {
+              throw new Error(`Failed to load ${path}`);
+            }
+            return res.text();
+          })
+          .catch((err) => {
+            console.error(err);
+            return "";
+          });
+      }
+      return FILE_CACHE[path];
+    }
+
+    function extractSnippet(text, marker, context = 14) {
+      if (!text) return "Code unavailable";
+      const lines = text.split(/?
+/);
+      const index = lines.findIndex((line) => line.includes(marker));
+      const start = Math.max(0, (index >= 0 ? index : 0) - 1);
+      const end = Math.min(lines.length, start + context);
+      return lines.slice(start, end).join("
+");
+    }
+
+    async function resolveSnippet(key) {
+      const def = SNIPPET_DEFS[key];
+      if (!def) {
+        return { title: "Unmapped node", file: "", code: "No snippet configured" };
+      }
+      const text = await loadFile(def.file);
+      const code = extractSnippet(text, def.marker, def.context);
+      return { title: def.title, file: def.file, code };
+    }
+
+    async function buildNodeCodeRefs() {
+      const refs = {};
+      for (const [diagramId, nodeMap] of Object.entries(NODE_SNIPPET_KEYS)) {
+        refs[diagramId] = {};
+        for (const [nodeId, snippetKey] of Object.entries(nodeMap)) {
+          if (nodeId === "__default") continue;
+          refs[diagramId][nodeId] = await resolveSnippet(snippetKey);
+        }
+        if (nodeMap.__default) {
+          refs[diagramId].__default = await resolveSnippet(nodeMap.__default);
+        }
+      }
+      return refs;
+    }
+
+    const codeTooltip = document.createElement("div");
+    codeTooltip.className = "code-tooltip";
+    document.body.appendChild(codeTooltip);
+
+    function positionTooltip(evt) {
+      const padding = 12;
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+      const tooltipRect = codeTooltip.getBoundingClientRect();
+      let left = evt.clientX + padding;
+      let top = evt.clientY + padding;
+      if (left + tooltipRect.width > viewportWidth - padding) {
+        left = viewportWidth - tooltipRect.width - padding;
+      }
+      if (top + tooltipRect.height > viewportHeight - padding) {
+        top = viewportHeight - tooltipRect.height - padding;
+      }
+      codeTooltip.style.left = `${left}px`;
+      codeTooltip.style.top = `${top}px`;
+    }
+
+    function showTooltip(evt, ref) {
+      const title = escapeHtml(ref.title || "Code reference");
+      const file = escapeHtml(ref.file || "");
+      const code = escapeHtml(ref.code || "Not available");
+      codeTooltip.innerHTML = `<h4>${title}</h4><div class="code-meta">${file}</div><pre><code>${code}</code></pre>`;
+      codeTooltip.style.display = "block";
+      positionTooltip(evt);
+    }
+
+    function hideTooltip() {
+      codeTooltip.style.display = "none";
+    }
+
+    function annotateDiagram(container, refs) {
+      if (!container || !refs) return;
+      const svg = container.querySelector("svg");
+      if (!svg) return;
+      const nodes = svg.querySelectorAll("g.node");
+      nodes.forEach(function (node) {
+        const rawId = node.id || "";
+        const baseId = rawId.includes("-") ? rawId.split("-").pop() : rawId;
+        const ref = refs[baseId] || refs.__default;
+        if (!ref) return;
+        node.style.cursor = "help";
+        node.addEventListener("mouseenter", function (evt) {
+          showTooltip(evt, ref);
+        });
+        node.addEventListener("mousemove", positionTooltip);
+        node.addEventListener("mouseleave", hideTooltip);
+        const title = node.querySelector("title");
+        if (title) {
+          title.textContent = ref.title || title.textContent;
+        }
+      });
+    }
+
     mermaid.initialize({
       startOnLoad: false,
       theme: "dark",
       securityLevel: "loose"
     });
 
-    document.addEventListener("DOMContentLoaded", function () {
+    document.addEventListener("DOMContentLoaded", async function () {
+      NODE_CODE_REFS = await buildNodeCodeRefs();
+
       // Load sources into inline mermaid divs
       document.querySelectorAll(".mermaid-src").forEach(function (src) {
         var id = src.id.replace("src-", "");
@@ -830,7 +1156,10 @@ classDiagram
       });
 
       // Render all inline diagrams
-      mermaid.init(undefined, document.querySelectorAll(".mermaid-inline"));
+      await mermaid.run({ querySelector: ".mermaid-inline" });
+      document.querySelectorAll(".mermaid-inline").forEach(function (diagram) {
+        annotateDiagram(diagram, NODE_CODE_REFS[diagram.id]);
+      });
 
       // Modal wiring
       var modal = document.getElementById("diagram-modal");
@@ -861,6 +1190,7 @@ classDiagram
         try {
           var renderResult = await mermaid.render(renderId, code);
           modalDiagram.innerHTML = renderResult.svg;
+          annotateDiagram(modalDiagram, NODE_CODE_REFS[targetId]);
         } catch (err) {
           console.error("Failed to render diagram", err);
           modalDiagram.textContent = "Unable to render diagram";
