@@ -181,6 +181,48 @@
       padding: 0 0.35rem;
     }
 
+    .code-tooltip {
+      position: fixed;
+      display: none;
+      max-width: 520px;
+      z-index: 50;
+      background: rgba(15, 23, 42, 0.98);
+      border: 1px solid rgba(148,163,184,0.55);
+      border-radius: 10px;
+      box-shadow: 0 18px 40px rgba(0, 0, 0, 0.7);
+      padding: 0.75rem 0.9rem;
+      color: var(--text);
+      font-size: 0.82rem;
+      line-height: 1.45;
+    }
+
+    .code-tooltip h4 {
+      margin: 0 0 0.35rem;
+      font-size: 0.9rem;
+      font-weight: 550;
+      color: var(--text);
+    }
+
+    .code-tooltip .code-meta {
+      color: var(--text-soft);
+      margin-bottom: 0.35rem;
+      font-size: 0.78rem;
+    }
+
+    .code-tooltip pre {
+      margin: 0;
+      padding: 0.5rem 0.6rem;
+      background: rgba(2, 6, 23, 0.85);
+      border-radius: 8px;
+      border: 1px solid rgba(59, 130, 246, 0.25);
+      overflow: auto;
+      font-family: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: 0.78rem;
+      line-height: 1.4;
+      color: var(--text);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    }
+
     .card-meta {
       font-size: 0.8rem;
       color: var(--text-soft);
@@ -813,6 +855,306 @@ classDiagram
 
   <!-- JS: init Mermaid + fullscreen wiring -->
   <script>
+    const CODE_SNIPPETS = {
+      mainEntry: {
+        title: "CLI launcher → Interactive UI",
+        file: "lynxmotion_control/__main__.py",
+        code: `def main() -> None:\n    parser = argparse.ArgumentParser(description="Interactive Lynxmotion AL5A controller")\n    parser.add_argument("--port", help="Serial port for SSC-32/SSC-32U controller")\n    parser.add_argument("--simulate", action="store_true", help="Use simulation mode (no hardware required)")\n    ...\n    controller = PrintController() if args.simulate or not args.port else AL5ASerialController(args.port)\n    run_demo(controller, move_time_ms=args.time)`
+      },
+      updateRobot: {
+        title: "interactive.py:update_robot",
+        file: "lynxmotion_control/interactive.py",
+        code: `requested = self._clamp_target(self.target)\nself.target[:] = requested\njoints = self._apply_hard_limits_to_ik(list(self.kin.inverse(requested[[0, 1, 2]], self.wrist_pitch)))\n...\nfull_joints = self._clamp_joint_list(full_joints)\nself._send_move_command(full_joints, move_time_ms=self.move_time_ms, soft_start=True)`
+      },
+      clampTarget: {
+        title: "interactive.py:_clamp_target",
+        file: "lynxmotion_control/interactive.py",
+        code: `def _clamp_target(self, target):\n    result = np.array(target, dtype=float)\n    x_limits = self.workspace_limits.get("x", (-0.3, 0.3))\n    y_limits = self.workspace_limits.get("y", (-0.3, 0.3))\n    z_limits = self.workspace_limits.get("z", (0.0, 0.4))\n    result[0] = float(np.clip(result[0], *x_limits))\n    result[1] = float(np.clip(result[1], *y_limits))\n    result[2] = float(np.clip(result[2], *z_limits))\n    return result`
+      },
+      smoothSegments: {
+        title: "interactive.py:_generate_smooth_segments",
+        file: "lynxmotion_control/interactive.py",
+        code: `def _generate_smooth_segments(self, start, target, move_time_ms, *, soft_start=False):\n    ...\n    for step in range(1, segments + 1):\n        t = step / segments\n        eased = t * t * (3 - 2 * t)\n        values = tuple(start[idx] + (target[idx] - start[idx]) * eased for idx in range(len(target)))\n        result.append((values, segment_time if segment_time > 0 else None))`
+      },
+      commandWorker: {
+        title: "interactive.py:_command_worker",
+        file: "lynxmotion_control/interactive.py",
+        code: `for segment_raw, segment_time in self._generate_smooth_segments(...):\n    if self._calibration_active and not self._calibration_guide_active:\n        relax = getattr(self.controller, "relax_servos", None)\n        if callable(relax):\n            relax()\n        aborted_for_calibration = True\n        break\n    corrected_segment = self._apply_offsets(segment_raw, direction="correct")\n    self.controller.move_joints(segment_raw, move_time_ms=segment_time, servo_configs=self._get_servo_configs_for_controller())\n    ...\nfeedback_raw = self._read_feedback_from_controller()\nif feedback_raw:\n    corrected_feedback = self._apply_offsets(feedback_raw, direction="correct")\n    self._apply_feedback(corrected_feedback)`
+      },
+      addWaypoint: {
+        title: "interactive.py:_handle_add_waypoint",
+        file: "lynxmotion_control/interactive.py",
+        code: `duration = max(0.1, float(self._waypoint_duration_box.text)) if self._waypoint_duration_box else 2.0\nposition = self._clamp_target(np.array(self.target))\nself.waypoints.append(Waypoint(position=position.copy(), duration=duration, wrist_pitch=self.wrist_pitch))\nself._selected_waypoint_index = len(self.waypoints) - 1\nself._refresh_waypoint_display()\nself._save_waypoints()`
+      },
+      saveSubroutine: {
+        title: "interactive.py:_handle_save_subroutine",
+        file: "lynxmotion_control/interactive.py",
+        code: `serialised = self._serialise_waypoints(self.waypoints)\ndata = {"name": name, "slug": slug, "waypoints": serialised}\nSUBROUTINE_STORAGE_DIR.mkdir(parents=True, exist_ok=True)\npath = SUBROUTINE_STORAGE_DIR / f"{slug}.json"\npath.write_text(json.dumps(data, indent=2))\nself._selected_subroutine_slug = slug\nself._load_subroutine_catalog()`
+      },
+      addToTimeline: {
+        title: "interactive.py:_handle_add_to_timeline",
+        file: "lynxmotion_control/interactive.py",
+        code: `summary = self._subroutine_catalog.get(slug)\nentry = TimelineEntry(name=summary.name, slug=summary.slug, duration=summary.duration, missing=False)\nself._timeline_entries.append(entry)\nself._selected_timeline_index = len(self._timeline_entries) - 1\nself._refresh_timeline_display()\nself._highlight_selected_timeline()\nself._save_timeline()`
+      },
+      loadTimeline: {
+        title: "interactive.py:_load_saved_timeline",
+        file: "lynxmotion_control/interactive.py",
+        code: `if TIMELINE_STORAGE_PATH.exists():\n    data = json.loads(TIMELINE_STORAGE_PATH.read_text())\n    for entry in data:\n        slug = str(entry.get("slug") or "").strip()\n        summary = self._subroutine_catalog.get(slug)\n        if summary is not None:\n            entries.append(TimelineEntry(name=summary.name, slug=slug, duration=summary.duration, missing=False))\n        else:\n            entries.append(TimelineEntry(name=str(entry.get("name") or slug), slug=slug, duration=float(entry.get("duration") or 0.0), missing=True))`
+      },
+      timelineWorker: {
+        title: "interactive.py:_timeline_playback_worker",
+        file: "lynxmotion_control/interactive.py",
+        code: `while not self._timeline_stop_event.is_set():\n    for index, entry in enumerate(list(self._timeline_entries)):\n        if self._timeline_stop_event.is_set():\n            break\n        if entry.missing:\n            continue\n        waypoints = self._load_subroutine_waypoints(entry.slug)\n        self._selected_timeline_index = index\n        self._highlight_selected_timeline()\n        self._execute_waypoint_sequence(waypoints, stop_event=self._timeline_stop_event, selection_callback=None, playback_speed=self._timeline_speed)\n    if not self._timeline_repeat:\n        break`
+      },
+      relaxServos: {
+        title: "serial_comm.py:relax_servos",
+        file: "lynxmotion_control/serial_comm.py",
+        code: `def relax_servos(self, servo_indices=None, servo_channels=None):\n    serial_port = self.ensure_connection()\n    channels_map = servo_channels or DEFAULT_SERVO_CHANNELS\n    indices = sorted(channels_map) if servo_indices is None else list(servo_indices)\n    channels = [channels_map[index] for index in indices]\n    command = ("".join(f"#{channel}PO" for channel in channels) + "\\r").encode("ascii")\n    serial_port.write(command)`
+      },
+      serialMove: {
+        title: "serial_comm.py:AL5ASerialController.move_joints",
+        file: "lynxmotion_control/serial_comm.py",
+        code: `pulses = joints_to_pulses(joints, servo_configs=servo_configs or DEFAULT_SERVO_CONFIGS, servo_channels=servo_channels or DEFAULT_SERVO_CHANNELS)\ncommand = SSC32Command(pulses, move_time_ms)\nserial_port.write(command.to_bytes())`
+      },
+      printMove: {
+        title: "serial_comm.py:PrintController.move_joints",
+        file: "lynxmotion_control/serial_comm.py",
+        code: `pulses = joints_to_pulses(joints, servo_configs=servo_configs or DEFAULT_SERVO_CONFIGS, servo_channels=servo_channels or DEFAULT_SERVO_CHANNELS)\ncommand = SSC32Command(pulses, move_time_ms)\nprint(command.to_bytes().decode("ascii").strip())`
+      },
+      inverseIk: {
+        title: "al5a_kinematics.py:AL5AKinematics.inverse",
+        file: "lynxmotion_control/al5a_kinematics.py",
+        code: `def inverse(self, position, wrist_pitch):\n    x, y, z = position\n    base = atan2(y, x)\n    wx = planar_radius - L.wrist * cos(wrist_pitch)\n    wz = z - L.base_height - L.wrist * sin(wrist_pitch)\n    d = sqrt(wx * wx + wz * wz)\n    max_reach = L.shoulder + L.elbow\n    if d > max_reach + 1e-9:\n        scale = max_reach / d if d != 0 else 0.0\n        wx *= scale\n        wz *= scale`
+      },
+      forwardKinematics: {
+        title: "al5a_kinematics.py:AL5AKinematics.forward",
+        file: "lynxmotion_control/al5a_kinematics.py",
+        code: `def forward(self, joints):\n    if len(joints) < 4:\n        raise ValueError("Expected at least 4 joint angles")\n    base, shoulder, elbow, wrist = joints[:4]\n    cb, sb = cos(base), sin(base)\n    z = L.base_height\n    r = 0.0\n    # Shoulder link\n    z += L.shoulder * sin(shoulder_angle)\n    r += L.shoulder * cos(shoulder_angle)`
+      },
+      servoConfig: {
+        title: "al5a_kinematics.py:ServoConfig",
+        file: "lynxmotion_control/al5a_kinematics.py",
+        code: `@dataclass(frozen=True)\nclass ServoConfig:\n    min_angle: float\n    max_angle: float\n    min_pulse: int\n    max_pulse: int\n\n    def angle_to_pulse(self, angle: float) -> int:\n        clamped = self.clamp_angle(angle)\n        span_angle = self.max_angle - self.min_angle\n        span_pulse = self.max_pulse - self.min_pulse\n        proportion = (clamped - self.min_angle) / span_angle\n        return int(round(self.min_pulse + proportion * span_pulse))`
+      },
+      ssc32Bytes: {
+        title: "serial_comm.py:SSC32Command.to_bytes",
+        file: "lynxmotion_control/serial_comm.py",
+        code: `def to_bytes(self) -> bytes:\n    parts: list[str] = []\n    for channel, pulse in enumerate(self.pulses):\n        if pulse is None:\n            continue\n        parts.append(f"#{channel}P{pulse}")\n    if self.move_time_ms is not None:\n        parts.append(f"T{self.move_time_ms}")\n    return ("".join(parts) + "\\r").encode("ascii")`
+      },
+      timelineEntry: {
+        title: "interactive.py:TimelineEntry dataclass",
+        file: "lynxmotion_control/interactive.py",
+        code: `@dataclass\nclass TimelineEntry:\n    name: str\n    slug: str\n    duration: float\n    missing: bool = False`
+      },
+      waypoint: {
+        title: "interactive.py:Waypoint dataclass",
+        file: "lynxmotion_control/interactive.py",
+        code: `@dataclass\nclass Waypoint:\n    position: np.ndarray\n    duration: float\n    wrist_pitch: float`
+      },
+      interactiveInit: {
+        title: "interactive.py:InteractiveArm setup",
+        file: "lynxmotion_control/interactive.py",
+        code: `class InteractiveArm:\n    """Matplotlib based interactive controller."""\n    DEFAULT_HOME_PULSES: dict[int, int] = {...}\n    def __init__(self, controller, kinematics=None, wrist_pitch: float = 0.0, move_time_ms: int = 1000, step_xy: float = 0.01, step_z: float = 0.01, *, build_matplotlib_controls: bool = True) -> None:\n        self.controller = controller\n        self.kin = kinematics or AL5AKinematics()`
+      }
+    };
+
+    const NODE_CODE_REFS = {
+      "diagram-journey": {
+        User: CODE_SNIPPETS.mainEntry,
+        Operator: CODE_SNIPPETS.mainEntry,
+        CLI: CODE_SNIPPETS.mainEntry,
+        ControllerSel: CODE_SNIPPETS.mainEntry,
+        Print: CODE_SNIPPETS.printMove,
+        Serial: CODE_SNIPPETS.serialMove,
+        UI: CODE_SNIPPETS.interactiveInit,
+        Mode: CODE_SNIPPETS.updateRobot,
+        Teleop: CODE_SNIPPETS.updateRobot,
+        TeleopState: CODE_SNIPPETS.updateRobot,
+        Teach: CODE_SNIPPETS.addWaypoint,
+        TeachState: CODE_SNIPPETS.addWaypoint,
+        Timeline: CODE_SNIPPETS.loadTimeline,
+        TimelineState: CODE_SNIPPETS.timelineWorker,
+        Calibration: CODE_SNIPPETS.commandWorker,
+        SafetyState: CODE_SNIPPETS.commandWorker,
+        Inspect: CODE_SNIPPETS.servoConfig,
+        Code: CODE_SNIPPETS.updateRobot,
+        Listing: CODE_SNIPPETS.ssc32Bytes,
+        Classes: CODE_SNIPPETS.interactiveInit,
+        Architecture: CODE_SNIPPETS.interactiveInit,
+        StateMachine: CODE_SNIPPETS.commandWorker,
+        main: CODE_SNIPPETS.mainEntry,
+        openDiagramFullscreen: CODE_SNIPPETS.mainEntry
+      },
+      "diagram-architecture": {
+        User: CODE_SNIPPETS.mainEntry,
+        OperatorLayer: CODE_SNIPPETS.mainEntry,
+        ApplicationLayer: CODE_SNIPPETS.mainEntry,
+        Launcher: CODE_SNIPPETS.mainEntry,
+        CLI: CODE_SNIPPETS.mainEntry,
+        UI: CODE_SNIPPETS.interactiveInit,
+        Interactive: CODE_SNIPPETS.interactiveInit,
+        LogicLayer: CODE_SNIPPETS.updateRobot,
+        Kinematics: CODE_SNIPPETS.inverseIk,
+        Queueing: CODE_SNIPPETS.smoothSegments,
+        Persistence: CODE_SNIPPETS.saveSubroutine,
+        ControllerLayer: CODE_SNIPPETS.serialMove,
+        SerialCtrl: CODE_SNIPPETS.serialMove,
+        PrintCtrl: CODE_SNIPPETS.printMove,
+        PersistenceLayer: CODE_SNIPPETS.saveSubroutine,
+        LocalFiles: CODE_SNIPPETS.saveSubroutine,
+        Paths: CODE_SNIPPETS.saveSubroutine,
+        Timeline: CODE_SNIPPETS.loadTimeline,
+        HardwareLayer: CODE_SNIPPETS.relaxServos,
+        Hardware: CODE_SNIPPETS.relaxServos,
+        TestLayer: CODE_SNIPPETS.inverseIk,
+        Tests: CODE_SNIPPETS.inverseIk,
+        TimelineLayer: CODE_SNIPPETS.loadTimeline
+      },
+      "diagram-teleop": {
+        Start: CODE_SNIPPETS.interactiveInit,
+        HomePose: CODE_SNIPPETS.interactiveInit,
+        InputCheck: CODE_SNIPPETS.updateRobot,
+        TargetUpdate: CODE_SNIPPETS.updateRobot,
+        Clamp: CODE_SNIPPETS.clampTarget,
+        IK: CODE_SNIPPETS.inverseIk,
+        ValidIK: CODE_SNIPPETS.updateRobot,
+        Reject: CODE_SNIPPETS.updateRobot,
+        Smooth: CODE_SNIPPETS.smoothSegments,
+        Queue: CODE_SNIPPETS.commandWorker,
+        Worker: CODE_SNIPPETS.commandWorker,
+        Controller: CODE_SNIPPETS.serialMove,
+        Feedback: CODE_SNIPPETS.commandWorker
+      },
+      "diagram-teach": {
+        Enter: CODE_SNIPPETS.interactiveInit,
+        Pose: CODE_SNIPPETS.updateRobot,
+        Capture: CODE_SNIPPETS.addWaypoint,
+        More: CODE_SNIPPETS.addWaypoint,
+        Name: CODE_SNIPPETS.saveSubroutine,
+        Save: CODE_SNIPPETS.saveSubroutine,
+        Next: CODE_SNIPPETS.addToTimeline,
+        Play: CODE_SNIPPETS.addWaypoint,
+        Add: CODE_SNIPPETS.addToTimeline,
+        subroutine: CODE_SNIPPETS.saveSubroutine,
+        waypoint: CODE_SNIPPETS.addWaypoint
+      },
+      "diagram-timeline": {
+        Load: CODE_SNIPPETS.loadTimeline,
+        SelectEntry: CODE_SNIPPETS.loadTimeline,
+        Hydrate: CODE_SNIPPETS.loadTimeline,
+        QueuePath: CODE_SNIPPETS.timelineWorker,
+        Monitor: CODE_SNIPPETS.timelineWorker,
+        Done: CODE_SNIPPETS.timelineWorker,
+        Idle: CODE_SNIPPETS.commandWorker
+      },
+      "diagram-safety": {
+        Cmd: CODE_SNIPPETS.updateRobot,
+        Limits: CODE_SNIPPETS.clampTarget,
+        SoftStart: CODE_SNIPPETS.smoothSegments,
+        Enqueue: CODE_SNIPPETS.commandWorker,
+        Calib: CODE_SNIPPETS.commandWorker,
+        Relax: CODE_SNIPPETS.relaxServos,
+        Wait: CODE_SNIPPETS.commandWorker,
+        Execute: CODE_SNIPPETS.serialMove,
+        Persist: CODE_SNIPPETS.saveSubroutine,
+        Monitor: CODE_SNIPPETS.commandWorker
+      },
+      "diagram-state": {
+        relax_servos: CODE_SNIPPETS.relaxServos
+      },
+      "diagram-classes": {
+        InteractiveArm: CODE_SNIPPETS.interactiveInit,
+        AL5AKinematics: CODE_SNIPPETS.forwardKinematics,
+        AL5ASerialController: CODE_SNIPPETS.serialMove,
+        PrintController: CODE_SNIPPETS.printMove,
+        SSC32Command: CODE_SNIPPETS.ssc32Bytes,
+        ServoConfig: CODE_SNIPPETS.servoConfig,
+        Waypoint: CODE_SNIPPETS.waypoint,
+        TimelineEntry: CODE_SNIPPETS.timelineEntry,
+        angle_to_pulse: CODE_SNIPPETS.servoConfig,
+        pulse_to_angle: CODE_SNIPPETS.servoConfig,
+        forward: CODE_SNIPPETS.forwardKinematics,
+        inverse: CODE_SNIPPETS.inverseIk,
+        move_joints: CODE_SNIPPETS.serialMove,
+        relax_servos: CODE_SNIPPETS.relaxServos,
+        to_bytes: CODE_SNIPPETS.ssc32Bytes,
+        _apply_workspace_limits: CODE_SNIPPETS.clampTarget,
+        _smooth_command: CODE_SNIPPETS.smoothSegments,
+        _command_worker: CODE_SNIPPETS.commandWorker,
+        update_robot: CODE_SNIPPETS.updateRobot,
+        _load_saved_timeline: CODE_SNIPPETS.loadTimeline,
+        _playback_subroutine: CODE_SNIPPETS.timelineWorker,
+        _save_subroutine: CODE_SNIPPETS.saveSubroutine
+      }
+    };
+
+    const codeTooltip = document.createElement("div");
+    codeTooltip.className = "code-tooltip";
+    document.body.appendChild(codeTooltip);
+
+    function escapeHtml(str) {
+      return str
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function positionTooltip(evt) {
+      const padding = 12;
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+      const tooltipRect = codeTooltip.getBoundingClientRect();
+      let left = evt.clientX + padding;
+      let top = evt.clientY + padding;
+      if (left + tooltipRect.width > viewportWidth - padding) {
+        left = viewportWidth - tooltipRect.width - padding;
+      }
+      if (top + tooltipRect.height > viewportHeight - padding) {
+        top = viewportHeight - tooltipRect.height - padding;
+      }
+      codeTooltip.style.left = `${left}px`;
+      codeTooltip.style.top = `${top}px`;
+    }
+
+    function showTooltip(evt, ref) {
+      const title = escapeHtml(ref.title || "Code reference");
+      const file = escapeHtml(ref.file || "");
+      const code = escapeHtml(ref.code || "Not available");
+      codeTooltip.innerHTML = `<h4>${title}</h4><div class="code-meta">${file}</div><pre><code>${code}</code></pre>`;
+      codeTooltip.style.display = "block";
+      positionTooltip(evt);
+    }
+
+    function hideTooltip() {
+      codeTooltip.style.display = "none";
+    }
+
+    function annotateDiagram(container, refs) {
+      if (!container || !refs) return;
+      const svg = container.querySelector("svg");
+      if (!svg) return;
+      const nodes = svg.querySelectorAll("g.node");
+      nodes.forEach(function (node) {
+        const rawId = node.id || "";
+        const baseId = rawId.includes("-") ? rawId.split("-").pop() : rawId;
+        const ref = refs[baseId];
+        if (!ref) {
+          return;
+        }
+        node.style.cursor = "help";
+        node.addEventListener("mouseenter", function (evt) {
+          showTooltip(evt, ref);
+        });
+        node.addEventListener("mousemove", positionTooltip);
+        node.addEventListener("mouseleave", hideTooltip);
+        const title = node.querySelector("title");
+        if (title) {
+          title.textContent = ref.title || title.textContent;
+        }
+      });
+    }
+
     mermaid.initialize({
       startOnLoad: false,
       theme: "dark",
@@ -831,6 +1173,9 @@ classDiagram
 
       // Render all inline diagrams
       mermaid.init(undefined, document.querySelectorAll(".mermaid-inline"));
+      document.querySelectorAll(".mermaid-inline").forEach(function (diagram) {
+        annotateDiagram(diagram, NODE_CODE_REFS[diagram.id]);
+      });
 
       // Modal wiring
       var modal = document.getElementById("diagram-modal");
@@ -861,6 +1206,7 @@ classDiagram
         try {
           var renderResult = await mermaid.render(renderId, code);
           modalDiagram.innerHTML = renderResult.svg;
+          annotateDiagram(modalDiagram, NODE_CODE_REFS[targetId]);
         } catch (err) {
           console.error("Failed to render diagram", err);
           modalDiagram.textContent = "Unable to render diagram";
