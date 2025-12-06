@@ -510,6 +510,7 @@ flowchart LR
               ⤢ Fullscreen
             </button>
             <div class="mermaid mermaid-inline" id="diagram-teleop"></div>
+            <!-- Keep <br/> annotations inside node labels for Mermaid v10 compatibility -->
             <script type="text/plain" class="mermaid-src" id="src-diagram-teleop">
 flowchart TD
   Start([Start UI]) --> HomePose[Apply DEFAULT_HOME_PULSES]
@@ -554,6 +555,7 @@ flowchart TD
               ⤢ Fullscreen
             </button>
             <div class="mermaid mermaid-inline" id="diagram-teach"></div>
+            <!-- Escape placeholders like <slug> so Mermaid doesn't misparse HTML tags -->
             <script type="text/plain" class="mermaid-src" id="src-diagram-teach">
 flowchart TD
   Enter([Open Path panel]) --> Pose[Use sliders/drag to set pose]
@@ -627,6 +629,7 @@ flowchart TD
               ⤢ Fullscreen
             </button>
             <div class="mermaid mermaid-inline" id="diagram-safety"></div>
+            <!-- Keep line breaks inside labels to avoid Mermaid syntax errors -->
             <script type="text/plain" class="mermaid-src" id="src-diagram-safety">
 flowchart TD
   Cmd([Command requested]) --> Limits["Clamp workspace + servo hard limits<br/>(_apply_workspace_limits)"]
