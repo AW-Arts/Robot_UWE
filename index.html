@@ -1018,6 +1018,7 @@ classDiagram
 
     const FILE_CACHE = {};
     let NODE_CODE_REFS = {};
+    let DIAGRAM_LABEL_MAPS = {};
 
     function escapeHtml(str) {
       return str
@@ -1025,6 +1026,19 @@ classDiagram
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;");
+    }
+
+    function sanitizeLabel(label) {
+      return (label || "")
+        .replace(/<br\s*\/?>(\s*)/gi, " ")
+        .replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/\s+/g, " ")
+        .trim()
+        .toLowerCase();
     }
 
     async function loadFile(path) {
@@ -1170,8 +1184,22 @@ classDiagram
       return NODE_CODE_REFS[diagramId][baseId];
     }
 
-    function normalizeNodeId(rawId) {
+    function normalizeNodeId(rawId, diagramId, titleText = "") {
       if (!rawId) return "";
+
+      const nodeKeys = Object.keys(NODE_SNIPPET_KEYS[diagramId] || {});
+      for (const key of nodeKeys) {
+        if (rawId.includes(key)) {
+          return key;
+        }
+      }
+
+      const labelMap = DIAGRAM_LABEL_MAPS[diagramId] || {};
+      const normalizedTitle = sanitizeLabel(titleText);
+      if (normalizedTitle && labelMap[normalizedTitle]) {
+        return labelMap[normalizedTitle];
+      }
+
       // Mermaid prefixes flowchart IDs with the diagram name, e.g. `flowchart-diagram-teleop-TargetUpdate`
       // and class diagrams with `classid-<Name>` or `classDiagram-...-<Name>`.
       // In fullscreen renders Mermaid also appends numeric suffixes to enforce unique IDs (e.g. `...-TargetUpdate-42`).
@@ -1189,8 +1217,8 @@ classDiagram
       return parts[parts.length - 1];
     }
 
-    async function resolveNodeRef(diagramId, rawId, refs) {
-      const baseId = normalizeNodeId(rawId);
+    async function resolveNodeRef(diagramId, rawId, refs, titleText = "") {
+      const baseId = normalizeNodeId(rawId, diagramId, titleText);
       const existing = refs?.[baseId];
       if (existing && !/No snippet configured/i.test(existing.code || "")) {
         return existing;
@@ -1208,17 +1236,18 @@ classDiagram
       return hydrated;
     }
 
-    function annotateDiagram(container, refs) {
+    function annotateDiagram(container, refs, diagramIdOverride) {
       if (!container || !refs) return;
       const svg = container.querySelector("svg");
       if (!svg) return;
       const nodes = svg.querySelectorAll("g.node, g.classGroup");
       nodes.forEach(function (node) {
         const rawId = node.id || "";
-        const diagramId = container.id;
+        const diagramId = diagramIdOverride || container.id;
+        const title = node.querySelector("title")?.textContent || "";
         node.style.cursor = "help";
         node.addEventListener("mouseenter", async function (evt) {
-          const ref = await resolveNodeRef(diagramId, rawId, refs);
+          const ref = await resolveNodeRef(diagramId, rawId, refs, title);
           showTooltip(evt, ref);
           const title = node.querySelector("title");
           if (title) {
@@ -1236,9 +1265,35 @@ classDiagram
       securityLevel: "loose"
     });
 
+    function buildLabelMaps() {
+      DIAGRAM_LABEL_MAPS = {};
+      document.querySelectorAll(".mermaid-src").forEach(function (src) {
+        const diagramId = src.id.replace("src-", "");
+        const labels = {};
+        const lines = (src.textContent || "").split(/\r?\n/);
+        lines.forEach(function (line) {
+          const trimmed = line.trim();
+          if (!trimmed || /^%%/.test(trimmed)) return;
+
+          const flowMatch = trimmed.match(/^([A-Za-z0-9_]+)\s*[\[\(\{](.+)[\]\)\}]/);
+          if (flowMatch) {
+            labels[sanitizeLabel(flowMatch[2])] = flowMatch[1];
+            return;
+          }
+
+          const classMatch = trimmed.match(/^class\s+([A-Za-z0-9_]+)/i);
+          if (classMatch) {
+            labels[sanitizeLabel(classMatch[1])] = classMatch[1];
+          }
+        });
+        DIAGRAM_LABEL_MAPS[diagramId] = labels;
+      });
+    }
+
     document.addEventListener("DOMContentLoaded", async function () {
       await loadSnippetCache();
       NODE_CODE_REFS = await buildNodeCodeRefs();
+      buildLabelMaps();
 
       // Load sources into inline mermaid divs
       document.querySelectorAll(".mermaid-src").forEach(function (src) {
@@ -1284,7 +1339,7 @@ classDiagram
         try {
           var renderResult = await mermaid.render(renderId, code);
           modalDiagram.innerHTML = renderResult.svg;
-          annotateDiagram(modalDiagram, NODE_CODE_REFS[targetId]);
+          annotateDiagram(modalDiagram, NODE_CODE_REFS[targetId], targetId);
         } catch (err) {
           console.error("Failed to render diagram", err);
           modalDiagram.textContent = "Unable to render diagram";
