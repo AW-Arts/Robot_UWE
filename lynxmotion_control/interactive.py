@@ -180,6 +180,7 @@ class InteractiveArm:
         self._invert_button_inactive_color = "0.85"
         self._invert_button_active_color = "#90ee90"
         self._calibration_path = CALIBRATION_CONFIG_PATH
+        self._calibration_loaded = False
         self._wrist_slider: Slider | None = None
         self._updating_wrist_slider = False
         self.zero_reference: dict[int, float] = {
@@ -478,6 +479,9 @@ class InteractiveArm:
         return joints
 
     def _get_home_joints(self) -> list[float] | None:
+        if not self._calibration_loaded:
+            return self._default_joint_configuration()
+
         if not self.zero_reference:
             return list(_DEFAULT_VERTICAL_JOINTS)
 
@@ -2549,6 +2553,7 @@ class InteractiveArm:
     def _load_calibration_data(self) -> dict[int, float]:
         path = self._calibration_path
         if not path.exists():
+            self._calibration_loaded = False
             return {}
         try:
             data = json.loads(path.read_text())
@@ -2556,7 +2561,10 @@ class InteractiveArm:
             _LOGGER.warning(
                 "Failed to load calibration data from %s", path, exc_info=True
             )
+            self._calibration_loaded = False
             return {}
+
+        self._calibration_loaded = True
 
         offsets_raw: dict[str, object] | None = None
         vertical_raw: dict[str, object] | None = None
