@@ -3343,19 +3343,16 @@ class InteractiveArm:
         previous_step_index = self._calibration_step_index
         self._calibration_step_index = next_index
         servo_index, phase = self._calibration_steps[next_index]
-        baseline = None
-        if previous_step_index is None:
-            baseline = self._calibration_neutral_joints()
-        else:
+        baseline = self._calibration_neutral_joints()
+        if previous_step_index is not None:
             previous_servo, _ = self._calibration_steps[previous_step_index]
             if previous_servo != servo_index:
                 zero_angle = self._zero_angle_for_servo(previous_servo)
                 self._move_servo_for_calibration(
                     previous_servo,
                     zero_angle,
-                    base_joints=self._calibration_neutral_joints(),
+                    base_joints=baseline,
                 )
-                baseline = self._calibration_neutral_joints()
 
         target_angle = self._target_angle_for_phase(servo_index, phase)
         self._move_servo_for_calibration(
