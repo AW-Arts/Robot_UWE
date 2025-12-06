@@ -194,6 +194,11 @@ class InteractiveArm:
         self._loaded_hard_limits: dict[int, tuple[float, float]] = {}
         self._loaded_workspace: dict[str, tuple[float, float]] = {}
         self.servo_offsets: dict[int, float] = self._load_calibration_data()
+        if not self._calibration_loaded:
+            self.zero_reference = {
+                index: angle
+                for index, angle in enumerate(self._default_joint_configuration())
+            }
         self.workspace_limits = {
             "x": (-0.25, 0.25),
             "y": (-0.25, 0.25),
