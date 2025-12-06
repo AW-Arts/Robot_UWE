@@ -166,6 +166,21 @@
       color: var(--text-soft);
     }
 
+    .refs {
+      font-size: 0.82rem;
+      color: var(--text-soft);
+      margin-top: 0.45rem;
+      line-height: 1.4;
+    }
+
+    .refs code {
+      color: var(--text);
+      background: rgba(15,23,42,0.9);
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      padding: 0 0.35rem;
+    }
+
     .card-meta {
       font-size: 0.8rem;
       color: var(--text-soft);
@@ -365,21 +380,25 @@
             <div class="mermaid mermaid-inline" id="diagram-journey"></div>
             <script type="text/plain" class="mermaid-src" id="src-diagram-journey">
 flowchart TD
-  User(["Operator (student/teacher)"]) --> CLI["CLI launcher<br/>__main__.py"]
-  CLI --> UI["InteractiveArm UI (interactive.py)"]
-  UI --> Mode{Select pathway}
+  User(["Operator (student/teacher)"]) --> CLI["CLI launcher<br/>__main__.py → main()"]
+  CLI --> ControllerSel{Choose controller}
+  ControllerSel -->|--simulate| Print["PrintController<br/>serial_comm.py"]
+  ControllerSel -->|--port| Serial["AL5ASerialController<br/>serial_comm.py"]
 
-  Mode --> Teleop["Teleoperation loop<br/>update_robot"]
-  Mode --> Teach["Teach mode<br/>waypoints &amp; subroutines"]
-  Mode --> Timeline["Timeline playback<br/>execute sequence"]
-  Mode --> Safety["Safety &amp; servo power"]
+  ControllerSel --> UI["InteractiveArm UI<br/>interactive.py"]
+  UI --> Mode{Select workspace slice}
+
+  Mode --> Teleop["Teleoperation loop<br/>update_robot + smoothing"]
+  Mode --> Teach["Teach mode<br/>waypoints/subroutines"]
+  Mode --> Timeline["Timeline playback<br/>threaded execution"]
+  Mode --> Calibration["Calibration tour<br/>servo offsets"]
   Mode --> Inspect["Inspect behaviours<br/>state + classes"]
   Mode --> Code["Full code listing"]
 
-  Teleop --> TeleopState["Action → state machine"]
-  Teach --> TeachState["Teach → state machine"]
-  Timeline --> TimelineState["Timeline → state machine"]
-  Safety --> SafetyState["Safety interlocks"]
+  Teleop --> TeleopState["Realtime flow"]
+  Teach --> TeachState["Author + persist"]
+  Timeline --> TimelineState["Schedule + repeat"]
+  Calibration --> SafetyState["Interlocks &amp; relax"]
   Inspect --> Classes["Class map"]
   Inspect --> Architecture["Architecture layers"]
   Inspect --> StateMachine["Global state machine"]
@@ -388,10 +407,10 @@ flowchart TD
   click Teleop call openDiagramFullscreen("diagram-teleop","Teleoperation Flow") "Open teleop flow"
   click Teach href "#teaching" "Scroll to teach mode diagram"
   click Timeline call openDiagramFullscreen("diagram-timeline","Timeline Playback") "Open timeline diagram"
-  click Safety call openDiagramFullscreen("diagram-safety","Safety Interlocks") "Open safety diagram"
-  click TeleopState call openDiagramFullscreen("diagram-state","State Machine – Teleop") "Drill into teleop state machine"
-  click TeachState call openDiagramFullscreen("diagram-state","State Machine – Teach") "Drill into teach state machine"
-  click TimelineState call openDiagramFullscreen("diagram-state","State Machine – Timeline") "Drill into timeline state machine"
+  click Calibration call openDiagramFullscreen("diagram-safety","Calibration & Safety") "Open calibration diagram"
+  click TeleopState call openDiagramFullscreen("diagram-teleop","Teleoperation Flow") "Drill into teleop flow"
+  click TeachState call openDiagramFullscreen("diagram-teach","Teach Mode") "Drill into teach mode"
+  click TimelineState call openDiagramFullscreen("diagram-timeline","Timeline Playback") "Drill into timeline"
   click SafetyState href "#safety" "Jump to safety card"
   click Classes call openDiagramFullscreen("diagram-classes","Class Diagram") "Open class diagram"
   click Architecture call openDiagramFullscreen("diagram-architecture","Software Architecture") "Open architecture diagram"
@@ -400,6 +419,7 @@ flowchart TD
   click Listing href "full_code_listing.md" "Open full code listing"
             </script>
           </div>
+          <div class="refs">Refs: <code>lynxmotion_control/__main__.py</code>, <code>lynxmotion_control/interactive.py</code>, <code>lynxmotion_control/serial_comm.py</code></div>
         </div>
       </section>
 
@@ -427,20 +447,24 @@ flowchart LR
 
   subgraph ApplicationLayer["Application"]
     CLI["CLI Launcher (__main__.py)"]
-    Interactive["InteractiveArm UI (interactive.py)"]
+    Interactive["InteractiveArm UI (interactive.py)<br/>matplotlib widgets + event loop"]
   end
 
   subgraph LogicLayer["Logic"]
-    Kinematics["AL5AKinematics (al5a_kinematics.py)"]
+    Kinematics["AL5AKinematics<br/>FK + IK + pulse helpers"]
+    Queueing["Command smoothing & queue<br/>_smooth_command / _command_worker"]
+    Persistence["JSON persistence<br/>servo offsets, subroutines, timeline"]
   end
 
   subgraph ControllerLayer["Controllers"]
-    SerialCtrl["AL5ASerialController (serial_comm.py)"]
-    PrintCtrl["PrintController (serial_comm.py)"]
+    SerialCtrl["AL5ASerialController<br/>connect / move_joints / relax_servos"]
+    PrintCtrl["PrintController<br/>simulation output"]
   end
 
   subgraph PersistenceLayer["Config & Paths"]
-    LocalFiles["Calibration · Waypoints · Timeline (~/.config/lynxmotion_al5a/*.json)"]
+    LocalFiles["Calibration offsets<br/>~/.config/lynxmotion_al5a/servo_offsets.json"]
+    Paths["Waypoints/Subroutines<br/>saved_path.json + subroutines/*.json"]
+    Timeline["Timeline schedule<br/>timeline.json"]
   end
 
   subgraph HardwareLayer["Hardware"]
@@ -452,15 +476,20 @@ flowchart LR
   end
 
   User -->|launches| CLI -->|spawns UI| Interactive
-  Interactive -->|IK / FK| Kinematics
+  Interactive -->|FK + IK| Kinematics
+  Interactive -->|smooth & queue| Queueing
+  Interactive -->|persist/load| Persistence
+  Persistence --> LocalFiles
+  Persistence --> Paths
+  Persistence --> Timeline
   Interactive -->|move_joints / relax_servos| SerialCtrl
   Interactive -->|simulation backend| PrintCtrl
   SerialCtrl -->|"SSC-32 command bytes"| Hardware
-  Interactive -->|read / write JSON| LocalFiles
   Tests -->|fixtures & behaviours| Interactive
   Tests -->|IK validation| Kinematics
             </script>
           </div>
+          <div class="refs">Refs: <code>lynxmotion_control/interactive.py</code>, <code>lynxmotion_control/al5a_kinematics.py</code>, <code>lynxmotion_control/serial_comm.py</code>, <code>lynxmotion_control/tests</code></div>
         </div>
       </section>
 
@@ -483,26 +512,28 @@ flowchart LR
             <div class="mermaid mermaid-inline" id="diagram-teleop"></div>
             <script type="text/plain" class="mermaid-src" id="src-diagram-teleop">
 flowchart TD
-  Start([Start UI]) --> HomePose[Set default home pose]
+  Start([Start UI]) --> HomePose[Apply DEFAULT_HOME_PULSES]
   HomePose --> InputCheck{User input?}
 
-  InputCheck -->|Drag gizmo / scroll / sliders| TargetUpdate[Update Cartesian target]
+  InputCheck -->|Drag gizmo / scroll / sliders| TargetUpdate[Update target XYZ + wrist_pitch]
   InputCheck -->|Keyboard modifiers| TargetUpdate
 
-  TargetUpdate --> Clamp[Clamp to workspace and wrist limits]
-  Clamp --> IK[Inverse kinematics XYZ + wrist]
+  TargetUpdate --> Clamp[Clamp to workspace &amp; hard servo limits]<br/>(_apply_workspace_limits)
+  Clamp --> IK[AL5AKinematics.inverse]<br/>(XYZ → base/shoulder/elbow/wrist)
 
   IK --> ValidIK{IK valid?}
-  ValidIK -->|No| Reject[Reject move and warn]
+  ValidIK -->|No| Reject[Reject move &amp; log warning]
   Reject --> InputCheck
 
-  ValidIK -->|Yes| Queue[Queue smoothed joint command]
-  Queue --> Worker[Command worker thread]
-  Worker --> Controller[move_joints to controller]
-  Controller --> Feedback[Mirror joints and feedback to UI]
+  ValidIK --> Smooth[Blend path<br/>_smooth_command]
+  Smooth --> Queue[Queue joint segments<br/>_command_queue]
+  Queue --> Worker[Command worker thread<br/>_command_worker]
+  Worker --> Controller[controller.move_joints]
+  Controller --> Feedback[Mirror joints + zero reference display]
   Feedback --> InputCheck
             </script>
           </div>
+          <div class="refs">Refs: <code>interactive.py:update_robot</code>, <code>interactive.py:_apply_workspace_limits</code>, <code>interactive.py:_smooth_command</code>, <code>interactive.py:_command_worker</code>, <code>al5a_kinematics.py:AL5AKinematics.inverse</code></div>
         </div>
       </section>
 
@@ -525,20 +556,21 @@ flowchart TD
             <div class="mermaid mermaid-inline" id="diagram-teach"></div>
             <script type="text/plain" class="mermaid-src" id="src-diagram-teach">
 flowchart TD
-  Enter([Open Path panel]) --> AdjustPose[Adjust pose and wrist]
-  AdjustPose --> Capture[Capture waypoint data]
+  Enter([Open Path panel]) --> Pose[Use sliders/drag to set pose]
+  Pose --> Capture[Capture waypoint (XYZ, wrist_pitch, duration)]
   Capture --> More{More waypoints?}
 
-  More -->|Yes| AdjustPose
-  More -->|No| Name[Name subroutine]
+  More -->|Yes| Pose
+  More -->|No| Name[Name subroutine → slug]
 
-  Name --> Save[Save waypoints as JSON]
+  Name --> Save[Persist JSON under subroutines/<slug>.json]
 
   Save --> Next{Next action?}
-  Next -->|Play locally| Play[Queue waypoints now]
-  Next -->|Add to timeline| Add[Append reference into timeline JSON]
+  Next -->|Play locally| Play[Queue waypoints now via _playback_path]
+  Next -->|Add to timeline| Add[Append slug/duration into timeline.json]
             </script>
           </div>
+          <div class="refs">Refs: <code>interactive.py:_record_current_waypoint</code>, <code>interactive.py:_save_subroutine</code>, <code>interactive.py:_playback_path</code>, <code>interactive.py:SUBROUTINE_STORAGE_DIR</code>, <code>interactive.py:TIMELINE_STORAGE_PATH</code></div>
         </div>
       </section>
 
@@ -561,19 +593,20 @@ flowchart TD
             <div class="mermaid mermaid-inline" id="diagram-timeline"></div>
             <script type="text/plain" class="mermaid-src" id="src-diagram-timeline">
 flowchart TD
-  Load[Load timeline JSON] --> SelectEntry[Select next entry]
+  Load[Load timeline.json<br/>_load_saved_timeline] --> SelectEntry[Select first/next entry]
 
-  SelectEntry --> Hydrate[Resolve subroutine and duration]
-  Hydrate --> QueuePath[Queue waypoints into command queue]
+  SelectEntry --> Hydrate[Find subroutine JSON<br/>mark missing entries]
+  Hydrate --> QueuePath[Invoke _playback_subroutine<br/>queue waypoints]
 
-  QueuePath --> Monitor[Monitor queue until path complete]
+  QueuePath --> Monitor[Timeline thread waits<br/>_timeline_playback_worker]
 
-  Monitor --> Done{Timeline finished?}
+  Monitor --> Done{Stop/repeat?}
 
-  Done -->|No and repeat enabled| SelectEntry
-  Done -->|Yes or stopped| Idle([Return to idle state])
+  Done -->|Repeat on| SelectEntry
+  Done -->|Stopped or finished| Idle([Return to idle state])
             </script>
           </div>
+          <div class="refs">Refs: <code>interactive.py:_load_saved_timeline</code>, <code>interactive.py:_timeline_playback_worker</code>, <code>interactive.py:_playback_subroutine</code></div>
         </div>
       </section>
 
@@ -596,22 +629,24 @@ flowchart TD
             <div class="mermaid mermaid-inline" id="diagram-safety"></div>
             <script type="text/plain" class="mermaid-src" id="src-diagram-safety">
 flowchart TD
-  Cmd([Command requested]) --> Limits[Clamp to workspace and servo limits]
+  Cmd([Command requested]) --> Limits[Clamp workspace + servo hard limits]<br/>(_apply_workspace_limits)
 
-  Limits --> Smooth[Smooth joint speeds and soft-start]
-  Smooth --> Enqueue[Enqueue command segments]
+  Limits --> SoftStart[Soft-start + velocity smoothing]<br/>(_smooth_command)
+  SoftStart --> Enqueue[Push segments to queue]<br/>(_enqueue_command_segments)
 
-  Enqueue --> Calib{Calibration active?}
+  Enqueue --> Calib{Calibration active?}<br/>(_calibration_active flag)
 
-  Calib -->|Yes| Relax[Relax servos and cancel commands]
-  Relax --> Wait[Wait for user to exit calibration]
+  Calib -->|Yes| Relax[Relax all servos]<br/>(AL5ASerialController.relax_servos)
+  Relax --> Wait[Wait + block queue]<br/>(_stop_for_calibration)
   Wait --> Limits
 
-  Calib -->|No| Execute[Send command to controller]
-  Execute --> Monitor[Optional joint feedback loop]
+  Calib -->|No| Execute[Send move_joints to controller]
+  Execute --> Persist[Auto-save offsets/paths]
+  Persist --> Monitor[Mirror joint feedback]
   Monitor --> Cmd
             </script>
           </div>
+          <div class="refs">Refs: <code>interactive.py:_apply_workspace_limits</code>, <code>interactive.py:_smooth_command</code>, <code>interactive.py:_enqueue_command_segments</code>, <code>interactive.py:_stop_for_calibration</code>, <code>serial_comm.py:AL5ASerialController.relax_servos</code></div>
         </div>
       </section>
     </div>
@@ -649,11 +684,12 @@ stateDiagram-v2
   Playback --> Idle: playback complete or stop pressed
 
   Idle --> Calibration: calibration toggled ON
-  Calibration --> Relaxed: servos relaxed for safety
-  Relaxed --> Calibration: resume calibration
+  Calibration --> Relaxed: relax_servos (AUTO_RELAX_ON_CALIBRATION)
+  Relaxed --> Calibration: resume calibration guide
   Calibration --> Idle: exit calibration and restore offsets
             </script>
           </div>
+          <div class="refs">Refs: <code>interactive.py</code> state transitions, <code>serial_comm.py:AL5ASerialController.AUTO_RELAX_ON_CALIBRATION</code></div>
         </div>
       </section>
 
@@ -679,10 +715,15 @@ classDiagram
     +target: np.ndarray
     +waypoints: list
     +timeline: list
+    +servo_offsets: dict
     -_command_queue: queue.Queue
     +update_robot()
-    +_send_move_command(joints, move_time_ms, soft_start)
+    +_apply_workspace_limits(target)
+    +_smooth_command(start, target, move_time_ms, soft_start)
     +_command_worker()
+    +_save_subroutine(name, waypoints)
+    +_playback_subroutine(path)
+    +_load_saved_timeline()
   }
 
   class AL5AKinematics {
@@ -700,11 +741,40 @@ classDiagram
     +relax_servos(indices) None
   }
 
+  class ServoConfig {
+    +angle_to_pulse(angle) int
+    +pulse_to_angle(pulse) float
+  }
+
+  class SSC32Command {
+    +pulses: Sequence[int|None]
+    +move_time_ms: int|None
+    +to_bytes() bytes
+  }
+
+  class Waypoint {
+    +position: np.ndarray
+    +duration: float
+    +wrist_pitch: float
+  }
+
+  class TimelineEntry {
+    +name: str
+    +slug: str
+    +duration: float
+    +missing: bool
+  }
+
   InteractiveArm --> AL5AKinematics : uses for IK/FK
   InteractiveArm --> AL5ASerialController : sends pulses
   InteractiveArm --> PrintController : simulation backend
+  InteractiveArm --> Waypoint : captures
+  InteractiveArm --> TimelineEntry : schedules playback
+  AL5ASerialController --> SSC32Command : builds commands
+  SSC32Command --> ServoConfig : pulse conversion
             </script>
           </div>
+          <div class="refs">Refs: <code>interactive.py</code> dataclasses and methods, <code>al5a_kinematics.py:ServoConfig</code>, <code>serial_comm.py:SSC32Command</code></div>
         </div>
       </section>
 
