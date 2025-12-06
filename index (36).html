@@ -1,0 +1,802 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Lynxmotion AL5A – Software Diagrams</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- Mermaid -->
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+
+  <style>
+    :root {
+      --bg: #020617;
+      --card-bg: #020617;
+      --border-subtle: rgba(148, 163, 184, 0.35);
+      --accent: #3b82f6;
+      --accent-soft: rgba(59, 130, 246, 0.16);
+      --text: #e5e7eb;
+      --text-soft: #9ca3af;
+      --radius-lg: 14px;
+      --shadow-soft: 0 18px 40px rgba(0, 0, 0, 0.55);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at top, #111827 0, #020617 45%, #020617 100%);
+      color: var(--text);
+      padding: 2.5rem clamp(1.5rem, 4vw, 3.5rem);
+      display: flex;
+      flex-direction: column;
+      gap: 1.75rem;
+    }
+
+    header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 1rem 2rem;
+    }
+
+    .title-block {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+    }
+
+    h1 {
+      margin: 0;
+      font-weight: 650;
+      letter-spacing: -0.03em;
+      font-size: clamp(1.9rem, 2.8vw, 2.4rem);
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .badge {
+      font-size: 0.85rem;
+      font-weight: 500;
+      padding: 0.15rem 0.6rem;
+      border-radius: 999px;
+      border: 1px solid var(--accent-soft);
+      background: radial-gradient(circle at top left, var(--accent-soft), transparent 60%);
+      color: var(--text-soft);
+    }
+
+    .subtitle {
+      margin: 0;
+      font-size: 0.95rem;
+      color: var(--text-soft);
+      max-width: 640px;
+    }
+
+    nav.quick-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      padding: 0.55rem;
+      border-radius: 999px;
+      background: rgba(15, 23, 42, 0.94);
+      border: 1px solid var(--border-subtle);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.7);
+    }
+
+    nav.quick-links a {
+      text-decoration: none;
+      font-size: 0.82rem;
+      padding: 0.3rem 0.9rem;
+      border-radius: 999px;
+      color: var(--text-soft);
+      border: 1px solid transparent;
+      transition: all 0.18s ease-out;
+    }
+
+    nav.quick-links a:hover {
+      color: var(--text);
+      border-color: var(--accent-soft);
+      background: radial-gradient(circle at top left, var(--accent-soft), transparent 70%);
+    }
+
+    main {
+      display: grid;
+      grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+      gap: 1.5rem;
+      align-items: flex-start;
+    }
+
+    @media (max-width: 960px) {
+      main { grid-template-columns: minmax(0, 1fr); }
+    }
+
+    .diagram-column,
+    .side-column {
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
+    section.card {
+      position: relative;
+      background: var(--card-bg);
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--border-subtle);
+      box-shadow: var(--shadow-soft);
+      padding: 1.15rem 1.25rem 1.3rem;
+      overflow: hidden;
+    }
+
+    section.card::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle at top left, rgba(59,130,246,0.18), transparent 60%);
+      mix-blend-mode: soft-light;
+      opacity: 0.7;
+      pointer-events: none;
+    }
+
+    .card-inner { position: relative; z-index: 1; }
+
+    .card-header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 0.75rem;
+      margin-bottom: 0.35rem;
+    }
+
+    .card-header h2 {
+      margin: 0;
+      font-size: 0.98rem;
+      font-weight: 560;
+      letter-spacing: -0.01em;
+    }
+
+    .tag {
+      font-size: 0.75rem;
+      padding: 0.1rem 0.6rem;
+      border-radius: 999px;
+      border: 1px solid rgba(148,163,184,0.5);
+      color: var(--text-soft);
+    }
+
+    .card-meta {
+      font-size: 0.8rem;
+      color: var(--text-soft);
+      margin-bottom: 0.6rem;
+    }
+
+    .pill {
+      display: inline-block;
+      font-size: 0.78rem;
+      padding: 0.1rem 0.55rem;
+      border-radius: 999px;
+      border: 1px solid rgba(148,163,184,0.5);
+      background: rgba(15,23,42,0.95);
+      margin-right: 0.35rem;
+      margin-bottom: 0.2rem;
+    }
+
+    .diagram-wrapper {
+      position: relative;
+    }
+
+    .fullscreen-btn {
+      position: absolute;
+      top: 0.1rem;
+      right: 0.1rem;
+      z-index: 2;
+      border: none;
+      border-radius: 999px;
+      background: rgba(15,23,42,0.9);
+      border: 1px solid rgba(148,163,184,0.5);
+      color: var(--text-soft);
+      font-size: 0.75rem;
+      padding: 0.1rem 0.5rem;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.15rem;
+      opacity: 0.9;
+      transition: all 0.18s ease-out;
+    }
+
+    .fullscreen-btn:hover {
+      color: var(--text);
+      border-color: var(--accent-soft);
+      background: rgba(15,23,42,1);
+      transform: translateY(-1px);
+    }
+
+    .mermaid-inline {
+      margin-top: 0.6rem;
+      border-radius: 10px;
+      background: #020617;
+      padding: 0.6rem;
+      border: 1px solid rgba(30,64,175,0.7);
+      box-shadow: 0 0 0 1px rgba(15,23,42,0.9);
+      overflow: auto;
+    }
+
+    .legend-list {
+      list-style: none;
+      padding-left: 0;
+      margin: 0.25rem 0 0;
+      font-size: 0.84rem;
+      color: var(--text-soft);
+    }
+
+    .legend-list li { margin-bottom: 0.25rem; }
+
+    /* Fullscreen modal */
+
+    .diagram-modal {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.22s ease-out;
+      z-index: 40;
+    }
+
+    .diagram-modal.open {
+      pointer-events: auto;
+      opacity: 1;
+    }
+
+    .diagram-modal-backdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(15,23,42,0.78);
+      backdrop-filter: blur(6px);
+    }
+
+    .diagram-modal-content {
+      position: relative;
+      z-index: 1;
+      width: min(1100px, 96vw);
+      max-height: 90vh;
+      background: #020617;
+      border-radius: 18px;
+      border: 1px solid rgba(148,163,184,0.5);
+      box-shadow: 0 24px 60px rgba(0,0,0,0.9);
+      padding: 1rem 1.2rem 1.2rem;
+      transform: translateY(10px) scale(0.97);
+      transition: transform 0.22s cubic-bezier(0.19, 1, 0.22, 1);
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .diagram-modal.open .diagram-modal-content {
+      transform: translateY(0) scale(1);
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.75rem;
+      font-size: 0.9rem;
+      color: var(--text-soft);
+    }
+
+    .modal-title {
+      font-size: 0.92rem;
+      font-weight: 500;
+    }
+
+    #modal-close {
+      border: none;
+      border-radius: 999px;
+      padding: 0.2rem 0.6rem;
+      background: rgba(15,23,42,0.95);
+      color: var(--text-soft);
+      font-size: 0.9rem;
+      cursor: pointer;
+      border: 1px solid rgba(148,163,184,0.55);
+      transition: all 0.16s ease-out;
+    }
+
+    #modal-close:hover {
+      color: var(--text);
+      background: rgba(15,23,42,1);
+      border-color: var(--accent-soft);
+    }
+
+    #modal-diagram {
+      flex: 1;
+      min-height: 300px;
+      overflow: auto;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="title-block">
+      <h1>
+        Lynxmotion AL5A
+        <span class="badge">Software Control Diagrams</span>
+      </h1>
+      <p class="subtitle">
+        Standardised, implementation-accurate diagrams for the AL5A control stack:
+        architecture, teleoperation, teaching, autoplay, safety, and state management.
+      </p>
+    </div>
+    <nav class="quick-links" aria-label="Diagram sections">
+      <a href="#architecture">Architecture</a>
+      <a href="#teleop">Teleoperation</a>
+      <a href="#teaching">Teach mode</a>
+      <a href="#timeline">Timeline</a>
+      <a href="#safety">Safety</a>
+      <a href="#state">State machine</a>
+      <a href="#classes">Classes</a>
+      <a href="#journey">Mega journey</a>
+    </nav>
+  </header>
+
+  <main>
+    <div class="diagram-column">
+      <!-- Mega journey map -->
+      <section class="card" id="journey">
+        <div class="card-inner">
+          <div class="card-header">
+            <h2>End-to-End Journey &amp; Drilldown Map</h2>
+            <span class="tag">Flowchart · Clickable drilldowns</span>
+          </div>
+          <div class="card-meta">
+            <span class="pill">Connects user intent → UI modes → diagrams → full code</span>
+            <span class="pill">Click a node to open the detailed diagram for that slice</span>
+          </div>
+          <div class="diagram-wrapper">
+            <button class="fullscreen-btn" type="button"
+                    onclick="openDiagramFullscreen('diagram-journey','End-to-End Journey & Drilldown Map')">
+              ⤢ Fullscreen
+            </button>
+            <div class="mermaid mermaid-inline" id="diagram-journey"></div>
+            <script type="text/plain" class="mermaid-src" id="src-diagram-journey">
+flowchart TD
+  User(["Operator (student/teacher)"]) --> CLI["CLI launcher<br/>__main__.py"]
+  CLI --> UI["InteractiveArm UI (interactive.py)"]
+  UI --> Mode{Select pathway}
+
+  Mode --> Teleop["Teleoperation loop<br/>update_robot"]
+  Mode --> Teach["Teach mode<br/>waypoints &amp; subroutines"]
+  Mode --> Timeline["Timeline playback<br/>execute sequence"]
+  Mode --> Safety["Safety &amp; servo power"]
+  Mode --> Inspect["Inspect behaviours<br/>state + classes"]
+  Mode --> Code["Full code listing"]
+
+  Teleop --> TeleopState["Action → state machine"]
+  Teach --> TeachState["Teach → state machine"]
+  Timeline --> TimelineState["Timeline → state machine"]
+  Safety --> SafetyState["Safety interlocks"]
+  Inspect --> Classes["Class map"]
+  Inspect --> Architecture["Architecture layers"]
+  Inspect --> StateMachine["Global state machine"]
+  Code -->|Reference every function| Listing["full_code_listing.md"]
+
+  click Teleop call openDiagramFullscreen("diagram-teleop","Teleoperation Flow") "Open teleop flow"
+  click Teach href "#teaching" "Scroll to teach mode diagram"
+  click Timeline call openDiagramFullscreen("diagram-timeline","Timeline Playback") "Open timeline diagram"
+  click Safety call openDiagramFullscreen("diagram-safety","Safety Interlocks") "Open safety diagram"
+  click TeleopState call openDiagramFullscreen("diagram-state","State Machine – Teleop") "Drill into teleop state machine"
+  click TeachState call openDiagramFullscreen("diagram-state","State Machine – Teach") "Drill into teach state machine"
+  click TimelineState call openDiagramFullscreen("diagram-state","State Machine – Timeline") "Drill into timeline state machine"
+  click SafetyState href "#safety" "Jump to safety card"
+  click Classes call openDiagramFullscreen("diagram-classes","Class Diagram") "Open class diagram"
+  click Architecture call openDiagramFullscreen("diagram-architecture","Software Architecture") "Open architecture diagram"
+  click StateMachine call openDiagramFullscreen("diagram-state","Global State Machine") "Open state machine diagram"
+  click Code href "full_code_listing.md" "Open full code listing"
+  click Listing href "full_code_listing.md" "Open full code listing"
+            </script>
+          </div>
+        </div>
+      </section>
+
+      <!-- Software Architecture -->
+      <section class="card" id="architecture">
+        <div class="card-inner">
+          <div class="card-header">
+            <h2>Software Architecture</h2>
+            <span class="tag">Flowchart · Logical layers</span>
+          </div>
+          <div class="card-meta">
+            <span class="pill">Operator → UI → Kinematics → Controller → Hardware</span>
+          </div>
+          <div class="diagram-wrapper">
+            <button class="fullscreen-btn" type="button"
+                    onclick="openDiagramFullscreen('diagram-architecture','Software Architecture')">
+              ⤢ Fullscreen
+            </button>
+            <div class="mermaid mermaid-inline" id="diagram-architecture"></div>
+            <script type="text/plain" class="mermaid-src" id="src-diagram-architecture">
+flowchart LR
+  subgraph OperatorLayer["Operator"]
+    User[(Operator)]
+  end
+
+  subgraph ApplicationLayer["Application"]
+    CLI["CLI Launcher (__main__.py)"]
+    Interactive["InteractiveArm UI (interactive.py)"]
+  end
+
+  subgraph LogicLayer["Logic"]
+    Kinematics["AL5AKinematics (al5a_kinematics.py)"]
+  end
+
+  subgraph ControllerLayer["Controllers"]
+    SerialCtrl["AL5ASerialController (serial_comm.py)"]
+    PrintCtrl["PrintController (serial_comm.py)"]
+  end
+
+  subgraph PersistenceLayer["Config & Paths"]
+    LocalFiles["Calibration · Waypoints · Timeline (~/.config/lynxmotion_al5a/*.json)"]
+  end
+
+  subgraph HardwareLayer["Hardware"]
+    Hardware["SSC-32 / SSC-32U + AL5A Servos"]
+  end
+
+  subgraph TestLayer["Tests"]
+    Tests["Pytest Suite"]
+  end
+
+  User -->|launches| CLI -->|spawns UI| Interactive
+  Interactive -->|IK / FK| Kinematics
+  Interactive -->|move_joints / relax_servos| SerialCtrl
+  Interactive -->|simulation backend| PrintCtrl
+  SerialCtrl -->|"SSC-32 command bytes"| Hardware
+  Interactive -->|read / write JSON| LocalFiles
+  Tests -->|fixtures & behaviours| Interactive
+  Tests -->|IK validation| Kinematics
+            </script>
+          </div>
+        </div>
+      </section>
+
+      <!-- Teleoperation -->
+      <section class="card" id="teleop">
+        <div class="card-inner">
+          <div class="card-header">
+            <h2>Teleoperation Flow</h2>
+            <span class="tag">Flowchart · Real-time control</span>
+          </div>
+          <div class="card-meta">
+            <span class="pill">Continuous loop while UI active</span>
+            <span class="pill">Workspace clamping + IK + smoothing</span>
+          </div>
+          <div class="diagram-wrapper">
+            <button class="fullscreen-btn" type="button"
+                    onclick="openDiagramFullscreen('diagram-teleop','Teleoperation Flow')">
+              ⤢ Fullscreen
+            </button>
+            <div class="mermaid mermaid-inline" id="diagram-teleop"></div>
+            <script type="text/plain" class="mermaid-src" id="src-diagram-teleop">
+flowchart TD
+  Start([Start UI]) --> HomePose[Set default home pose]
+  HomePose --> InputCheck{User input?}
+
+  InputCheck -->|Drag gizmo / scroll / sliders| TargetUpdate[Update Cartesian target]
+  InputCheck -->|Keyboard modifiers| TargetUpdate
+
+  TargetUpdate --> Clamp[Clamp to workspace and wrist limits]
+  Clamp --> IK[Inverse kinematics XYZ + wrist]
+
+  IK --> ValidIK{IK valid?}
+  ValidIK -->|No| Reject[Reject move and warn]
+  Reject --> InputCheck
+
+  ValidIK -->|Yes| Queue[Queue smoothed joint command]
+  Queue --> Worker[Command worker thread]
+  Worker --> Controller[move_joints to controller]
+  Controller --> Feedback[Mirror joints and feedback to UI]
+  Feedback --> InputCheck
+            </script>
+          </div>
+        </div>
+      </section>
+
+      <!-- Teach mode -->
+      <section class="card" id="teaching">
+        <div class="card-inner">
+          <div class="card-header">
+            <h2>Teach Mode – Waypoints &amp; Subroutines</h2>
+            <span class="tag">Flowchart · Authoring</span>
+          </div>
+          <div class="card-meta">
+            <span class="pill">InteractiveArm Path panel</span>
+            <span class="pill">Subroutines stored as JSON</span>
+          </div>
+          <div class="diagram-wrapper">
+            <button class="fullscreen-btn" type="button"
+                    onclick="openDiagramFullscreen('diagram-teach','Teach Mode – Waypoints & Subroutines')">
+              ⤢ Fullscreen
+            </button>
+            <div class="mermaid mermaid-inline" id="diagram-teach"></div>
+            <script type="text/plain" class="mermaid-src" id="src-diagram-teach">
+flowchart TD
+  Enter([Open Path panel]) --> AdjustPose[Adjust pose and wrist]
+  AdjustPose --> Capture[Capture waypoint data]
+  Capture --> More{More waypoints?}
+
+  More -->|Yes| AdjustPose
+  More -->|No| Name[Name subroutine]
+
+  Name --> Save[Save waypoints as JSON]
+
+  Save --> Next{Next action?}
+  Next -->|Play locally| Play[Queue waypoints now]
+  Next -->|Add to timeline| Add[Append reference into timeline JSON]
+            </script>
+          </div>
+        </div>
+      </section>
+
+      <!-- Timeline -->
+      <section class="card" id="timeline">
+        <div class="card-inner">
+          <div class="card-header">
+            <h2>Autoplay – Timeline Execution</h2>
+            <span class="tag">Flowchart · Sequencing</span>
+          </div>
+          <div class="card-meta">
+            <span class="pill">Timeline JSON → hydrated paths</span>
+            <span class="pill">Supports repeat loop</span>
+          </div>
+          <div class="diagram-wrapper">
+            <button class="fullscreen-btn" type="button"
+                    onclick="openDiagramFullscreen('diagram-timeline','Autoplay – Timeline Execution')">
+              ⤢ Fullscreen
+            </button>
+            <div class="mermaid mermaid-inline" id="diagram-timeline"></div>
+            <script type="text/plain" class="mermaid-src" id="src-diagram-timeline">
+flowchart TD
+  Load[Load timeline JSON] --> SelectEntry[Select next entry]
+
+  SelectEntry --> Hydrate[Resolve subroutine and duration]
+  Hydrate --> QueuePath[Queue waypoints into command queue]
+
+  QueuePath --> Monitor[Monitor queue until path complete]
+
+  Monitor --> Done{Timeline finished?}
+
+  Done -->|No and repeat enabled| SelectEntry
+  Done -->|Yes or stopped| Idle([Return to idle state])
+            </script>
+          </div>
+        </div>
+      </section>
+
+      <!-- Safety -->
+      <section class="card" id="safety">
+        <div class="card-inner">
+          <div class="card-header">
+            <h2>Safety &amp; Calibration Guardrail</h2>
+            <span class="tag">Flowchart · Safety envelope</span>
+          </div>
+          <div class="card-meta">
+            <span class="pill">Workspace &amp; servo limits enforced</span>
+            <span class="pill">Calibration cancels motion</span>
+          </div>
+          <div class="diagram-wrapper">
+            <button class="fullscreen-btn" type="button"
+                    onclick="openDiagramFullscreen('diagram-safety','Safety & Calibration Guardrail')">
+              ⤢ Fullscreen
+            </button>
+            <div class="mermaid mermaid-inline" id="diagram-safety"></div>
+            <script type="text/plain" class="mermaid-src" id="src-diagram-safety">
+flowchart TD
+  Cmd([Command requested]) --> Limits[Clamp to workspace and servo limits]
+
+  Limits --> Smooth[Smooth joint speeds and soft-start]
+  Smooth --> Enqueue[Enqueue command segments]
+
+  Enqueue --> Calib{Calibration active?}
+
+  Calib -->|Yes| Relax[Relax servos and cancel commands]
+  Relax --> Wait[Wait for user to exit calibration]
+  Wait --> Limits
+
+  Calib -->|No| Execute[Send command to controller]
+  Execute --> Monitor[Optional joint feedback loop]
+  Monitor --> Cmd
+            </script>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="side-column">
+      <!-- State machine -->
+      <section class="card" id="state">
+        <div class="card-inner">
+          <div class="card-header">
+            <h2>High-Level UI State Machine</h2>
+            <span class="tag">State diagram · InteractiveArm</span>
+          </div>
+          <div class="card-meta">
+            <span class="pill">Single active state at any time</span>
+          </div>
+          <div class="diagram-wrapper">
+            <button class="fullscreen-btn" type="button"
+                    onclick="openDiagramFullscreen('diagram-state','High-Level UI State Machine')">
+              ⤢ Fullscreen
+            </button>
+            <div class="mermaid mermaid-inline" id="diagram-state"></div>
+            <script type="text/plain" class="mermaid-src" id="src-diagram-state">
+stateDiagram-v2
+  [*] --> Home
+
+  Home --> Idle: home move completes
+
+  Idle --> Teleop: drag / scroll / slider input
+  Teleop --> Idle: no input and command queue empty
+
+  Idle --> Teaching: Path panel opened
+  Teaching --> Idle: subroutine saved or cleared
+
+  Idle --> Playback: waypoint playback or timeline start
+  Playback --> Idle: playback complete or stop pressed
+
+  Idle --> Calibration: calibration toggled ON
+  Calibration --> Relaxed: servos relaxed for safety
+  Relaxed --> Calibration: resume calibration
+  Calibration --> Idle: exit calibration and restore offsets
+            </script>
+          </div>
+        </div>
+      </section>
+
+      <!-- Classes -->
+      <section class="card" id="classes">
+        <div class="card-inner">
+          <div class="card-header">
+            <h2>Core Classes &amp; Responsibilities</h2>
+            <span class="tag">Class diagram · Python modules</span>
+          </div>
+          <div class="card-meta">
+            <span class="pill">UI orchestrates kinematics and controllers</span>
+          </div>
+          <div class="diagram-wrapper">
+            <button class="fullscreen-btn" type="button"
+                    onclick="openDiagramFullscreen('diagram-classes','Core Classes & Responsibilities')">
+              ⤢ Fullscreen
+            </button>
+            <div class="mermaid mermaid-inline" id="diagram-classes"></div>
+            <script type="text/plain" class="mermaid-src" id="src-diagram-classes">
+classDiagram
+  class InteractiveArm {
+    +target: np.ndarray
+    +waypoints: list
+    +timeline: list
+    -_command_queue: queue.Queue
+    +update_robot()
+    +_send_move_command(joints, move_time_ms, soft_start)
+    +_command_worker()
+  }
+
+  class AL5AKinematics {
+    +forward(joints) np.ndarray
+    +inverse(position, wrist_pitch) list
+  }
+
+  class AL5ASerialController {
+    +move_joints(joints, move_time_ms) None
+    +relax_servos(indices) None
+  }
+
+  class PrintController {
+    +move_joints(joints, move_time_ms) None
+    +relax_servos(indices) None
+  }
+
+  InteractiveArm --> AL5AKinematics : uses for IK/FK
+  InteractiveArm --> AL5ASerialController : sends pulses
+  InteractiveArm --> PrintController : simulation backend
+            </script>
+          </div>
+        </div>
+      </section>
+
+      <!-- Standards -->
+      <section class="card">
+        <div class="card-inner">
+          <div class="card-header">
+            <h2>Diagram Standards (Summary)</h2>
+            <span class="tag">Conventions</span>
+          </div>
+          <ul class="legend-list">
+            <li><strong>Flowcharts</strong> use TD/LR orientation, explicit decision nodes and labelled transitions.</li>
+            <li><strong>Labels</strong> follow “verb + object” phrasing and align with function names where relevant.</li>
+            <li><strong>State machine</strong> is single-active-state, with entry and exit events on transitions.</li>
+            <li><strong>Class diagram</strong> shows public methods, basic types and dependency arrows UI → logic → controllers.</li>
+            <li>All diagrams use <strong>Mermaid v10</strong> and can be pasted directly into Markdown, MkDocs or Sphinx (with Mermaid plugins).</li>
+          </ul>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- Fullscreen Modal -->
+  <div class="diagram-modal" id="diagram-modal" aria-hidden="true">
+    <div class="diagram-modal-backdrop" id="modal-backdrop"></div>
+    <div class="diagram-modal-content">
+      <div class="modal-header">
+        <div class="modal-title" id="modal-title">Diagram – Fullscreen</div>
+        <button id="modal-close" type="button">Close ✕</button>
+      </div>
+      <div id="modal-diagram"></div>
+    </div>
+  </div>
+
+  <!-- JS: init Mermaid + fullscreen wiring -->
+  <script>
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: "dark",
+      securityLevel: "loose"
+    });
+
+    document.addEventListener("DOMContentLoaded", function () {
+      // Load sources into inline mermaid divs
+      document.querySelectorAll(".mermaid-src").forEach(function (src) {
+        var id = src.id.replace("src-", "");
+        var target = document.getElementById(id);
+        if (target) {
+          target.textContent = src.textContent.trim();
+        }
+      });
+
+      // Render all inline diagrams
+      mermaid.init(undefined, document.querySelectorAll(".mermaid-inline"));
+
+      // Modal wiring
+      var modal = document.getElementById("diagram-modal");
+      var modalDiagram = document.getElementById("modal-diagram");
+      var modalTitle = document.getElementById("modal-title");
+      var closeBtn = document.getElementById("modal-close");
+      var backdrop = document.getElementById("modal-backdrop");
+
+      function closeModal() {
+        modal.classList.remove("open");
+        modalDiagram.innerHTML = "";
+      }
+
+      closeBtn.addEventListener("click", closeModal);
+      backdrop.addEventListener("click", closeModal);
+      document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape") {
+          closeModal();
+        }
+      });
+
+      // Global so buttons can call it
+      window.openDiagramFullscreen = async function (targetId, title) {
+        var srcScript = document.getElementById("src-" + targetId);
+        if (!srcScript) return;
+        var code = srcScript.textContent.trim();
+        var renderId = "fs-" + targetId + "-" + Date.now();
+        try {
+          var renderResult = await mermaid.render(renderId, code);
+          modalDiagram.innerHTML = renderResult.svg;
+        } catch (err) {
+          console.error("Failed to render diagram", err);
+          modalDiagram.textContent = "Unable to render diagram";
+        }
+        modalTitle.textContent = title || "Diagram";
+        modal.classList.add("open");
+      };
+    });
+  </script>
+</body>
+</html>
