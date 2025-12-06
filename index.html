@@ -1241,19 +1241,19 @@ classDiagram
       const svg = container.querySelector("svg");
       if (!svg) return;
       const nodes = svg.querySelectorAll("g.node, g.classGroup");
-      nodes.forEach(function (node) {
-        const rawId = node.id || "";
-        const diagramId = diagramIdOverride || container.id;
-        const title = node.querySelector("title")?.textContent || "";
-        node.style.cursor = "help";
-        node.addEventListener("mouseenter", async function (evt) {
-          const ref = await resolveNodeRef(diagramId, rawId, refs, title);
-          showTooltip(evt, ref);
-          const title = node.querySelector("title");
-          if (title) {
-            title.textContent = ref.title || title.textContent;
-          }
-        });
+        nodes.forEach(function (node) {
+          const rawId = node.id || "";
+          const diagramId = diagramIdOverride || container.id;
+          const titleText = node.querySelector("title")?.textContent || "";
+          node.style.cursor = "help";
+          node.addEventListener("mouseenter", async function (evt) {
+            const ref = await resolveNodeRef(diagramId, rawId, refs, titleText);
+            showTooltip(evt, ref);
+            const titleEl = node.querySelector("title");
+            if (titleEl) {
+              titleEl.textContent = ref.title || titleEl.textContent;
+            }
+          });
         node.addEventListener("mousemove", positionTooltip);
         node.addEventListener("mouseleave", hideTooltip);
       });
