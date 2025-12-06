@@ -979,6 +979,7 @@ classDiagram
         Monitor: "applyFeedback"
       },
       "diagram-state": {
+        start: "homeSequence",
         Home: "homeSequence",
         Idle: "updateRobot",
         Teleop: "updateRobot",
@@ -1138,6 +1139,19 @@ classDiagram
       codeTooltip.style.display = "none";
     }
 
+    function ensureNodeRef(diagramId, baseId) {
+      NODE_CODE_REFS[diagramId] = NODE_CODE_REFS[diagramId] || {};
+      if (!NODE_CODE_REFS[diagramId][baseId]) {
+        console.warn(`No snippet mapping found for ${diagramId} node ${baseId}`);
+        NODE_CODE_REFS[diagramId][baseId] = {
+          title: `Missing mapping: ${baseId}`,
+          file: "Update NODE_SNIPPET_KEYS",
+          code: "No snippet configured for this node."
+        };
+      }
+      return NODE_CODE_REFS[diagramId][baseId];
+    }
+
     function annotateDiagram(container, refs) {
       if (!container || !refs) return;
       const svg = container.querySelector("svg");
@@ -1146,11 +1160,8 @@ classDiagram
       nodes.forEach(function (node) {
         const rawId = node.id || "";
         const baseId = rawId.includes("-") ? rawId.split("-").pop() : rawId;
-        const ref = refs[baseId] || {
-          title: "Code reference",
-          file: "",
-          code: "Snippet not configured"
-        };
+        const diagramId = container.id;
+        const ref = refs[baseId] || ensureNodeRef(diagramId, baseId);
         node.style.cursor = "help";
         node.addEventListener("mouseenter", function (evt) {
           showTooltip(evt, ref);
