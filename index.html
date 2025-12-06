@@ -1170,26 +1170,58 @@ classDiagram
       return NODE_CODE_REFS[diagramId][baseId];
     }
 
+    function normalizeNodeId(rawId) {
+      if (!rawId) return "";
+      // Mermaid prefixes flowchart IDs with the diagram name, e.g. `flowchart-diagram-teleop-TargetUpdate`
+      // and class diagrams with `classid-<Name>` or `classDiagram-...-<Name>`.
+      const parts = rawId.split("-").filter(Boolean);
+      if (parts.length === 0) return rawId;
+
+      // Try the last segment first (common flowchart case)
+      const tail = parts[parts.length - 1];
+      if (tail) return tail;
+
+      return rawId;
+    }
+
+    async function resolveNodeRef(diagramId, rawId, refs) {
+      const baseId = normalizeNodeId(rawId);
+      const existing = refs?.[baseId];
+      if (existing && !/No snippet configured/i.test(existing.code || "")) {
+        return existing;
+      }
+
+      const nodeMap = NODE_SNIPPET_KEYS[diagramId] || {};
+      const snippetKey = nodeMap[baseId] || nodeMap[rawId];
+      if (!snippetKey) {
+        return ensureNodeRef(diagramId, baseId);
+      }
+
+      const hydrated = await resolveSnippet(snippetKey);
+      NODE_CODE_REFS[diagramId] = NODE_CODE_REFS[diagramId] || {};
+      NODE_CODE_REFS[diagramId][baseId] = hydrated;
+      return hydrated;
+    }
+
     function annotateDiagram(container, refs) {
       if (!container || !refs) return;
       const svg = container.querySelector("svg");
       if (!svg) return;
-      const nodes = svg.querySelectorAll("g.node");
+      const nodes = svg.querySelectorAll("g.node, g.classGroup");
       nodes.forEach(function (node) {
         const rawId = node.id || "";
-        const baseId = rawId.includes("-") ? rawId.split("-").pop() : rawId;
         const diagramId = container.id;
-        const ref = refs[baseId] || ensureNodeRef(diagramId, baseId);
         node.style.cursor = "help";
-        node.addEventListener("mouseenter", function (evt) {
+        node.addEventListener("mouseenter", async function (evt) {
+          const ref = await resolveNodeRef(diagramId, rawId, refs);
           showTooltip(evt, ref);
+          const title = node.querySelector("title");
+          if (title) {
+            title.textContent = ref.title || title.textContent;
+          }
         });
         node.addEventListener("mousemove", positionTooltip);
         node.addEventListener("mouseleave", hideTooltip);
-        const title = node.querySelector("title");
-        if (title) {
-          title.textContent = ref.title || title.textContent;
-        }
       });
     }
 
