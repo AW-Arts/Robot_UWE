@@ -266,6 +266,38 @@ def test_servo_limits_loaded_and_persisted(
     assert math.isclose(float(stored_limits["max_deg"]), 30.0, rel_tol=1e-6)
 
 
+def test_servo_multipliers_loaded_and_persisted(
+    monkeypatch, interactive_module, tmp_path
+) -> None:
+    calibration_file = tmp_path / "servo_offsets.json"
+    calibration_file.write_text(
+        json.dumps(
+            {
+                "multipliers": {
+                    "0": 0.5,
+                    "2": 1.3,
+                }
+            }
+        )
+    )
+    monkeypatch.setattr(
+        interactive_module,
+        "CALIBRATION_CONFIG_PATH",
+        calibration_file,
+        raising=False,
+    )
+
+    controller = _BasicController()
+    with _prepare_arm(monkeypatch, interactive_module, controller) as arm:
+        assert arm.servo_multipliers[0] == pytest.approx(0.8)
+        assert arm.servo_multipliers[2] == pytest.approx(1.2)
+        arm._set_servo_multiplier(0, 1.05)
+
+    stored = json.loads(calibration_file.read_text())
+    assert stored["multipliers"]["0"] == pytest.approx(1.05)
+    assert stored["multipliers"]["2"] == pytest.approx(1.2)
+
+
 def test_hard_limit_clamping_uses_servo_configs(
     monkeypatch, interactive_module, tmp_path
 ) -> None:

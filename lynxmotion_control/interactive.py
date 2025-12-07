@@ -176,6 +176,9 @@ class InteractiveArm:
         self.step_z = step_z
         self._base_servo_configs = deepcopy(DEFAULT_SERVO_CONFIGS)
         self.servo_configs: dict[int, ServoConfig] = dict(self._base_servo_configs)
+        self.servo_multipliers: dict[int, float] = {
+            index: 1.0 for index in self._base_servo_configs
+        }
         self.servo_inversions: list[bool] = [False] * len(self._SERVO_METADATA)
         self._invert_button_inactive_color = "0.85"
         self._invert_button_active_color = "#90ee90"
@@ -193,6 +196,7 @@ class InteractiveArm:
         self._home_move_time_ms = move_time_ms
         self._loaded_hard_limits: dict[int, tuple[float, float]] = {}
         self._loaded_workspace: dict[str, tuple[float, float]] = {}
+        self._servo_multiplier_limits = (0.8, 1.2)
         self.wrist_extension_compensation: list[tuple[float, float]] = [
             (0.0, 1.0),
             (0.55, 1.0),
@@ -412,6 +416,7 @@ class InteractiveArm:
         self.servo_limit_boxes_min: list[TextBox] = []
         self.servo_limit_boxes_max: list[TextBox] = []
         self.servo_pulse_sliders: list[Slider] = []
+        self.servo_multiplier_sliders: list[Slider] = []
         self._home_button: Button | None = None
         self._waypoint_duration_box: TextBox | None = None
         self._add_waypoint_button: Button | None = None
@@ -1500,7 +1505,7 @@ class InteractiveArm:
                 row_height * 0.55,
             )
 
-            config = self.servo_configs.get(index)
+            config = self._servo_config_with_multiplier(index)
             current_source = self.feedback_joints or self.current_joints
             current_angle = (
                 current_source[index]
@@ -1522,6 +1527,25 @@ class InteractiveArm:
             self.servo_pulse_sliders.append(slider)
             self._panel_interactive_widgets[panel_key].append(slider)
             axes.append(slider_ax)
+
+            multiplier_ax = self._panel_axes(
+                slider_left,
+                row_bottom + row_height * 0.65,
+                slider_width,
+                row_height * 0.25,
+            )
+            multiplier_slider = Slider(
+                multiplier_ax,
+                "Fudge ×",
+                valmin=self._servo_multiplier_limits[0],
+                valmax=self._servo_multiplier_limits[1],
+                valinit=self.servo_multipliers.get(index, 1.0),
+                valfmt="%0.2f×",
+            )
+            multiplier_slider.on_changed(self._make_multiplier_slider_callback(index))
+            self.servo_multiplier_sliders.append(multiplier_slider)
+            self._panel_interactive_widgets[panel_key].append(multiplier_slider)
+            axes.append(multiplier_ax)
 
             min_left = slider_left + slider_width + gap_small
             max_left = min_left + limit_width + gap_small
@@ -2363,10 +2387,49 @@ class InteractiveArm:
 
     def _make_pulse_slider_callback(self, index: int):
         def _callback(value: float) -> None:  # pragma: no cover - UI interaction
-            config = self.servo_configs.get(index)
+            config = self._servo_config_with_multiplier(index)
             if config is None:
                 return
             self._set_servo_angle(index, config.pulse_to_angle(value))
+
+        return _callback
+
+    def _scaled_servo_config(
+        self, config: ServoConfig, multiplier: float
+    ) -> ServoConfig:
+        mid_pulse = (config.min_pulse + config.max_pulse) / 2.0
+        half_span = (config.max_pulse - config.min_pulse) / 2.0
+        scaled_half_span = half_span * multiplier
+        min_pulse = mid_pulse - scaled_half_span
+        max_pulse = mid_pulse + scaled_half_span
+        return ServoConfig(
+            min_angle=config.min_angle,
+            max_angle=config.max_angle,
+            min_pulse=int(round(min_pulse)),
+            max_pulse=int(round(max_pulse)),
+        )
+
+    def _servo_config_with_multiplier(self, index: int) -> ServoConfig | None:
+        config = self.servo_configs.get(index)
+        if config is None:
+            return None
+        multiplier = self.servo_multipliers.get(index, 1.0)
+        clamped = float(np.clip(multiplier, *self._servo_multiplier_limits))
+        if math.isclose(clamped, 1.0, rel_tol=0.0, abs_tol=1e-6):
+            return config
+        return self._scaled_servo_config(config, clamped)
+
+    def _set_servo_multiplier(self, index: int, multiplier: float) -> None:
+        clamped = float(np.clip(multiplier, *self._servo_multiplier_limits))
+        self.servo_multipliers[index] = clamped
+        self._update_multiplier_slider_display(index)
+        self._update_pulse_slider_range(index)
+        self._save_calibration_data()
+        self._send_move_command(self.commanded_joints, move_time_ms=self.move_time_ms)
+
+    def _make_multiplier_slider_callback(self, index: int):
+        def _callback(value: float) -> None:  # pragma: no cover - UI interaction
+            self._set_servo_multiplier(index, value)
 
         return _callback
 
@@ -2508,7 +2571,7 @@ class InteractiveArm:
         if index >= len(self.servo_pulse_sliders):
             return
         slider = self.servo_pulse_sliders[index]
-        config = self.servo_configs.get(index)
+        config = self._servo_config_with_multiplier(index)
         if slider is None or config is None:
             return
         if not self.commanded_joints:
@@ -2536,13 +2599,36 @@ class InteractiveArm:
         if index >= len(self.servo_pulse_sliders):
             return
         slider = self.servo_pulse_sliders[index]
-        config = self.servo_configs.get(index)
+        config = self._servo_config_with_multiplier(index)
         if slider is None or config is None:
             return
         slider.valmin = min(config.min_pulse, config.max_pulse)
         slider.valmax = max(config.min_pulse, config.max_pulse)
         slider.ax.set_xlim(slider.valmin, slider.valmax)
         self._update_pulse_slider_display(index)
+
+    def _update_multiplier_slider_display(self, index: int) -> None:
+        if not hasattr(self, "servo_multiplier_sliders"):
+            return
+        if index >= len(self.servo_multiplier_sliders):
+            return
+        slider = self.servo_multiplier_sliders[index]
+        if slider is None:
+            return
+        value = self.servo_multipliers.get(index, 1.0)
+        low = min(slider.valmin, slider.valmax)
+        high = max(slider.valmin, slider.valmax)
+        try:
+            slider.eventson = False
+        except AttributeError:  # pragma: no cover - Matplotlib implementation detail
+            pass
+        try:
+            slider.set_val(float(np.clip(value, low, high)))
+        finally:
+            try:
+                slider.eventson = True
+            except AttributeError:  # pragma: no cover - Matplotlib implementation detail
+                pass
 
     def _apply_hard_limits_to_ik(self, joints: list[float]) -> list[float]:
         clamped = self._clamp_joint_list(joints)
@@ -2617,9 +2703,18 @@ class InteractiveArm:
         inversion_raw: dict[str, object] | None = None
         workspace_raw: dict[str, object] | None = None
         limits_raw: dict[str, object] | None = None
+        multipliers_raw: dict[str, object] | None = None
 
         if isinstance(data, dict):
-            if "offsets" in data or "vertical_angles" in data:
+            structured_keys = {
+                "offsets",
+                "vertical_angles",
+                "inverted",
+                "workspace",
+                "servo_limits",
+                "multipliers",
+            }
+            if structured_keys.intersection(data):
                 offsets_candidate = data.get("offsets")
                 if isinstance(offsets_candidate, dict):
                     offsets_raw = offsets_candidate
@@ -2632,6 +2727,9 @@ class InteractiveArm:
                 workspace_candidate = data.get("workspace")
                 if isinstance(workspace_candidate, dict):
                     workspace_raw = workspace_candidate
+                multiplier_candidate = data.get("multipliers")
+                if isinstance(multiplier_candidate, dict):
+                    multipliers_raw = multiplier_candidate
             else:
                 offsets_raw = data
 
@@ -2706,6 +2804,18 @@ class InteractiveArm:
             if parsed_limits:
                 self._loaded_hard_limits.update(parsed_limits)
 
+        if multipliers_raw:
+            for key, value in multipliers_raw.items():
+                try:
+                    index = int(key)
+                    multiplier = float(value)
+                except (TypeError, ValueError):
+                    _LOGGER.warning("Ignoring invalid servo multiplier entry for %s", key)
+                    continue
+                self.servo_multipliers[index] = float(
+                    np.clip(multiplier, *self._servo_multiplier_limits)
+                )
+
         return offsets
 
     def _save_calibration_data(self) -> None:
@@ -2725,6 +2835,9 @@ class InteractiveArm:
             vertical_serialised = {
                 str(idx): angle for idx, angle in self.zero_reference.items()
             }
+            multipliers_serialised = {
+                str(idx): value for idx, value in self.servo_multipliers.items()
+            }
             serialisable = dict(offsets_serialised)
             serialisable.update(
                 {
@@ -2738,6 +2851,7 @@ class InteractiveArm:
                         axis: [bounds[0], bounds[1]]
                         for axis, bounds in self.workspace_limits.items()
                     },
+                    "multipliers": dict(multipliers_serialised),
                 }
             )
             path.write_text(json.dumps(serialisable, indent=2, sort_keys=True))
@@ -3463,7 +3577,7 @@ class InteractiveArm:
             servo_index, phase = self._calibration_steps[self._calibration_step_index]
             name, model, _ = self._SERVO_METADATA[servo_index]
             target_angle = self._target_angle_for_phase(servo_index, phase)
-            config = self.servo_configs.get(servo_index)
+            config = self._servo_config_with_multiplier(servo_index)
             zero_angle = self._zero_angle_for_servo(servo_index)
             relative_target_deg = math.degrees(target_angle - zero_angle)
             message = (
@@ -3573,7 +3687,7 @@ class InteractiveArm:
         source = self.feedback_joints or self.current_joints
         if source and servo_index < len(source):
             actual_angle = source[servo_index]
-        config = self.servo_configs.get(servo_index)
+        config = self._servo_config_with_multiplier(servo_index)
         phase_label = {
             "center": "Center", "min": "Hard min", "max": "Hard max", "zero": "Zero"
         }.get(phase, phase.capitalize())
@@ -4261,7 +4375,12 @@ class InteractiveArm:
             self._command_queue.put(command)
 
     def _get_servo_configs_for_controller(self) -> dict[int, ServoConfig]:
-        return dict(self.servo_configs)
+        configs: dict[int, ServoConfig] = {}
+        for index in self.servo_configs:
+            config = self._servo_config_with_multiplier(index)
+            if config is not None:
+                configs[index] = config
+        return configs
 
     def _generate_smooth_segments(
         self,
