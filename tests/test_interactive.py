@@ -37,13 +37,9 @@ def interactive_module(monkeypatch):
 class _BasicController:
     def __init__(self) -> None:
         self.moves: list[tuple[tuple[float, ...], int | None]] = []
-        self.relax_calls = 0
 
     def move_joints(self, joints, **kwargs) -> None:  # pragma: no cover - simple recording
         self.moves.append((tuple(joints), kwargs.get("move_time_ms")))
-
-    def relax_servos(self, *_args, **_kwargs) -> None:  # pragma: no cover - compatibility
-        self.relax_calls += 1
 
 
 @contextlib.contextmanager
@@ -94,7 +90,6 @@ def test_enter_calibration_mode_clears_pending_commands(
         arm._enter_calibration_mode()
         assert arm._calibration_active
         assert arm._command_queue.commands == []  # type: ignore[attr-defined]
-        assert controller.relax_calls == 0
 
 
 def test_set_vertical_persists_offsets(monkeypatch, interactive_module, tmp_path) -> None:
@@ -465,7 +460,6 @@ def test_command_worker_processes_commands_without_feedback(
         arm._command_queue.get = original_get  # type: ignore[attr-defined]
 
         assert controller.moves  # command sent to controller
-        assert controller.relax_calls == 0
         assert arm._last_commanded_raw != baseline_last_raw
         assert arm.commanded_joints != baseline_current
         assert arm.current_joints != baseline_current

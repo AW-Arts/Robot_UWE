@@ -48,8 +48,6 @@ class SSC32Command:
 class AL5ASerialController:
     """High-level interface to the SSC-32/SSC-32U controller."""
 
-    AUTO_RELAX_ON_CALIBRATION = True
-
     def __init__(self, port: str | None = None, baudrate: int = 115200) -> None:
         self.port_name = port
         self.baudrate = baudrate
@@ -105,32 +103,6 @@ class AL5ASerialController:
         command = SSC32Command(pulses, move_time_ms)
         serial_port.write(command.to_bytes())
 
-    def relax_servos(
-        self,
-        servo_indices: Sequence[int] | None = None,
-        servo_channels: dict[int, int] | None = None,
-    ) -> None:
-        serial_port = self.ensure_connection()
-        channels_map = servo_channels or DEFAULT_SERVO_CHANNELS
-        indices = (
-            sorted(channels_map)
-            if servo_indices is None
-            else list(servo_indices)
-        )
-        try:
-            channels = [channels_map[index] for index in indices]
-        except KeyError as exc:  # pragma: no cover - defensive programming
-            raise KeyError(f"Unknown servo index: {exc.args[0]}") from exc
-        # ``#<channel>PO`` disables the PWM output for a servo channel on the
-        # SSC-32/SSC-32U controller which removes holding torque from the
-        # connected servo. ``#<channel>L`` only changes a digital output state
-        # and has no effect on active servo channels, so use ``PO`` instead of
-        # ``L`` when relaxing servos.
-        command = (
-            "".join(f"#{channel}PO" for channel in channels) + "\r"
-        ).encode("ascii")
-        serial_port.write(command)
-
 
 class PrintController:
     """Fallback controller that prints commands instead of sending them."""
@@ -149,21 +121,6 @@ class PrintController:
         )
         command = SSC32Command(pulses, move_time_ms)
         print(command.to_bytes().decode("ascii").strip())
-
-    def relax_servos(
-        self,
-        servo_indices: Sequence[int] | None = None,
-        servo_channels: dict[int, int] | None = None,
-    ) -> None:
-        channels_map = servo_channels or DEFAULT_SERVO_CHANNELS
-        indices = (
-            sorted(channels_map)
-            if servo_indices is None
-            else list(servo_indices)
-        )
-        channels = [channels_map[index] for index in indices]
-        command = "".join(f"#{channel}PO" for channel in channels)
-        print(command)
 
 
 __all__ = ["AL5ASerialController", "PrintController", "SSC32Command"]

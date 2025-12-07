@@ -441,7 +441,7 @@ flowchart TD
   Teleop --> TeleopState["Realtime flow"]
   Teach --> TeachState["Author + persist"]
   Timeline --> TimelineState["Schedule + repeat"]
-  Calibration --> SafetyState["Interlocks &amp; relax"]
+  Calibration --> SafetyState["Interlocks"]
   Inspect --> Classes["Class map"]
   Inspect --> Architecture["Architecture layers"]
   Inspect --> StateMachine["Global state machine"]
@@ -502,7 +502,7 @@ flowchart LR
   end
 
   subgraph ControllerLayer["Controllers"]
-    SerialCtrl["AL5ASerialController<br/>connect / move_joints / relax_servos"]
+    SerialCtrl["AL5ASerialController<br/>connect / move_joints"]
     PrintCtrl["PrintController<br/>simulation output"]
   end
 
@@ -689,8 +689,7 @@ flowchart TD
 
   Enqueue --> Calib["Calibration active?<br/>(_calibration_active flag)"]
 
-  Calib -->|Yes| Relax["Relax all servos<br/>(AL5ASerialController.relax_servos)"]
-  Relax --> Wait["Wait + block queue<br/>(_stop_for_calibration)"]
+  Calib -->|Yes| Wait["Pause queue for calibration<br/>(_stop_for_calibration)"]
   Wait --> Limits
 
   Calib -->|No| Execute["Send move_joints to controller"]
@@ -699,7 +698,7 @@ flowchart TD
   Monitor --> Cmd
             </script>
           </div>
-          <div class="refs">Refs: <code>interactive.py:_apply_workspace_limits</code>, <code>interactive.py:_smooth_command</code>, <code>interactive.py:_enqueue_command_segments</code>, <code>interactive.py:_stop_for_calibration</code>, <code>serial_comm.py:AL5ASerialController.relax_servos</code></div>
+          <div class="refs">Refs: <code>interactive.py:_apply_workspace_limits</code>, <code>interactive.py:_smooth_command</code>, <code>interactive.py:_enqueue_command_segments</code>, <code>interactive.py:_stop_for_calibration</code></div>
         </div>
       </section>
     </div>
@@ -737,8 +736,6 @@ stateDiagram-v2
   Playback --> Idle: playback complete or stop pressed
 
   Idle --> Calibration: calibration toggled ON
-  Calibration --> Relaxed: relax_servos (AUTO_RELAX_ON_CALIBRATION)
-  Relaxed --> Calibration: resume calibration guide
   Calibration --> Idle: exit calibration and restore offsets
             </script>
           </div>
@@ -793,10 +790,8 @@ mindmap
         disconnect
         ensure_connection
         move_joints
-        relax_servos
       PrintController
         move_joints
-        relax_servos
     interactive.py
       _ensure_interactive_backend
       run_demo
@@ -1007,12 +1002,10 @@ classDiagram
 
   class AL5ASerialController {
     +move_joints(joints, move_time_ms, servo_configs) None
-    +relax_servos(indices) None
   }
 
   class PrintController {
     +move_joints(joints, move_time_ms) None
-    +relax_servos(indices) None
   }
 
   class ServoConfig {
@@ -1112,7 +1105,6 @@ classDiagram
       applyFeedback: { title: "interactive.py:_apply_feedback", file: "lynxmotion_control/interactive.py", marker: "def _apply_feedback", context: 900 },
       sendMove: { title: "interactive.py:_send_move_command", file: "lynxmotion_control/interactive.py", marker: "def _send_move_command", context: 1000 },
       saveTimeline: { title: "interactive.py:_save_timeline", file: "lynxmotion_control/interactive.py", marker: "def _save_timeline", context: 900 },
-      relaxServos: { title: "serial_comm.py:relax_servos", file: "lynxmotion_control/serial_comm.py", marker: "def relax_servos", context: 900 },
       serialMove: { title: "serial_comm.py:AL5ASerialController.move_joints", file: "lynxmotion_control/serial_comm.py", marker: "def move_joints", context: 900 },
       serialControllerClass: { title: "serial_comm.py:AL5ASerialController class", file: "lynxmotion_control/serial_comm.py", marker: "class AL5ASerialController", context: 900 },
       printMove: { title: "serial_comm.py:PrintController", file: "lynxmotion_control/serial_comm.py", marker: "class PrintController", context: 900 },
@@ -1166,7 +1158,6 @@ classDiagram
         LocalFiles: "saveTimeline",
         Paths: "saveSubroutine",
         Timeline: "loadTimeline",
-        Hardware: "relaxServos",
         Tests: "testsKinematics"
       },
       "diagram-teleop": {
@@ -1213,7 +1204,6 @@ classDiagram
         SoftStart: "smoothSegments",
         Enqueue: "commandWorker",
         Calib: "toggleCalibration",
-        Relax: "relaxServos",
         Wait: "toggleCalibration",
         Execute: "sendMove",
         Persist: "saveTimeline",
@@ -1226,8 +1216,7 @@ classDiagram
         Teleop: "updateRobot",
         Teaching: "addWaypoint",
         Playback: "timelineWorker",
-        Calibration: "toggleCalibration",
-        Relaxed: "relaxServos"
+        Calibration: "toggleCalibration"
       },
       "diagram-classes": {
         InteractiveArm: "interactiveClass",
@@ -1243,7 +1232,6 @@ classDiagram
         forward: "forwardKinematics",
         inverse: "inverseIk",
         move_joints: "serialMove",
-        relax_servos: "relaxServos",
         to_bytes: "ssc32Bytes",
         _apply_workspace_limits: "clampTarget",
         _smooth_command: "smoothSegments",
