@@ -99,6 +99,8 @@ class Waypoint:
     position: np.ndarray
     duration: float
     wrist_pitch: float
+    wrist_rotation: float
+    gripper_angle: float
 
 
 @dataclass
@@ -2120,10 +2122,13 @@ class InteractiveArm:
             pitch_text = (
                 f"Wrist: {self._slider_value_from_pitch(waypoint.wrist_pitch):.1f}°"
             )
+            rotation_text = f"Rotation: {math.degrees(waypoint.wrist_rotation):.1f}°"
+            gripper_text = f"Gripper: {math.degrees(waypoint.gripper_angle):.1f}°"
             text = self.waypoint_ax.text(
                 0.04,
                 y + self._waypoint_item_height / 2,
-                f"{position_text}\n{waypoint.duration:.2f} s, {pitch_text}",
+                f"{position_text}\n{waypoint.duration:.2f} s, {pitch_text}\n"
+                f"{rotation_text}, {gripper_text}",
                 va="center",
                 ha="left",
                 fontsize=9,
@@ -2171,19 +2176,33 @@ class InteractiveArm:
             position = entry.get("position")
             duration = entry.get("duration")
             wrist_pitch = entry.get("wrist_pitch")
+            wrist_rotation = entry.get("wrist_rotation", self.wrist_rotation)
+            gripper_angle = entry.get("gripper_angle", self.gripper_angle)
             try:
                 position_array = np.array(position, dtype=float)
                 if position_array.shape != (3,):
                     continue
                 duration_value = float(duration)
                 pitch_value = float(wrist_pitch)
+                rotation_value = float(wrist_rotation)
+                gripper_value = float(gripper_angle)
             except (TypeError, ValueError):
                 continue
+
+            rotation_config = self.servo_configs.get(4)
+            if rotation_config is not None:
+                rotation_value = rotation_config.clamp_angle(rotation_value)
+            gripper_config = self.servo_configs.get(5)
+            if gripper_config is not None:
+                gripper_value = gripper_config.clamp_angle(gripper_value)
+
             loaded.append(
                 Waypoint(
                     position=position_array,
                     duration=max(0.1, duration_value),
                     wrist_pitch=float(np.clip(pitch_value, *self._wrist_pitch_limits)),
+                    wrist_rotation=rotation_value,
+                    gripper_angle=gripper_value,
                 )
             )
         return loaded
@@ -2341,6 +2360,8 @@ class InteractiveArm:
                 "position": waypoint.position.tolist(),
                 "duration": float(waypoint.duration),
                 "wrist_pitch": float(waypoint.wrist_pitch),
+                "wrist_rotation": float(waypoint.wrist_rotation),
+                "gripper_angle": float(waypoint.gripper_angle),
             }
             for waypoint in waypoints
         ]
@@ -2970,6 +2991,8 @@ class InteractiveArm:
                 position=position.copy(),
                 duration=duration,
                 wrist_pitch=self.wrist_pitch,
+                wrist_rotation=self.wrist_rotation,
+                gripper_angle=self.gripper_angle,
             )
         )
         self._selected_waypoint_index = len(self.waypoints) - 1
@@ -3232,6 +3255,8 @@ class InteractiveArm:
             scaled_duration = waypoint.duration / max(playback_speed, 0.1)
             duration_ms = int(max(0.02, scaled_duration) * 1000)
             desired_pitch = float(np.clip(waypoint.wrist_pitch, *self._wrist_pitch_limits))
+            desired_rotation = waypoint.wrist_rotation
+            desired_gripper = waypoint.gripper_angle
             self._set_wrist_pitch_target(desired_pitch, update_slider=False)
             try:
                 compensated_pitch = self._apply_wrist_extension_compensation(
@@ -3244,7 +3269,9 @@ class InteractiveArm:
                 _LOGGER.exception("Failed to solve IK for scheduled waypoint %d", index + 1)
                 continue
             self._last_wrist_pitch = joints[1] + joints[2] + joints[3]
-            full_joints = joints + [self.wrist_rotation, self.gripper_angle]
+            self.wrist_rotation = desired_rotation
+            self.gripper_angle = desired_gripper
+            full_joints = joints + [desired_rotation, desired_gripper]
             full_joints = self._clamp_joint_list(full_joints)
             self.target[:] = target
             self._send_move_command(
