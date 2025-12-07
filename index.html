@@ -390,6 +390,10 @@
       </p>
     </div>
     <nav class="quick-links" aria-label="Diagram sections">
+      <a href="#report-alignment">Marker fit</a>
+      <a href="#design-levels">Design levels</a>
+      <a href="#modes">Modes</a>
+      <a href="#project-management">Project mgmt</a>
       <a href="#architecture">Architecture</a>
       <a href="#teleop">Teleoperation</a>
       <a href="#teaching">Teach mode</a>
@@ -704,6 +708,66 @@ flowchart TD
     </div>
 
     <div class="side-column">
+      <section class="card" id="report-alignment">
+        <div class="card-inner">
+          <div class="card-header">
+            <h2>Marker Expectations &amp; Report Fit</h2>
+            <span class="tag">Read this first</span>
+          </div>
+          <ul class="legend-list">
+            <li><strong>Three design levels only:</strong> use the terms <em>Top-level design</em>, <em>High-level design</em>, and <em>Low-level design</em> consistently.</li>
+            <li><strong>Two operation modes:</strong> Normal operation vs Teach mode, selectable in the InteractiveArm UI and shown in the demo/video.</li>
+            <li><strong>Project management:</strong> Gantt chart must show explicit V&amp;V tasks (simulation, hardware tests, final validation) plus a short risk awareness note.</li>
+            <li><strong>Keep lecturer wording:</strong> mirror the marking scheme language so the marker immediately sees the mapping.</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="card" id="design-levels">
+        <div class="card-inner">
+          <div class="card-header">
+            <h2>Top / High / Low-Level Design Map</h2>
+            <span class="tag">Use these figures</span>
+          </div>
+          <ul class="legend-list">
+            <li><strong>Top-level design:</strong> use “End-to-End Journey &amp; Drilldown Map” as the system overview (operator → UI → controllers → hardware → demo output). Caption it as the top-level system design.</li>
+            <li><strong>High-level design:</strong> pair the “Software Architecture” diagram with the “High-Level UI State Machine” to describe subsystems and interactions. Note: Teaching state = Teach mode; Teleop/Playback = Normal operation.</li>
+            <li><strong>Low-level design:</strong> select 2–4 flows: Teleoperation, Teach Mode – Waypoints &amp; Subroutines, Autoplay – Timeline Execution, and Safety &amp; Calibration Guardrail. Reference the class diagram sparingly in the body, keep the full function inventory for the appendix.</li>
+            <li><strong>Requirement bullets to lift:</strong> R1 Normal mode trajectories, R2 Teach mode waypoint authoring, R3 mode selection via UI, R4 workspace/servo limits in all modes, R5 support for video/simulation evidence.</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="card" id="modes">
+        <div class="card-inner">
+          <div class="card-header">
+            <h2>Operation Modes &amp; Selection</h2>
+            <span class="tag">Normal vs Teach</span>
+          </div>
+          <ul class="legend-list">
+            <li><strong>Normal operation mode:</strong> Teleoperation and Timeline/Playback states execute trajectories on the robot or simulator.</li>
+            <li><strong>Teach mode:</strong> Teaching state enables waypoint capture and subroutine saving; autoplay is disabled until you exit.</li>
+            <li><strong>Selection mechanism:</strong> mode toggle in InteractiveArm UI (panel switch/button). Entering Teaching locks in teach workflow; returning to Teleop/Playback resumes Normal mode.</li>
+            <li><strong>Demonstration ask:</strong> show both modes in the video—highlight the toggle and the distinct behaviours.</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="card" id="project-management">
+        <div class="card-inner">
+          <div class="card-header">
+            <h2>Project Management &amp; V&amp;V Visibility</h2>
+            <span class="tag">Gantt + risks</span>
+          </div>
+          <ul class="legend-list">
+            <li><strong>Gantt must show V&amp;V tasks:</strong> add explicit tasks for simulation tests, hardware motion tests, and final validation/demo checks.</li>
+            <li><strong>Text callout:</strong> include a sentence like “Verification and validation activities were explicitly scheduled (simulation trajectories, robot tests, final demo checks).”</li>
+            <li><strong>Risk awareness:</strong> summarise key risks (hardware limits, calibration drift, missed deadlines) and mitigations.</li>
+            <li><strong>Where to put extras:</strong> keep the full function inventory and exhaustive risk register in the appendix; main body gets the summary and the annotated Gantt.</li>
+          </ul>
+        </div>
+      </section>
+
       <!-- State machine -->
       <section class="card" id="state">
         <div class="card-inner">
