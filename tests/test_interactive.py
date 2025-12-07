@@ -9,6 +9,7 @@ import sys
 from typing import Any
 
 import pytest
+import numpy as np
 
 matplotlib = pytest.importorskip("matplotlib")
 
@@ -436,3 +437,39 @@ def test_command_worker_processes_commands_without_feedback(
         assert arm._last_commanded_raw != baseline_last_raw
         assert arm.commanded_joints != baseline_current
         assert arm.current_joints != baseline_current
+
+
+def test_wrist_extension_compensation_scales_with_reach(
+    monkeypatch, interactive_module
+) -> None:
+    controller = _BasicController()
+    with _prepare_arm(monkeypatch, interactive_module, controller) as arm:
+        arm.wrist_extension_compensation = [
+            (0.0, 1.0),
+            (0.5, 1.0),
+            (1.0, 1.2),
+        ]
+        base_pitch = math.radians(15)
+        close_target = np.array([0.05, 0.0, 0.05])
+        far_target = np.array([arm.kin.links.shoulder + arm.kin.links.elbow, 0.0, 0.05])
+
+        close_pitch = arm._apply_wrist_extension_compensation(close_target, base_pitch)
+        far_pitch = arm._apply_wrist_extension_compensation(far_target, base_pitch)
+
+        assert math.isclose(close_pitch, base_pitch, rel_tol=1e-6)
+        assert far_pitch > close_pitch
+
+
+def test_wrist_extension_compensation_respects_limits(
+    monkeypatch, interactive_module
+) -> None:
+    controller = _BasicController()
+    with _prepare_arm(monkeypatch, interactive_module, controller) as arm:
+        arm.wrist_extension_compensation = [(0.0, 10.0)]
+        arm._wrist_pitch_limits = (math.radians(-20), math.radians(20))
+        base_pitch = math.radians(18)
+        target = np.array([arm.kin.links.shoulder, 0.0, 0.0])
+
+        compensated = arm._apply_wrist_extension_compensation(target, base_pitch)
+
+        assert math.isclose(compensated, arm._wrist_pitch_limits[1], rel_tol=1e-6)

@@ -193,6 +193,12 @@ class InteractiveArm:
         self._home_move_time_ms = move_time_ms
         self._loaded_hard_limits: dict[int, tuple[float, float]] = {}
         self._loaded_workspace: dict[str, tuple[float, float]] = {}
+        self.wrist_extension_compensation: list[tuple[float, float]] = [
+            (0.0, 1.0),
+            (0.55, 1.0),
+            (0.75, 1.05),
+            (1.0, 1.12),
+        ]
         self.servo_offsets: dict[int, float] = self._load_calibration_data()
         if not self._calibration_loaded:
             self.zero_reference = {
@@ -597,8 +603,11 @@ class InteractiveArm:
     def update_robot(self) -> None:
         requested = self._clamp_target(self.target)
         self.target[:] = requested
+        compensated_pitch = self._apply_wrist_extension_compensation(
+            requested, self.wrist_pitch
+        )
         joints = self._apply_hard_limits_to_ik(
-            list(self.kin.inverse(requested[[0, 1, 2]], self.wrist_pitch))
+            list(self.kin.inverse(requested[[0, 1, 2]], compensated_pitch))
         )
         self._last_wrist_pitch = joints[1] + joints[2] + joints[3]
         try:
@@ -629,6 +638,38 @@ class InteractiveArm:
         clamped_value = float(np.clip(value, *self._wrist_slider_limits))
         pitch = math.radians(90.0 - clamped_value)
         return float(np.clip(pitch, *self._wrist_pitch_limits))
+
+    def _extension_ratio(self, position: Sequence[float]) -> float:
+        planar_radius = math.hypot(float(position[0]), float(position[1]))
+        max_reach = self.kin.links.shoulder + self.kin.links.elbow
+        if max_reach <= 0:
+            return 0.0
+        return float(np.clip(planar_radius / max_reach, 0.0, 1.0))
+
+    def _wrist_extension_multiplier(self, position: Sequence[float]) -> float:
+        profile = sorted(self.wrist_extension_compensation, key=lambda item: item[0])
+        if not profile:
+            return 1.0
+
+        ratio = self._extension_ratio(position)
+
+        for index, (reach_fraction, multiplier) in enumerate(profile):
+            if ratio <= reach_fraction:
+                if index == 0:
+                    return float(multiplier)
+                prev_fraction, prev_multiplier = profile[index - 1]
+                span = reach_fraction - prev_fraction
+                blend = 0.0 if span == 0 else (ratio - prev_fraction) / span
+                return float(prev_multiplier + blend * (multiplier - prev_multiplier))
+
+        return float(profile[-1][1])
+
+    def _apply_wrist_extension_compensation(
+        self, position: Sequence[float], desired_pitch: float
+    ) -> float:
+        multiplier = self._wrist_extension_multiplier(position)
+        compensated = desired_pitch * multiplier
+        return float(np.clip(compensated, *self._wrist_pitch_limits))
 
     def _set_wrist_pitch_target(self, pitch: float, *, update_slider: bool = True) -> None:
         clamped = float(np.clip(pitch, *self._wrist_pitch_limits))
@@ -3079,8 +3120,11 @@ class InteractiveArm:
             desired_pitch = float(np.clip(waypoint.wrist_pitch, *self._wrist_pitch_limits))
             self._set_wrist_pitch_target(desired_pitch, update_slider=False)
             try:
+                compensated_pitch = self._apply_wrist_extension_compensation(
+                    target, desired_pitch
+                )
                 joints = self._apply_hard_limits_to_ik(
-                    list(self.kin.inverse(target[[0, 1, 2]], desired_pitch))
+                    list(self.kin.inverse(target[[0, 1, 2]], compensated_pitch))
                 )
             except Exception:
                 _LOGGER.exception("Failed to solve IK for scheduled waypoint %d", index + 1)
