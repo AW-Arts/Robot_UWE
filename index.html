@@ -497,6 +497,8 @@ flowchart LR
     Kinematics["AL5AKinematics<br/>FK + IK + pulse helpers"]
     Queueing["Command smoothing & queue<br/>_smooth_command / _command_worker"]
     Persistence["JSON persistence<br/>servo offsets, subroutines, timeline"]
+    Compensation["Wrist extension compensation<br/>pitch scaling vs reach"]
+    ServoMultipliers["Servo multipliers<br/>per-servo scaling"]
   end
 
   subgraph ControllerLayer["Controllers"]
@@ -522,10 +524,13 @@ flowchart LR
   Interactive -->|FK + IK| Kinematics
   Interactive -->|smooth & queue| Queueing
   Interactive -->|persist/load| Persistence
+  Interactive -->|reach-aware pitch| Compensation
+  Queueing --> ServoMultipliers
+  Compensation --> Kinematics
   Persistence --> LocalFiles
   Persistence --> Paths
   Persistence --> Timeline
-  Interactive -->|move_joints / relax_servos| SerialCtrl
+  ServoMultipliers --> SerialCtrl
   Interactive -->|simulation backend| PrintCtrl
   SerialCtrl -->|"SSC-32 command bytes"| Hardware
   Tests -->|fixtures & behaviours| Interactive
@@ -559,20 +564,23 @@ flowchart TD
   Start([Start UI]) --> HomePose[Apply DEFAULT_HOME_PULSES]
   HomePose --> InputCheck{User input?}
 
-  InputCheck -->|Drag gizmo / scroll / sliders| TargetUpdate[Update target XYZ + wrist_pitch]
+  InputCheck -->|Drag gizmo / scroll / sliders| TargetUpdate[Update target XYZ + wrist_pitch + wrist_rotation + gripper]
   InputCheck -->|Keyboard modifiers| TargetUpdate
 
   TargetUpdate --> Clamp["Clamp to workspace &amp; hard servo limits<br/>(_apply_workspace_limits)"]
-  Clamp --> IK["AL5AKinematics.inverse<br/>(XYZ → base/shoulder/elbow/wrist)"]
+  Clamp --> WristComp["Compensate wrist pitch for extension<br/>(_apply_wrist_extension_compensation)"]
+  WristComp --> IK["AL5AKinematics.inverse<br/>(XYZ → base/shoulder/elbow/wrist)"]
 
   IK --> ValidIK{IK valid?}
   ValidIK -->|No| Reject[Reject move &amp; log warning]
   Reject --> InputCheck
 
-  ValidIK --> Smooth[Blend path<br/>_smooth_command]
+  ValidIK --> Append["Append wrist rotation + gripper<br/>(_clamp_joint_list)"]
+  Append --> Smooth[Blend path<br/>_smooth_command]
   Smooth --> Queue[Queue joint segments<br/>_command_queue]
   Queue --> Worker[Command worker thread<br/>_command_worker]
-  Worker --> Controller[controller.move_joints]
+  Worker --> ServoScale["Scale servo configs by multipliers<br/>(_servo_config_with_multiplier)"]
+  ServoScale --> Controller[controller.move_joints]
   Controller --> Feedback[Mirror joints + zero reference display]
   Feedback --> InputCheck
             </script>
@@ -601,7 +609,7 @@ flowchart TD
             <script type="text/plain" class="mermaid-src" id="src-diagram-teach">
 flowchart TD
   Enter([Open Path panel]) --> Pose["Use sliders/drag to set pose"]
-  Pose --> Capture["Capture waypoint (XYZ, wrist_pitch, duration)"]
+  Pose --> Capture["Capture waypoint (XYZ, wrist_pitch, wrist_rotation, gripper, duration)"]
   Capture --> More{More waypoints?}
 
   More -->|Yes| Pose
@@ -640,7 +648,7 @@ flowchart TD
   Load[Load timeline.json<br/>_load_saved_timeline] --> SelectEntry[Select first/next entry]
 
   SelectEntry --> Hydrate[Find subroutine JSON<br/>mark missing entries]
-  Hydrate --> QueuePath[Invoke _playback_subroutine<br/>queue waypoints]
+  Hydrate --> QueuePath[Invoke _playback_subroutine<br/>queue XYZ + wrist pitch/rotation + gripper]
 
   QueuePath --> Monitor[Timeline thread waits<br/>_timeline_playback_worker]
 
@@ -808,6 +816,9 @@ mindmap
         Wrist and axes controls
           _slider_value_from_pitch
           _pitch_from_slider_value
+          _extension_ratio
+          _wrist_extension_multiplier
+          _apply_wrist_extension_compensation
           _set_wrist_pitch_target
           _handle_wrist_slider_change
           _update_wrist_slider_display
@@ -875,6 +886,9 @@ mindmap
           _clamp_joint_list
           _clamp_target
           _apply_offsets
+          _servo_config_with_multiplier
+          _set_servo_multiplier
+          _update_multiplier_slider_display
           _load_calibration_data
           _save_calibration_data
           _load_workspace_limits_from_config
@@ -992,7 +1006,7 @@ classDiagram
   }
 
   class AL5ASerialController {
-    +move_joints(joints, move_time_ms) None
+    +move_joints(joints, move_time_ms, servo_configs) None
     +relax_servos(indices) None
   }
 
@@ -1016,6 +1030,8 @@ classDiagram
     +position: np.ndarray
     +duration: float
     +wrist_pitch: float
+    +wrist_rotation: float
+    +gripper_angle: float
   }
 
   class TimelineEntry {
@@ -1081,6 +1097,8 @@ classDiagram
       clampTarget: { title: "interactive.py:_clamp_target", file: "lynxmotion_control/interactive.py", marker: "def _clamp_target", context: 900 },
       smoothSegments: { title: "interactive.py:_generate_smooth_segments", file: "lynxmotion_control/interactive.py", marker: "def _generate_smooth_segments", context: 900 },
       commandWorker: { title: "interactive.py:_command_worker", file: "lynxmotion_control/interactive.py", marker: "def _command_worker", context: 1100 },
+      wristComp: { title: "interactive.py:_apply_wrist_extension_compensation", file: "lynxmotion_control/interactive.py", marker: "def _apply_wrist_extension_compensation", context: 700 },
+      servoMultiplier: { title: "interactive.py:_servo_config_with_multiplier", file: "lynxmotion_control/interactive.py", marker: "def _servo_config_with_multiplier", context: 500 },
       addWaypoint: { title: "interactive.py:_handle_add_waypoint", file: "lynxmotion_control/interactive.py", marker: "def _handle_add_waypoint", context: 900 },
       slugifySubroutine: { title: "interactive.py:_slugify_subroutine_name", file: "lynxmotion_control/interactive.py", marker: "def _slugify_subroutine_name", context: 700 },
       saveSubroutine: { title: "interactive.py:_handle_save_subroutine", file: "lynxmotion_control/interactive.py", marker: "def _handle_save_subroutine", context: 900 },
@@ -1141,6 +1159,8 @@ classDiagram
         Kinematics: "kinematicsClass",
         Queueing: "smoothSegments",
         Persistence: "saveTimeline",
+        Compensation: "wristComp",
+        ServoMultipliers: "servoMultiplier",
         SerialCtrl: "serialControllerClass",
         PrintCtrl: "printMove",
         LocalFiles: "saveTimeline",
@@ -1155,12 +1175,15 @@ classDiagram
         InputCheck: "onMotion",
         TargetUpdate: "onMotion",
         Clamp: "clampTarget",
+        WristComp: "wristComp",
         IK: "inverseIk",
         ValidIK: "updateRobot",
         Reject: "updateRobot",
+        Append: "updateRobot",
         Smooth: "smoothSegments",
         Queue: "commandWorker",
         Worker: "commandWorker",
+        ServoScale: "servoMultiplier",
         Controller: "serialMove",
         Feedback: "applyFeedback"
       },
