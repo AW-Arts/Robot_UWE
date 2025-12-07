@@ -1448,7 +1448,7 @@ class InteractiveArm:
             0.0,
             1.0,
             "Calibration helper:\n"
-            "1) Tap Calibrate to relax the motors.\n"
+            "1) Tap Calibrate to start the calibration flow.\n"
             "2) Move each servo with +/- or the Pulse slider until the arm looks right.\n"
             "3) Press Set vertical to store that upright pose.\n"
             "Hard min°/Hard max° below update the same limits used during the"
@@ -3432,13 +3432,6 @@ class InteractiveArm:
         if self._calibration_active and not self._calibration_guide_active:
             return
         self._calibration_active = True
-        relax = getattr(self.controller, "relax_servos", None)
-        should_relax = getattr(self.controller, "AUTO_RELAX_ON_CALIBRATION", False)
-        if callable(relax) and should_relax:
-            try:
-                relax()
-            except Exception:  # pragma: no cover - runtime safety net
-                _LOGGER.warning("Failed to relax servos for calibration", exc_info=True)
         commands_buffer = getattr(self._command_queue, "commands", None)
         if isinstance(commands_buffer, list):
             commands_buffer.clear()
@@ -4280,15 +4273,6 @@ class InteractiveArm:
                     self._last_commanded_raw, joints_raw, move_time, soft_start=soft_start
                 ):
                     if self._calibration_active and not self._calibration_guide_active:
-                        relax = getattr(self.controller, "relax_servos", None)
-                        if callable(relax):
-                            try:
-                                relax()
-                            except Exception:  # pragma: no cover - runtime safety net
-                                _LOGGER.warning(
-                                    "Failed to relax servos when calibration became active",
-                                    exc_info=True,
-                                )
                         aborted_for_calibration = True
                         break
                     corrected_segment = self._apply_offsets(

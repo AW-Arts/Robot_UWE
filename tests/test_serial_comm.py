@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from typing import Sequence
-
 import pytest
 
 from lynxmotion_control import serial_comm
@@ -22,40 +21,34 @@ class FakeSerial:
         pass
 
 
-@pytest.fixture
-def patched_channels(monkeypatch: pytest.MonkeyPatch) -> dict[int, int]:
-    mapping = {0: 0, 1: 2, 2: 4}
-    monkeypatch.setattr(serial_comm, "DEFAULT_SERVO_CHANNELS", mapping)
-    return mapping
-
-
-@pytest.mark.parametrize("servo_indices", [None, [0, 2]])
-def test_relax_servos_generates_expected_command(
-    servo_indices: Sequence[int] | None, patched_channels: dict[int, int]
-) -> None:
+def test_move_joints_sends_serial_command(monkeypatch: pytest.MonkeyPatch) -> None:
     controller = serial_comm.AL5ASerialController(port="loopback")
     fake_serial = FakeSerial()
     controller._serial = fake_serial
 
-    controller.relax_servos(servo_indices=servo_indices)
-
-    expected_order = (
-        [0, 1, 2] if servo_indices is None else list(servo_indices)
+    monkeypatch.setattr(
+        serial_comm,
+        "joints_to_pulses",
+        lambda *_args, **_kwargs: [1000, 1500],
     )
-    expected = (
-        "".join(f"#{patched_channels[index]}PO" for index in expected_order) + "\r"
-    ).encode(
-        "ascii"
-    )
-    assert fake_serial.writes == [expected]
+
+    controller.move_joints([0.0, 0.0], move_time_ms=250)
+
+    assert fake_serial.writes == [b"#0P1000#1P1500T250\r"]
 
 
-def test_print_controller_relax_outputs_command(
-    capsys: pytest.CaptureFixture[str], patched_channels: dict[int, int]
+def test_print_controller_move_outputs_command(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     controller = serial_comm.PrintController()
 
-    controller.relax_servos(servo_indices=[1])
+    monkeypatch.setattr(
+        serial_comm,
+        "joints_to_pulses",
+        lambda *_args, **_kwargs: [1200],
+    )
+
+    controller.move_joints([0.0], move_time_ms=None)
 
     captured = capsys.readouterr().out.strip()
-    assert captured == f"#{patched_channels[1]}PO"
+    assert captured == "#0P1200\r"
