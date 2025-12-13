@@ -83,3 +83,11 @@ workflows aligned.
   the command rate or batching updates if your hardware requires it.
 - When a manual servo adjustment reaches a configured limit the controller logs
   a warning but still re-sends the command so the hardware stays in sync.
+
+## Status LEDs
+
+If you are wiring a stack light or front-panel indicators, follow the industrial
+scheme in `docs/status_led_plan.md`. The red/amber/green stack communicates
+fault, attention, and ready states, while yellow and blue handle teach mode and
+controller heartbeat. A white indicator is reserved for illumination or
+presence and should never be used for errors.

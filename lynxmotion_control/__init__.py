@@ -13,6 +13,7 @@ from .al5a_kinematics import (
     pulses_to_joints,
 )
 from .serial_comm import AL5ASerialController, PrintController
+from .status_leds import LEDState, StatusLEDController
 
 __all__ = [
     "AL5AKinematics",
@@ -26,6 +27,8 @@ __all__ = [
     "run_demo",
     "AL5ASerialController",
     "PrintController",
+    "LEDState",
+    "StatusLEDController",
 ]
 
 

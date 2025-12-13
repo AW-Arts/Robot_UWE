@@ -199,6 +199,27 @@ def test_set_vertical_preserves_asymmetric_base_limits(
         assert max_raw >= base_config.max_angle
 
 
+def test_leds_follow_calibration_state(monkeypatch, interactive_module) -> None:
+    controller = _BasicController()
+    with _prepare_arm(monkeypatch, interactive_module, controller) as arm:
+        arm._command_queue.commands.clear()  # type: ignore[attr-defined]
+        arm._mark_motion_complete()
+        initial = arm.status_leds.snapshot()
+        assert initial["green"].pattern == "solid"
+
+        arm._enter_calibration_mode()
+        during_calibration = arm.status_leds.snapshot()
+        assert during_calibration["yellow"].pattern == "solid"
+        assert during_calibration["amber"].pattern == "solid"
+        assert during_calibration["green"].pattern == "off"
+
+        arm._exit_calibration_mode()
+        after = arm.status_leds.snapshot()
+        assert after["yellow"].pattern == "off"
+        assert after["amber"].pattern == "off"
+        assert after["green"].pattern == "solid"
+
+
 def test_zero_reference_lines_follow_current_pose(monkeypatch, interactive_module) -> None:
     controller = _BasicController()
     with _prepare_arm(monkeypatch, interactive_module, controller) as arm:

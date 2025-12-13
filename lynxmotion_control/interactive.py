@@ -25,6 +25,7 @@ from .al5a_kinematics import (
     DEFAULT_SERVO_CONFIGS,
     ServoConfig,
 )
+from .status_leds import StatusLEDController
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -184,6 +185,10 @@ class InteractiveArm:
         self.servo_inversions: list[bool] = [False] * len(self._SERVO_METADATA)
         self._invert_button_inactive_color = "0.85"
         self._invert_button_active_color = "#90ee90"
+        self._fault_active = False
+        self._motion_active = False
+        self._playback_active = False
+        self.status_leds = StatusLEDController()
         self._calibration_path = CALIBRATION_CONFIG_PATH
         self._calibration_loaded = False
         self._wrist_slider: Slider | None = None
@@ -282,6 +287,7 @@ class InteractiveArm:
             target=self._command_worker, name="al5a-command-worker", daemon=True
         )
         self._command_thread.start()
+        self._initialise_status_leds()
 
         self.drag_state = DragState()
         self._modifiers: set[str] = set()
@@ -444,6 +450,72 @@ class InteractiveArm:
         self._skip_next_command = True
         self.update_robot()
         self._run_home_sequence()
+
+    def _initialise_status_leds(self) -> None:
+        self.status_leds.set_illumination(on=True, dim=True)
+        self.status_leds.set_controller_link(connected=True, heartbeat=False)
+        self.status_leds.set_ready(active=True, running=False)
+        self.status_leds.set_attention(active=False, transitioning=False)
+        self.status_leds.set_teach_mode(active=False, blinking=False)
+
+    def _update_idle_leds(self) -> None:
+        if self._fault_active:
+            return
+        self.status_leds.set_controller_link(connected=True, heartbeat=False)
+        self.status_leds.set_attention(
+            active=self._calibration_active,
+            transitioning=self._calibration_guide_active,
+        )
+        self.status_leds.set_teach_mode(
+            active=self._calibration_active,
+            blinking=self._calibration_guide_active,
+        )
+        ready = not (self._calibration_active or self._motion_active or self._playback_active)
+        self.status_leds.set_ready(active=ready, running=False)
+
+    def _mark_motion_active(self) -> None:
+        if self._fault_active:
+            self._fault_active = False
+            self.status_leds.set_fault(active=False)
+        self._motion_active = True
+        self.status_leds.set_controller_link(connected=True, heartbeat=True)
+        self.status_leds.set_ready(active=True, running=True)
+        if self._calibration_active:
+            self.status_leds.set_attention(active=True, transitioning=True)
+            self.status_leds.set_teach_mode(
+                active=True, blinking=self._calibration_guide_active
+            )
+
+    def _mark_motion_complete(self) -> None:
+        if hasattr(self._command_queue, "empty") and not self._command_queue.empty():
+            return
+        if self._playback_active:
+            return
+        self._motion_active = False
+        self._update_idle_leds()
+
+    def _mark_fault(self) -> None:
+        self._fault_active = True
+        self._motion_active = False
+        self.status_leds.set_fault(active=True, just_triggered=True)
+        self.status_leds.set_ready(active=False, running=False)
+        self.status_leds.set_attention(active=False, transitioning=False)
+
+    def _update_calibration_leds(self) -> None:
+        if self._fault_active:
+            return
+        self.status_leds.set_teach_mode(
+            active=self._calibration_active,
+            blinking=self._calibration_guide_active,
+        )
+        self.status_leds.set_attention(
+            active=self._calibration_active,
+            transitioning=self._calibration_guide_active,
+        )
+        if self._calibration_active:
+            self.status_leds.set_ready(active=False, running=self._motion_active)
+        elif not self._motion_active and not self._playback_active:
+            self.status_leds.set_ready(active=True, running=False)
 
     def _on_canvas_resized(self, _event) -> None:
         try:
@@ -3113,6 +3185,8 @@ class InteractiveArm:
             return
         self._stop_waypoint_playback()
         self._timeline_stop_event.clear()
+        self._playback_active = True
+        self._mark_motion_active()
         self._timeline_playback_thread = threading.Thread(
             target=self._timeline_playback_worker,
             name="al5a-timeline-playback",
@@ -3136,6 +3210,8 @@ class InteractiveArm:
             _LOGGER.info("No waypoints queued; add at least one before playback")
             return
         self._waypoint_stop_event.clear()
+        self._playback_active = True
+        self._mark_motion_active()
         self._waypoint_playback_thread = threading.Thread(
             target=self._waypoint_playback_worker,
             name="al5a-waypoint-playback",
@@ -3161,6 +3237,8 @@ class InteractiveArm:
             self._waypoint_playback_thread.join(timeout=1.0)
         self._waypoint_playback_thread = None
         self._waypoint_stop_event.clear()
+        self._playback_active = False
+        self._update_idle_leds()
         self._update_play_button_label(running=False)
 
     def _waypoint_playback_worker(self) -> None:
@@ -3173,6 +3251,8 @@ class InteractiveArm:
         finally:
             self._update_play_button_label(running=False)
             self._waypoint_stop_event.clear()
+            self._playback_active = False
+            self._update_idle_leds()
             self._waypoint_playback_thread = None
 
     def _handle_waypoint_playback_step(self, index: int, _waypoint: Waypoint) -> None:
@@ -3204,6 +3284,8 @@ class InteractiveArm:
             self._timeline_playback_thread.join(timeout=1.0)
         self._timeline_playback_thread = None
         self._timeline_stop_event.clear()
+        self._playback_active = False
+        self._update_idle_leds()
         self._update_timeline_play_button(running=False)
 
     def _timeline_playback_worker(self) -> None:
@@ -3238,6 +3320,8 @@ class InteractiveArm:
         finally:
             self._timeline_stop_event.clear()
             self._timeline_playback_thread = None
+            self._playback_active = False
+            self._update_idle_leds()
             self._update_timeline_play_button(running=False)
 
     def _execute_waypoint_sequence(
@@ -3248,46 +3332,54 @@ class InteractiveArm:
         selection_callback: Callable[[int, Waypoint], None] | None = None,
         playback_speed: float = 1.0,
     ) -> None:
-        for index, waypoint in enumerate(waypoints):
-            if stop_event.is_set():
-                break
-            target = self._clamp_target(np.array(waypoint.position, dtype=float))
-            scaled_duration = waypoint.duration / max(playback_speed, 0.1)
-            duration_ms = int(max(0.02, scaled_duration) * 1000)
-            desired_pitch = float(np.clip(waypoint.wrist_pitch, *self._wrist_pitch_limits))
-            desired_rotation = waypoint.wrist_rotation
-            desired_gripper = waypoint.gripper_angle
-            self._set_wrist_pitch_target(desired_pitch, update_slider=False)
-            try:
-                compensated_pitch = self._apply_wrist_extension_compensation(
-                    target, desired_pitch
-                )
-                joints = self._apply_hard_limits_to_ik(
-                    list(self.kin.inverse(target[[0, 1, 2]], compensated_pitch))
-                )
-            except Exception:
-                _LOGGER.exception("Failed to solve IK for scheduled waypoint %d", index + 1)
-                continue
-            self._last_wrist_pitch = joints[1] + joints[2] + joints[3]
-            self.wrist_rotation = desired_rotation
-            self.gripper_angle = desired_gripper
-            full_joints = joints + [desired_rotation, desired_gripper]
-            full_joints = self._clamp_joint_list(full_joints)
-            self.target[:] = target
-            self._send_move_command(
-                full_joints,
-                move_time_ms=duration_ms,
-                soft_start=True,
-                replace=False,
-            )
-            self._command_queue.join()
-            if stop_event.is_set():
-                break
-            if selection_callback is not None:
+        previous_playback_state = self._playback_active
+        self._playback_active = True
+        self._mark_motion_active()
+        try:
+            for index, waypoint in enumerate(waypoints):
+                if stop_event.is_set():
+                    break
+                target = self._clamp_target(np.array(waypoint.position, dtype=float))
+                scaled_duration = waypoint.duration / max(playback_speed, 0.1)
+                duration_ms = int(max(0.02, scaled_duration) * 1000)
+                desired_pitch = float(np.clip(waypoint.wrist_pitch, *self._wrist_pitch_limits))
+                desired_rotation = waypoint.wrist_rotation
+                desired_gripper = waypoint.gripper_angle
+                self._set_wrist_pitch_target(desired_pitch, update_slider=False)
                 try:
-                    selection_callback(index, waypoint)
+                    compensated_pitch = self._apply_wrist_extension_compensation(
+                        target, desired_pitch
+                    )
+                    joints = self._apply_hard_limits_to_ik(
+                        list(self.kin.inverse(target[[0, 1, 2]], compensated_pitch))
+                    )
                 except Exception:
-                    pass
+                    _LOGGER.exception("Failed to solve IK for scheduled waypoint %d", index + 1)
+                    continue
+                self._last_wrist_pitch = joints[1] + joints[2] + joints[3]
+                self.wrist_rotation = desired_rotation
+                self.gripper_angle = desired_gripper
+                full_joints = joints + [desired_rotation, desired_gripper]
+                full_joints = self._clamp_joint_list(full_joints)
+                self.target[:] = target
+                self._send_move_command(
+                    full_joints,
+                    move_time_ms=duration_ms,
+                    soft_start=True,
+                    replace=False,
+                )
+                self._command_queue.join()
+                if stop_event.is_set():
+                    break
+                if selection_callback is not None:
+                    try:
+                        selection_callback(index, waypoint)
+                    except Exception:
+                        pass
+        finally:
+            self._playback_active = previous_playback_state
+            if not self._playback_active:
+                self._update_idle_leds()
 
     def _handle_subroutine_press(self, event) -> bool:
         if self._subroutine_list_ax is None or event.inaxes != self._subroutine_list_ax:
@@ -3453,12 +3545,14 @@ class InteractiveArm:
                 pass
             self._calibration_timer = None
         self._update_calibration_button_visual()
+        self._update_calibration_leds()
 
     def _exit_calibration_mode(self) -> None:
         if not self._calibration_active:
             return
         self._calibration_active = False
         self._update_calibration_button_visual()
+        self._update_calibration_leds()
 
     def _generate_calibration_steps(self) -> list[tuple[int, str]]:
         steps: list[tuple[int, str]] = []
@@ -3497,6 +3591,7 @@ class InteractiveArm:
         self._calibration_step_index = None
         self._enter_calibration_mode()
         self._advance_calibration_step(force_index=0)
+        self._update_calibration_leds()
 
     def _restart_calibration_tour(self, _event=None) -> None:  # pragma: no cover - UI interaction
         self._start_calibration_tour()
@@ -3541,6 +3636,7 @@ class InteractiveArm:
         )
         self._update_calibration_status()
         self._update_calibration_overlay()
+        self._update_calibration_leds()
 
     def _move_servo_for_calibration(
         self, index: int, target_angle: float, *, base_joints: Sequence[float] | None = None
@@ -4267,6 +4363,7 @@ class InteractiveArm:
         while True:
             joints_raw, move_time, soft_start = self._command_queue.get()
             try:
+                self._mark_motion_active()
                 interrupted = False
                 aborted_for_calibration = False
                 for segment_raw, segment_time in self._generate_smooth_segments(
@@ -4319,8 +4416,10 @@ class InteractiveArm:
                     self.feedback_joints = None
             except Exception:  # pragma: no cover - runtime safety net
                 _LOGGER.exception("Failed to send move command to controller")
+                self._mark_fault()
             finally:
                 self._command_queue.task_done()
+                self._mark_motion_complete()
 
     def _send_move_command(
         self,
@@ -4360,6 +4459,7 @@ class InteractiveArm:
             self._skip_next_command = False
             return
 
+        self._mark_motion_active()
         raw_command = tuple(self._apply_offsets(joints, direction="raw"))
         command = (raw_command, adjusted_move_time, soft_start)
         if replace:
