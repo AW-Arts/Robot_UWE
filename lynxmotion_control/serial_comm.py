@@ -120,7 +120,7 @@ class PrintController:
             servo_channels=servo_channels or DEFAULT_SERVO_CHANNELS,
         )
         command = SSC32Command(pulses, move_time_ms)
-        print(command.to_bytes().decode("ascii").strip())
+        print(command.to_bytes().decode("ascii"), end="")
 
 
 __all__ = ["AL5ASerialController", "PrintController", "SSC32Command"]

@@ -37,3 +37,36 @@ This design treats status lights like an industrial stack light so each color ha
 | Yellow | Mode | Teach / calibration |
 | Blue | System | USB + firmware alive |
 | Clear | Utility | Power / illumination |
+
+## Wiring and configuration
+
+Hardware pin assignments live in `~/.config/lynxmotion_al5a/led_pins.json` as a JSON
+object mapping LED names to BCM/GPIO pin numbers:
+
+```json
+{
+  "red": 17,
+  "amber": 27,
+  "green": 22,
+  "yellow": 23,
+  "blue": 24,
+  "white": 25
+}
+```
+
+If the config file is missing or contains no valid entries, the controller falls back
+to a no-op hardware driver while still updating the logical LED states inside the UI.
+
+### Electrical expectations
+
+The driver interprets patterns as follows:
+
+- `solid` &rarr; output driven high.
+- `off` &rarr; output driven low.
+- `blink_slow` &rarr; 1 Hz PWM at 50% duty cycle.
+- `blink_fast` &rarr; 4 Hz PWM at 50% duty cycle.
+- `dim` &rarr; ~200 Hz PWM at ~22% duty cycle.
+
+Assuming common-cathode LEDs with individual current-limiting resistors (e.g. 220–470 Ω),
+each pin drives the anode directly from the MCU or SBC GPIO header. Adjust the JSON map
+to match your carrier board layout.
