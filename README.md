@@ -86,8 +86,13 @@ workflows aligned.
 
 ## Status LEDs
 
-If you are wiring a stack light or front-panel indicators, follow the industrial
-scheme in `docs/status_led_plan.md`. The red/amber/green stack communicates
-fault, attention, and ready states, while yellow and blue handle teach mode and
-controller heartbeat. A white indicator is reserved for illumination or
-presence and should never be used for errors.
+Stack lights are driven directly from unused SSC-32(U) servo channels (no extra
+GPIO). Follow the locked channel map, wiring rules, and behaviours in
+`docs/status_led_plan.md`, and configure the mapping in
+`~/.config/lynxmotion_al5a/led_pins.json`.
+
+> Prototype limitation: Status indicators are driven using unused servo PWM
+> channels on the SSC-32(U). These outputs are not true GPIO and may exhibit
+> flicker or brightness variation. This implementation is acceptable for
+> prototype demonstration and functional validation only and is not intended for
+> production or safety-rated use.

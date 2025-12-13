@@ -1,4 +1,4 @@
-"""Hardware driver for status LEDs configured via a JSON pin map."""
+"""Hardware drivers for status LEDs configured via a JSON pin map or SSC-32."""
 from __future__ import annotations
 
 import importlib
@@ -6,15 +6,22 @@ import importlib.util
 import json
 import logging
 import sys
+import threading
+import time
 from pathlib import Path
 from typing import Callable, Dict
 
+from .serial_comm import SSC32Command
 from .status_leds import LEDState
 
 _LOGGER = logging.getLogger(__name__)
 
 CONFIG_PATH = Path.home() / ".config" / "lynxmotion_al5a" / "led_pins.json"
 _ALLOWED_LEDS = {"red", "amber", "green", "yellow", "blue", "white"}
+_DEFAULT_SSC32_PULSES = {"off": 500, "on": 2000, "dim": 1300}
+_DEFAULT_SSC32_BLINK = {"slow_hz": 1.0, "fast_hz": 4.0}
+_DEFAULT_SSC32_RESERVED = set(range(0, 8))
+_NOOP_CONFIG: dict[str, object] = {"backend": "noop"}
 
 _PWM_FREQUENCIES = {
     "blink_slow": 1.0,
@@ -133,47 +140,89 @@ class LEDDriver:
 def load_led_pin_map(config_path: Path = CONFIG_PATH) -> Dict[str, int] | None:
     """Load and validate the user-provided LED pin map if present."""
 
+    _LOGGER.info(
+        "`load_led_pin_map` is deprecated; use `load_led_config` and include a backend"
+    )
+
+    config = load_led_config(config_path)
+    if config.get("backend") != "gpio":
+        return None
+    return config.get("pin_map")  # type: ignore[return-value]
+
+
+def load_led_config(config_path: Path = CONFIG_PATH) -> Dict[str, object]:
+    """Load and validate the LED driver configuration.
+
+    The loader accepts both the legacy GPIO-only JSON map and the new structured
+    configuration that supports SSC-32(U) PWM outputs. Missing or invalid files
+    cause the LEDs to run in a no-op mode while still updating logical state.
+    """
+
     if not config_path.exists():
         _LOGGER.info(
             "No LED pin map found at %s; hardware LEDs will be disabled", config_path
         )
-        return None
+        return _NOOP_CONFIG
     try:
         raw = json.loads(config_path.read_text())
     except Exception as exc:  # pragma: no cover - exercised via log path
         _LOGGER.warning("Failed to parse LED pin map at %s: %s", config_path, exc)
-        return None
+        return _NOOP_CONFIG
     if not isinstance(raw, dict):
         _LOGGER.warning(
-            "LED pin map at %s must be a JSON object mapping LED names to pin numbers",
+            "LED configuration at %s must be a JSON object; disabling hardware LEDs",
             config_path,
         )
-        return None
-    valid_entries: dict[str, int] = {}
-    for led_name, pin in raw.items():
-        if led_name not in _ALLOWED_LEDS:
-            _LOGGER.warning("Ignoring unsupported LED name '%s' in %s", led_name, config_path)
-            continue
-        if not isinstance(pin, int):
-            _LOGGER.warning(
-                "LED pin for %s must be an integer in %s; skipping entry", led_name, config_path
-            )
-            continue
-        valid_entries[led_name] = pin
-    if not valid_entries:
-        _LOGGER.warning("No valid LED mappings found in %s; hardware LEDs disabled", config_path)
-        return None
-    return valid_entries
+        return _NOOP_CONFIG
+    if "backend" not in raw:
+        return _parse_legacy_gpio_config(raw, config_path)
+    backend = raw.get("backend")
+    if backend == "gpio":
+        return _parse_gpio_config(raw, config_path)
+    if backend == "ssc32_pwm_led":
+        return _parse_ssc32_config(raw, config_path)
+    _LOGGER.warning("Unsupported LED backend '%s' in %s; disabling hardware LEDs", backend, config_path)
+    return _NOOP_CONFIG
 
 
-def build_drive_leds(pin_map: Dict[str, int] | None) -> Callable[[Dict[str, LEDState]], None]:
+def build_drive_leds(
+    config: Dict[str, object],
+    *,
+    serial_writer: Callable[[bytes], None] | None = None,
+) -> Callable[[Dict[str, LEDState]], None]:
     """Construct a drive_leds callback suitable for StatusLEDController."""
 
-    if not pin_map:
-        _LOGGER.info("LED driver running in no-op mode; no pin map available")
-        return lambda _state: None
-    driver = LEDDriver(pin_map)
-    return driver.drive
+    backend = config.get("backend")
+    if backend == "gpio":
+        pin_map = config.get("pin_map")
+        if not pin_map:
+            _LOGGER.info("LED driver running in no-op mode; GPIO pin map missing")
+            return lambda _state: None
+        driver = LEDDriver(pin_map)  # type: ignore[arg-type]
+        return driver.drive
+    if backend == "ssc32_pwm_led":
+        channel_map = config.get("led_channels")
+        if not channel_map:
+            _LOGGER.info("LED driver running in no-op mode; no SSC-32 channel map")
+            return lambda _state: None
+        if serial_writer is None:
+            _LOGGER.info(
+                "SSC-32 LED backend requested but no serial writer provided; running in no-op mode"
+            )
+            return lambda _state: None
+        pulses = config.get("pulse_us", _DEFAULT_SSC32_PULSES)
+        blink = config.get("blink", _DEFAULT_SSC32_BLINK)
+        reserved = set(config.get("servo_reserved_channels", _DEFAULT_SSC32_RESERVED))
+        driver = SSC32PWMLEDDriver(
+            channel_map=channel_map,  # type: ignore[arg-type]
+            reserved_channels=reserved,
+            pulse_us=pulses,  # type: ignore[arg-type]
+            blink=blink,  # type: ignore[arg-type]
+            serial_writer=serial_writer,
+        )
+        return driver.drive
+    _LOGGER.info("LED driver running in no-op mode; backend %s not configured", backend)
+    return lambda _state: None
 
 
 def _load_gpio_module():
@@ -198,4 +247,196 @@ def _load_gpio_module():
     return module
 
 
-__all__ = ["LEDDriver", "build_drive_leds", "load_led_pin_map", "CONFIG_PATH"]
+def _parse_legacy_gpio_config(raw: dict, config_path: Path) -> dict[str, object]:
+    _LOGGER.info(
+        "Using legacy LED pin map format in %s; consider adding a 'backend' field",
+        config_path,
+    )
+    valid_entries: dict[str, int] = {}
+    for led_name, pin in raw.items():
+        if led_name not in _ALLOWED_LEDS:
+            _LOGGER.warning("Ignoring unsupported LED name '%s' in %s", led_name, config_path)
+            continue
+        if not isinstance(pin, int):
+            _LOGGER.warning(
+                "LED pin for %s must be an integer in %s; skipping entry", led_name, config_path
+            )
+            continue
+        valid_entries[led_name] = pin
+    if not valid_entries:
+        _LOGGER.warning("No valid LED mappings found in %s; hardware LEDs disabled", config_path)
+        return _NOOP_CONFIG
+    return {"backend": "gpio", "pin_map": valid_entries}
+
+
+def _parse_gpio_config(raw: dict, config_path: Path) -> dict[str, object]:
+    pin_map = raw.get("pin_map")
+    if not isinstance(pin_map, dict):
+        _LOGGER.warning(
+            "GPIO LED backend in %s requires a 'pin_map' object; disabling hardware LEDs",
+            config_path,
+        )
+        return _NOOP_CONFIG
+    return _parse_legacy_gpio_config(pin_map, config_path)
+
+
+def _parse_ssc32_config(raw: dict, config_path: Path) -> dict[str, object]:
+    led_channels = raw.get("led_channels")
+    if not isinstance(led_channels, dict):
+        _LOGGER.warning(
+            "SSC-32 LED backend in %s requires an 'led_channels' object; disabling hardware LEDs",
+            config_path,
+        )
+        return _NOOP_CONFIG
+    validated_channels: dict[str, int] = {}
+    for name, channel in led_channels.items():
+        if name not in _ALLOWED_LEDS:
+            _LOGGER.warning("Ignoring unsupported LED name '%s' in %s", name, config_path)
+            continue
+        if not isinstance(channel, int) or channel < 0:
+            _LOGGER.warning(
+                "LED channel for %s must be a non-negative integer in %s", name, config_path
+            )
+            continue
+        validated_channels[name] = channel
+    if not validated_channels:
+        _LOGGER.warning("No valid SSC-32 LED channels defined in %s; hardware LEDs disabled", config_path)
+        return _NOOP_CONFIG
+    pulses = raw.get("pulse_us", _DEFAULT_SSC32_PULSES)
+    blink = raw.get("blink", _DEFAULT_SSC32_BLINK)
+    reserved = set(raw.get("servo_reserved_channels", _DEFAULT_SSC32_RESERVED))
+    return {
+        "backend": "ssc32_pwm_led",
+        "led_channels": validated_channels,
+        "pulse_us": {
+            "off": int(pulses.get("off", _DEFAULT_SSC32_PULSES["off"])),
+            "on": int(pulses.get("on", _DEFAULT_SSC32_PULSES["on"])),
+            "dim": int(pulses.get("dim", _DEFAULT_SSC32_PULSES["dim"])),
+        },
+        "blink": {
+            "slow_hz": float(blink.get("slow_hz", _DEFAULT_SSC32_BLINK["slow_hz"])),
+            "fast_hz": float(blink.get("fast_hz", _DEFAULT_SSC32_BLINK["fast_hz"])),
+        },
+        "servo_reserved_channels": reserved,
+    }
+
+
+class SSC32PWMLEDDriver:
+    """Drive LEDs using SSC-32(U) servo PWM channels.
+
+    This backend converts logical LED patterns into servo pulse widths following
+    the prototype scheme described in ``docs/status_led_plan.md``. Blink
+    patterns are implemented via a background timer that toggles between off/on
+    pulse widths.
+    """
+
+    def __init__(
+        self,
+        *,
+        channel_map: Dict[str, int],
+        reserved_channels: set[int],
+        pulse_us: Dict[str, int],
+        blink: Dict[str, float],
+        serial_writer: Callable[[bytes], None],
+        tick_s: float = 0.05,
+    ) -> None:
+        self.channel_map = self._filter_channel_map(channel_map, reserved_channels)
+        self.pulse_us = {**_DEFAULT_SSC32_PULSES, **pulse_us}
+        self.blink = {**_DEFAULT_SSC32_BLINK, **blink}
+        self.serial_writer = serial_writer
+        self.tick_s = tick_s
+        self._patterns: dict[str, str] = {name: "off" for name in self.channel_map}
+        self._lock = threading.Lock()
+        self._update_event = threading.Event()
+        self._stop_event = threading.Event()
+        self._last_pulses: dict[int, int] = {}
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def drive(self, state: Dict[str, LEDState]) -> None:
+        with self._lock:
+            updated = False
+            for name, led_state in state.items():
+                if name not in self.channel_map:
+                    continue
+                pattern = led_state.pattern
+                if self._patterns.get(name) != pattern:
+                    self._patterns[name] = pattern
+                    updated = True
+            if updated:
+                self._update_event.set()
+
+    def _run(self) -> None:
+        while not self._stop_event.is_set():
+            now = time.monotonic()
+            pulses = self._compute_pulses(now)
+            if pulses != self._last_pulses:
+                self._send_pulses(pulses)
+                self._last_pulses = pulses
+            self._update_event.wait(self.tick_s)
+            self._update_event.clear()
+
+    def _compute_pulses(self, now: float) -> dict[int, int]:
+        pulses: dict[int, int] = {}
+        with self._lock:
+            patterns = dict(self._patterns)
+        for name, pattern in patterns.items():
+            channel = self.channel_map[name]
+            pulses[channel] = self._pattern_to_pulse(pattern, now)
+        return pulses
+
+    def _pattern_to_pulse(self, pattern: str, now: float) -> int:
+        if pattern == "off":
+            return self.pulse_us["off"]
+        if pattern == "solid":
+            return self.pulse_us["on"]
+        if pattern == "dim":
+            return self.pulse_us["dim"]
+        if pattern == "blink_slow":
+            return self.pulse_us["on"] if self._blink_on(self.blink["slow_hz"], now) else self.pulse_us["off"]
+        if pattern == "blink_fast":
+            return self.pulse_us["on"] if self._blink_on(self.blink["fast_hz"], now) else self.pulse_us["off"]
+        _LOGGER.warning("Unknown LED pattern '%s'; defaulting to off", pattern)
+        return self.pulse_us["off"]
+
+    @staticmethod
+    def _blink_on(frequency_hz: float, now: float) -> bool:
+        if frequency_hz <= 0:
+            return False
+        period = 1.0 / frequency_hz
+        return (now % period) < (period / 2.0)
+
+    def _send_pulses(self, pulses: dict[int, int]) -> None:
+        if not pulses:
+            return
+        max_channel = max(self.channel_map.values())
+        command_pulses = [None] * (max_channel + 1)
+        for channel, pulse in pulses.items():
+            command_pulses[channel] = pulse
+        command = SSC32Command(command_pulses).to_bytes()
+        try:
+            self.serial_writer(command)
+        except Exception as exc:  # pragma: no cover - depends on runtime IO
+            _LOGGER.warning("Failed to write SSC-32 LED command: %s", exc)
+
+    @staticmethod
+    def _filter_channel_map(channel_map: Dict[str, int], reserved: set[int]) -> Dict[str, int]:
+        filtered: dict[str, int] = {}
+        for name, channel in channel_map.items():
+            if channel in reserved:
+                _LOGGER.warning(
+                    "LED '%s' requested reserved SSC-32 channel %d; skipping entry", name, channel
+                )
+                continue
+            filtered[name] = channel
+        return filtered
+
+
+__all__ = [
+    "LEDDriver",
+    "SSC32PWMLEDDriver",
+    "build_drive_leds",
+    "load_led_config",
+    "load_led_pin_map",
+    "CONFIG_PATH",
+]

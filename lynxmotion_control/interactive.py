@@ -25,7 +25,7 @@ from .al5a_kinematics import (
     DEFAULT_SERVO_CONFIGS,
     ServoConfig,
 )
-from .led_driver import build_drive_leds, load_led_pin_map
+from .led_driver import build_drive_leds, load_led_config
 from .status_leds import StatusLEDController
 
 
@@ -189,8 +189,11 @@ class InteractiveArm:
         self._fault_active = False
         self._motion_active = False
         self._playback_active = False
-        pin_map = load_led_pin_map()
-        drive_leds = build_drive_leds(pin_map)
+        led_config = load_led_config()
+        drive_leds = build_drive_leds(
+            led_config,
+            serial_writer=self._build_serial_writer(),
+        )
         self.status_leds = StatusLEDController(on_change=drive_leds)
         self._calibration_path = CALIBRATION_CONFIG_PATH
         self._calibration_loaded = False
@@ -453,6 +456,17 @@ class InteractiveArm:
         self._skip_next_command = True
         self.update_robot()
         self._run_home_sequence()
+
+    def _build_serial_writer(self) -> Callable[[bytes], None] | None:
+        controller = getattr(self, "controller", None)
+        if controller is None or not hasattr(controller, "ensure_connection"):
+            return None
+
+        def _writer(data: bytes) -> None:
+            serial_port = controller.ensure_connection()
+            serial_port.write(data)
+
+        return _writer
 
     def _initialise_status_leds(self) -> None:
         self.status_leds.set_illumination(on=True, dim=True)

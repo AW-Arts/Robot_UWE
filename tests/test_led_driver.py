@@ -1,110 +1,59 @@
 from __future__ import annotations
 
-from pathlib import Path
+import json
+import time
 
 from lynxmotion_control.led_driver import (
-    LEDDriver,
-    build_drive_leds,
-    load_led_pin_map,
+    SSC32PWMLEDDriver,
+    load_led_config,
 )
 from lynxmotion_control.status_leds import LEDState
 
 
-class FakePWM:
-    def __init__(self, pin: int, frequency: float) -> None:
-        self.pin = pin
-        self.frequency = frequency
-        self.duty_cycle: float | None = None
-        self.started = False
-        self.stopped = False
+def test_load_led_config_legacy_gpio(tmp_path) -> None:
+    config_path = tmp_path / "led_pins.json"
+    config_path.write_text(json.dumps({"red": 17, "green": 22}))
 
-    def start(self, duty_cycle: float) -> None:
-        self.started = True
-        self.duty_cycle = duty_cycle
+    config = load_led_config(config_path)
 
-    def ChangeFrequency(self, frequency: float) -> None:  # noqa: N802
-        self.frequency = frequency
-
-    def ChangeDutyCycle(self, duty_cycle: float) -> None:  # noqa: N802
-        self.duty_cycle = duty_cycle
-
-    def stop(self) -> None:
-        self.stopped = True
+    assert config["backend"] == "gpio"
+    assert config["pin_map"] == {"red": 17, "green": 22}
 
 
-class FakeGPIO:
-    OUT = "out"
-    BCM = "bcm"
-    HIGH = 1
-    LOW = 0
+def test_load_led_config_ssc32_structured(tmp_path) -> None:
+    payload = {
+        "backend": "ssc32_pwm_led",
+        "servo_reserved_channels": [0, 1, 2, 3, 4, 5, 6, 7],
+        "led_channels": {"red": 8, "amber": 9, "green": 10},
+        "pulse_us": {"off": 500, "on": 2000, "dim": 1300},
+        "blink": {"slow_hz": 1, "fast_hz": 4},
+    }
+    config_path = tmp_path / "led_pins.json"
+    config_path.write_text(json.dumps(payload))
 
-    def __init__(self) -> None:
-        self.setmode_calls: list[str] = []
-        self.setup_calls: list[tuple[int, str]] = []
-        self.output_calls: list[tuple[int, int]] = []
-        self.pwms: list[FakePWM] = []
+    config = load_led_config(config_path)
 
-    def setmode(self, mode) -> None:
-        self.setmode_calls.append(mode)
-
-    def setup(self, pin: int, mode) -> None:
-        self.setup_calls.append((pin, mode))
-
-    def output(self, pin: int, level: int) -> None:
-        self.output_calls.append((pin, level))
-
-    def PWM(self, pin: int, frequency: float) -> FakePWM:
-        pwm = FakePWM(pin, frequency)
-        self.pwms.append(pwm)
-        return pwm
+    assert config["backend"] == "ssc32_pwm_led"
+    assert config["led_channels"] == {"red": 8, "amber": 9, "green": 10}
+    assert config["pulse_us"]["on"] == 2000
+    assert config["blink"]["fast_hz"] == 4.0
 
 
-def test_load_led_pin_map_filters_invalid_entries(tmp_path: Path) -> None:
-    config = tmp_path / "led_pins.json"
-    config.write_text(
-        '{"red": 5, "amber": "not-a-pin", "orange": 12, "green": 7}'
+def test_ssc32_driver_filters_reserved_and_drives() -> None:
+    sent: list[bytes] = []
+    driver = SSC32PWMLEDDriver(
+        channel_map={"red": 8, "amber": 0},
+        reserved_channels={0},
+        pulse_us={"off": 500, "on": 2000, "dim": 1300},
+        blink={"slow_hz": 1.0, "fast_hz": 4.0},
+        serial_writer=sent.append,
+        tick_s=0.01,
     )
 
-    pin_map = load_led_pin_map(config)
+    driver.drive({"red": LEDState("solid", ""), "amber": LEDState("solid", "")})
+    time.sleep(0.03)
 
-    assert pin_map == {"red": 5, "green": 7}
-
-
-def test_build_drive_leds_no_config() -> None:
-    driver_fn = build_drive_leds(None)
-
-    driver_fn({
-        "red": LEDState("solid", ""),
-    })
-
-    assert callable(driver_fn)
-
-
-def test_led_driver_translates_patterns_to_gpio(tmp_path: Path) -> None:
-    gpio = FakeGPIO()
-    driver = LEDDriver({"red": 17, "green": 18}, gpio_module=gpio)
-
-    driver.drive(
-        {
-            "red": LEDState("solid", "Fault"),
-            "green": LEDState("blink_fast", "Ready"),
-        }
-    )
-
-    assert gpio.setmode_calls == [gpio.BCM]
-    assert (17, gpio.OUT) in gpio.setup_calls
-    assert (18, gpio.OUT) in gpio.setup_calls
-    assert (17, gpio.HIGH) in gpio.output_calls
-    assert (18, gpio.HIGH) in gpio.output_calls
-
-    assert len(gpio.pwms) == 1
-    pwm = gpio.pwms[0]
-    assert pwm.started is True
-    assert pwm.frequency == 4.0
-    assert pwm.duty_cycle == 50.0
-
-    driver.drive({"green": LEDState("off", "Ready"), "red": LEDState("off", "Fault")})
-
-    assert pwm.stopped is True
-    assert (17, gpio.LOW) in gpio.output_calls
-    assert (18, gpio.LOW) in gpio.output_calls
+    assert sent, "Driver should emit at least one SSC-32 command"
+    command = sent[-1].decode("ascii")
+    assert "#8P2000" in command
+    assert "#0P" not in command
