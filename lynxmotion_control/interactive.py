@@ -186,6 +186,7 @@ class InteractiveArm:
         self.servo_inversions: list[bool] = [False] * len(self._SERVO_METADATA)
         self._invert_button_inactive_color = "0.85"
         self._invert_button_active_color = "#90ee90"
+        self._serial_write_lock = threading.Lock()
         self._fault_active = False
         self._motion_active = False
         self._playback_active = False
@@ -464,7 +465,8 @@ class InteractiveArm:
 
         def _writer(data: bytes) -> None:
             serial_port = controller.ensure_connection()
-            serial_port.write(data)
+            with self._serial_write_lock:
+                serial_port.write(data)
 
         return _writer
 
@@ -4393,11 +4395,12 @@ class InteractiveArm:
                         segment_raw, direction="correct"
                     )
                     self.commanded_joints = list(corrected_segment)
-                    self.controller.move_joints(
-                        segment_raw,
-                        move_time_ms=segment_time,
-                        servo_configs=self._get_servo_configs_for_controller(),
-                    )
+                    with self._serial_write_lock:
+                        self.controller.move_joints(
+                            segment_raw,
+                            move_time_ms=segment_time,
+                            servo_configs=self._get_servo_configs_for_controller(),
+                        )
                     self._last_commanded_raw = tuple(segment_raw)
                     self._update_servo_readouts()
                     interrupted = False
