@@ -15,7 +15,7 @@ from pathlib import Path
 import matplotlib
 import numpy as np
 from matplotlib.lines import Line2D
-from matplotlib.patches import Rectangle, Wedge
+from matplotlib.patches import Circle, Rectangle, Wedge
 from matplotlib.widgets import Button, Slider, TextBox
 from mpl_toolkits.mplot3d import proj3d
 
@@ -26,7 +26,7 @@ from .al5a_kinematics import (
     ServoConfig,
 )
 from .led_driver import build_drive_leds, load_led_config
-from .status_leds import StatusLEDController
+from .status_leds import LEDState, StatusLEDController
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -190,11 +190,19 @@ class InteractiveArm:
         self._motion_active = False
         self._playback_active = False
         led_config = load_led_config()
-        drive_leds = build_drive_leds(
+        self._drive_leds_callback = build_drive_leds(
             led_config,
             serial_writer=self._build_serial_writer(),
         )
-        self.status_leds = StatusLEDController(on_change=drive_leds)
+        self.status_leds = StatusLEDController(on_change=self._on_leds_changed)
+        self._latest_led_states: dict[str, LEDState] = {}
+        self._led_panel_ax = None
+        self._led_patches: dict[str, Circle] = {}
+        self._led_reason_texts: dict[str, object] = {}
+        self._led_pattern_texts: dict[str, object] = {}
+        self._led_color_map: dict[str, str] = {}
+        self._led_tick_count = 0
+        self._led_flash_timer = None
         self._calibration_path = CALIBRATION_CONFIG_PATH
         self._calibration_loaded = False
         self._wrist_slider: Slider | None = None
@@ -475,6 +483,16 @@ class InteractiveArm:
         self.status_leds.set_attention(active=False, transitioning=False)
         self.status_leds.set_teach_mode(active=False, blinking=False)
 
+    def _on_leds_changed(self, state: dict[str, LEDState]) -> None:
+        self._latest_led_states = state
+        self._render_led_states()
+        if self._drive_leds_callback:
+            try:
+                self._drive_leds_callback(state)
+            except Exception:
+                # Hardware LED updates are best-effort and must not break the UI.
+                pass
+
     def _update_idle_leds(self) -> None:
         if self._fault_active:
             return
@@ -533,6 +551,170 @@ class InteractiveArm:
             self.status_leds.set_ready(active=False, running=self._motion_active)
         elif not self._motion_active and not self._playback_active:
             self.status_leds.set_ready(active=True, running=False)
+
+    # ------------------------------------------------------------------
+    # LED status display
+    def _build_led_status_panel(self) -> None:
+        """Create a left-hand summary showing simulated stack lights."""
+
+        self._led_panel_ax = self.figure.add_axes([0.02, 0.08, 0.12, 0.86])
+        self._led_panel_ax.set_xlim(0.0, 1.0)
+        self._led_panel_ax.set_ylim(0.0, 1.0)
+        self._led_panel_ax.axis("off")
+        self._led_panel_ax.set_facecolor("#f8fafc")
+
+        self._led_panel_ax.text(
+            0.5,
+            0.96,
+            "LED mirror",
+            ha="center",
+            va="center",
+            fontsize=10,
+            fontweight="bold",
+            color="#0f172a",
+        )
+        self._led_panel_ax.text(
+            0.5,
+            0.92,
+            "(live signals)",
+            ha="center",
+            va="center",
+            fontsize=8,
+            color="#475569",
+        )
+
+        led_order = [
+            "red",
+            "amber",
+            "green",
+            "yellow",
+            "blue",
+            "white",
+        ]
+        led_colors = {
+            "red": "#ef4444",
+            "amber": "#f59e0b",
+            "green": "#22c55e",
+            "yellow": "#fbbf24",
+            "blue": "#3b82f6",
+            "white": "#e5e7eb",
+        }
+        self._led_color_map = led_colors
+
+        y_positions = np.linspace(0.78, 0.12, len(led_order))
+        for name, y in zip(led_order, y_positions, strict=True):
+            color = led_colors.get(name, "#94a3b8")
+            circle = Circle(
+                (0.18, y),
+                0.065,
+                facecolor="#0f172a",
+                edgecolor=color,
+                lw=2,
+                alpha=0.2,
+            )
+            self._led_panel_ax.add_patch(circle)
+            label = name.capitalize()
+            self._led_panel_ax.text(
+                0.34,
+                y + 0.05,
+                label,
+                ha="left",
+                va="center",
+                fontsize=9,
+                color="#0f172a",
+                fontweight="bold",
+            )
+            reason_text = self._led_panel_ax.text(
+                0.34,
+                y,
+                "idle",
+                ha="left",
+                va="center",
+                fontsize=11,
+                color="#0f172a",
+                fontweight="bold",
+            )
+            pattern_text = self._led_panel_ax.text(
+                0.34,
+                y - 0.05,
+                "off",
+                ha="left",
+                va="center",
+                fontsize=8,
+                color="#475569",
+            )
+            self._led_patches[name] = circle
+            self._led_reason_texts[name] = reason_text
+            self._led_pattern_texts[name] = pattern_text
+
+        self._led_tick_count = 0
+        self._led_flash_timer = self.figure.canvas.new_timer(interval=250)
+        self._led_flash_timer.add_callback(self._tick_led_timer)
+        self._led_flash_timer.start()
+        self._render_led_states()
+
+    def _tick_led_timer(self) -> None:
+        self._led_tick_count += 1
+        self._render_led_states()
+
+    def _render_led_states(self) -> None:
+        if self._led_panel_ax is None:
+            return
+        states = self._latest_led_states or self.status_leds.snapshot()
+        for name, state in states.items():
+            patch = self._led_patches.get(name)
+            reason_text = self._led_reason_texts.get(name)
+            pattern_text = self._led_pattern_texts.get(name)
+            if patch is None or reason_text is None or pattern_text is None:
+                continue
+
+            base_color = self._led_color_map.get(name, "#94a3b8")
+            pattern = state.pattern
+            tick = self._led_tick_count
+            if pattern == "blink_fast":
+                on = (tick % 2) == 0
+            elif pattern == "blink_slow":
+                on = (tick % 6) < 3
+            else:
+                on = pattern != "off"
+
+            face = base_color if on else "#0f172a"
+            alpha = 1.0
+            if pattern == "off":
+                alpha = 0.18
+            elif pattern == "dim":
+                alpha = 0.35
+            elif pattern.startswith("blink") and not on:
+                alpha = 0.28
+
+            patch.set_facecolor(face)
+            patch.set_edgecolor(base_color)
+            patch.set_alpha(alpha)
+
+            reason_text.set_text(self._summarise_led_reason(state))
+            pattern_text.set_text(pattern.replace("_", " "))
+        if self.figure.canvas is not None:
+            self.figure.canvas.draw_idle()
+
+    def _summarise_led_reason(self, state: LEDState) -> str:
+        meaning = state.meaning.lower()
+        if "fault" in meaning or "stop" in meaning:
+            return "error"
+        if "attention" in meaning or "interlock" in meaning:
+            return "hold"
+        if "teach" in meaning or "calibration" in meaning:
+            return "teach"
+        if "ready" in meaning or "running" in meaning:
+            if state.pattern in {"blink_slow", "blink_fast"}:
+                return "running"
+            if state.pattern == "off":
+                return "idle"
+            return "ready"
+        if "usb" in meaning or "host" in meaning or "heartbeat" in meaning:
+            return "link"
+        if "illumination" in meaning or "presence" in meaning:
+            return "light"
+        return "status"
 
     def _on_canvas_resized(self, _event) -> None:
         try:
@@ -971,7 +1153,9 @@ class InteractiveArm:
     def _create_controls(self) -> None:
         """Create on-figure UI elements organised into collapsible panels."""
 
-        self.figure.subplots_adjust(left=0.045, right=0.575, top=0.965, bottom=0.08)
+        self.figure.subplots_adjust(left=0.16, right=0.575, top=0.965, bottom=0.08)
+
+        self._build_led_status_panel()
 
         self._panel_left = 0.61
         self._panel_bottom = 0.08
