@@ -25,6 +25,7 @@ from .al5a_kinematics import (
     DEFAULT_SERVO_CONFIGS,
     ServoConfig,
 )
+from .led_driver import build_drive_leds, load_led_pin_map
 from .status_leds import StatusLEDController
 
 
@@ -188,7 +189,9 @@ class InteractiveArm:
         self._fault_active = False
         self._motion_active = False
         self._playback_active = False
-        self.status_leds = StatusLEDController()
+        pin_map = load_led_pin_map()
+        drive_leds = build_drive_leds(pin_map)
+        self.status_leds = StatusLEDController(on_change=drive_leds)
         self._calibration_path = CALIBRATION_CONFIG_PATH
         self._calibration_loaded = False
         self._wrist_slider: Slider | None = None

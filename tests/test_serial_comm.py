@@ -50,5 +50,5 @@ def test_print_controller_move_outputs_command(
 
     controller.move_joints([0.0], move_time_ms=None)
 
-    captured = capsys.readouterr().out.strip()
+    captured = capsys.readouterr().out
     assert captured == "#0P1200\r"
