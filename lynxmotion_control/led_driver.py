@@ -5,6 +5,7 @@ import importlib
 import importlib.util
 import json
 import logging
+import sys
 from pathlib import Path
 from typing import Callable, Dict
 
@@ -176,11 +177,24 @@ def build_drive_leds(pin_map: Dict[str, int] | None) -> Callable[[Dict[str, LEDS
 
 
 def _load_gpio_module():
+    if not sys.platform.startswith("linux"):
+        _LOGGER.info(
+            "RPi.GPIO is only available on Raspberry Pi; skipping hardware LEDs on %s",
+            sys.platform,
+        )
+        return None
+
     spec = importlib.util.find_spec("RPi.GPIO")
     if spec is None:
         _LOGGER.info("RPi.GPIO not available; status LEDs will not drive hardware")
         return None
-    module = importlib.import_module("RPi.GPIO")
+
+    try:
+        module = importlib.import_module("RPi.GPIO")
+    except ImportError:
+        _LOGGER.info("Failed to import RPi.GPIO; status LEDs will not drive hardware")
+        return None
+
     return module
 
 
