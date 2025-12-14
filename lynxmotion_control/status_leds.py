@@ -148,7 +148,7 @@ class StatusLEDController:
                 "red": "off",
                 "amber": "off",
                 "green": "solid",
-                "blue": "solid",
+                "blue": "off",
                 "yellow": "solid",
                 "white": "solid",
             }
