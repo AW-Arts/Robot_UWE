@@ -36,6 +36,7 @@ CALIBRATION_CONFIG_PATH = Path.home() / ".config" / "lynxmotion_al5a" / "servo_o
 PATH_STORAGE_PATH = CALIBRATION_CONFIG_PATH.with_name("saved_path.json")
 SUBROUTINE_STORAGE_DIR = PATH_STORAGE_PATH.with_name("subroutines")
 TIMELINE_STORAGE_PATH = PATH_STORAGE_PATH.with_name("timeline.json")
+TEACH_SESSION_DIR = CALIBRATION_CONFIG_PATH.with_name("teach_sessions")
 
 
 _DEFAULT_VERTICAL_JOINTS = [
@@ -103,6 +104,32 @@ class Waypoint:
     wrist_pitch: float
     wrist_rotation: float
     gripper_angle: float
+
+
+@dataclass
+class TeachSample:
+    timestamp: float
+    joints: tuple[float, ...]
+    cartesian: tuple[float, float, float] | None
+    wrist_pitch: float
+    wrist_rotation: float
+    gripper_angle: float
+    move_time_ms: int | None
+    dwell_ms: int | None = None
+    label: str | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "timestamp_s": float(self.timestamp),
+            "joints": list(self.joints),
+            "cartesian": list(self.cartesian) if self.cartesian is not None else None,
+            "wrist_pitch": float(self.wrist_pitch),
+            "wrist_rotation": float(self.wrist_rotation),
+            "gripper_angle": float(self.gripper_angle),
+            "move_time_ms": self.move_time_ms,
+            "dwell_ms": self.dwell_ms,
+            "label": self.label,
+        }
 
 
 @dataclass
@@ -186,6 +213,15 @@ class InteractiveArm:
         self.servo_inversions: list[bool] = [False] * len(self._SERVO_METADATA)
         self._invert_button_inactive_color = "0.85"
         self._invert_button_active_color = "#90ee90"
+        self._operation_mode: str = "live"
+        self._run_mode_armed = False
+        self._teach_session_start: float | None = None
+        self._last_teach_timestamp: float | None = None
+        self._teach_samples: list[TeachSample] = []
+        self._smoothed_teach_samples: list[TeachSample] = []
+        self._last_teach_save_path: Path | None = None
+        self._last_teach_status: str = ""
+        TEACH_SESSION_DIR.mkdir(parents=True, exist_ok=True)
         self._fault_active = False
         self._motion_active = False
         self._playback_active = False
@@ -453,6 +489,13 @@ class InteractiveArm:
         self._remove_timeline_button: Button | None = None
         self._clear_timeline_button: Button | None = None
         self._play_timeline_button: Button | None = None
+        self._mode_status_text = None
+        self._live_mode_button: Button | None = None
+        self._teach_mode_button: Button | None = None
+        self._run_mode_button: Button | None = None
+        self._arm_run_button: Button | None = None
+        self._smooth_teach_button: Button | None = None
+        self._save_teach_button: Button | None = None
         self.waypoint_ax = None
 
         self._load_saved_waypoints()
@@ -1163,6 +1206,7 @@ class InteractiveArm:
         background.set_zorder(-10)
 
         menu_entries = [
+            ("Modes", "modes"),
             ("Movement", "movement"),
             ("Servos", "servos"),
             ("Motor config", "motor_config"),
@@ -1202,6 +1246,7 @@ class InteractiveArm:
         self.servo_limit_boxes_max = []
         self.servo_pulse_sliders = []
 
+        self._panel_widgets["modes"] = self._build_mode_panel()
         self._panel_widgets["movement"] = self._build_movement_panel()
         self._panel_widgets["servos"] = self._build_servo_panel()
         self._panel_widgets["motor_config"] = self._build_motor_config_panel()
@@ -1251,6 +1296,433 @@ class InteractiveArm:
                 button.hovercolor = "0.95"
             button.ax.set_facecolor(button.color)
         self._active_panel = panel
+        self.figure.canvas.draw_idle()
+
+    def _build_mode_panel(self) -> list:
+        panel_key = "modes"
+        axes: list = []
+
+        title_ax = self._panel_axes(
+            self._panel_margin,
+            self._panel_content_top - 0.08,
+            1.0 - 2 * self._panel_margin,
+            0.06,
+        )
+        title_ax.axis("off")
+        title_ax.text(
+            0.0,
+            0.6,
+            "Mode selection",
+            va="center",
+            ha="left",
+            fontsize=10,
+            fontweight="bold",
+        )
+        title_ax.text(
+            0.0,
+            0.0,
+            "Live = real robot, Teach = virtual with auto-recording, Run = guarded playback.",
+            va="center",
+            ha="left",
+            fontsize=8,
+            color="#334155",
+        )
+        axes.append(title_ax)
+
+        info_ax = self._panel_axes(
+            self._panel_margin,
+            self._panel_content_top - 0.24,
+            1.0 - 2 * self._panel_margin,
+            0.12,
+        )
+        info_ax.axis("off")
+        info_text = (
+            "Live Mode: stream IK jogs, joint jogs, gripper, subroutines to hardware in real time.\n"
+            "Teach Mode: identical controls but no hardware output; updates only the digital twin and auto-records a routine.\n"
+            "Run Mode: only mode that executes a routine on hardware; requires explicit ARM + RUN confirmation."
+        )
+        info_ax.text(
+            0.0,
+            0.95,
+            info_text,
+            va="top",
+            ha="left",
+            fontsize=8,
+            color="#0f172a",
+            wrap=True,
+        )
+        axes.append(info_ax)
+
+        button_width = (1.0 - 4 * self._panel_margin) / 3
+        button_height = 0.08
+        button_bottom = self._panel_content_top - 0.34
+
+        live_ax = self._panel_axes(
+            self._panel_margin,
+            button_bottom,
+            button_width,
+            button_height,
+        )
+        self._live_mode_button = Button(live_ax, "Live Mode", hovercolor="#d9e8ff")
+        self._live_mode_button.on_clicked(lambda _event: self._set_operation_mode("live"))
+        self._panel_interactive_widgets[panel_key].append(self._live_mode_button)
+        axes.append(live_ax)
+
+        teach_ax = self._panel_axes(
+            self._panel_margin * 2 + button_width,
+            button_bottom,
+            button_width,
+            button_height,
+        )
+        self._teach_mode_button = Button(teach_ax, "Teach Mode", hovercolor="#d9e8ff")
+        self._teach_mode_button.on_clicked(lambda _event: self._set_operation_mode("teach"))
+        self._panel_interactive_widgets[panel_key].append(self._teach_mode_button)
+        axes.append(teach_ax)
+
+        run_ax = self._panel_axes(
+            self._panel_margin * 3 + button_width * 2,
+            button_bottom,
+            button_width,
+            button_height,
+        )
+        self._run_mode_button = Button(run_ax, "Run Mode", hovercolor="#ffe4d5")
+        self._run_mode_button.on_clicked(lambda _event: self._set_operation_mode("run"))
+        self._panel_interactive_widgets[panel_key].append(self._run_mode_button)
+        axes.append(run_ax)
+
+        guard_bottom = button_bottom - 0.1
+        arm_ax = self._panel_axes(
+            self._panel_margin,
+            guard_bottom,
+            (1.0 - 3 * self._panel_margin) / 2,
+            button_height,
+        )
+        self._arm_run_button = Button(arm_ax, "Arm + confirm run", hovercolor="#ffd7b5")
+        self._arm_run_button.on_clicked(self._toggle_run_arm)
+        self._panel_interactive_widgets[panel_key].append(self._arm_run_button)
+        axes.append(arm_ax)
+
+        status_ax = self._panel_axes(
+            self._panel_margin,
+            guard_bottom - 0.12,
+            1.0 - 2 * self._panel_margin,
+            0.1,
+        )
+        status_ax.axis("off")
+        self._mode_status_text = status_ax.text(
+            0.0,
+            0.6,
+            "Mode: Live (hardware commands enabled)",
+            va="center",
+            ha="left",
+            fontsize=9,
+            color="#0f172a",
+        )
+        status_ax.text(
+            0.0,
+            0.05,
+            "Teach recordings auto-save with timestamps, gripper state, and dwell metadata.",
+            va="bottom",
+            ha="left",
+            fontsize=8,
+            color="#334155",
+        )
+        axes.append(status_ax)
+
+        smooth_ax = self._panel_axes(
+            self._panel_margin,
+            self._panel_margin + 0.16,
+            (1.0 - 3 * self._panel_margin) / 2,
+            button_height,
+        )
+        self._smooth_teach_button = Button(
+            smooth_ax, "Smooth recording", hovercolor="#d9e8ff"
+        )
+        self._smooth_teach_button.on_clicked(self._smooth_teach_session)
+        self._panel_interactive_widgets[panel_key].append(self._smooth_teach_button)
+        axes.append(smooth_ax)
+
+        save_ax = self._panel_axes(
+            self._panel_margin * 2 + (1.0 - 3 * self._panel_margin) / 2,
+            self._panel_margin + 0.16,
+            (1.0 - 3 * self._panel_margin) / 2,
+            button_height,
+        )
+        self._save_teach_button = Button(save_ax, "Save routine", hovercolor="#d9e8ff")
+        self._save_teach_button.on_clicked(self._finalise_teach_session)
+        self._panel_interactive_widgets[panel_key].append(self._save_teach_button)
+        axes.append(save_ax)
+
+        summary_ax = self._panel_axes(
+            self._panel_margin,
+            self._panel_margin,
+            1.0 - 2 * self._panel_margin,
+            0.12,
+        )
+        summary_ax.axis("off")
+        summary_ax.text(
+            0.0,
+            0.8,
+            "Post-process smoothing trims jitter (averages neighbours) and keeps timestamps intact.",
+            va="center",
+            ha="left",
+            fontsize=8,
+            color="#0f172a",
+        )
+        summary_ax.text(
+            0.0,
+            0.3,
+            "Run Mode demands an explicit ARM + RUN click before any hardware motion will occur.",
+            va="center",
+            ha="left",
+            fontsize=8,
+            color="#b45309",
+            fontweight="bold",
+        )
+        axes.append(summary_ax)
+
+        self._update_mode_controls()
+        return axes
+
+    def _set_operation_mode(self, mode: str) -> None:
+        if mode not in {"live", "teach", "run"}:
+            return
+
+        if mode == "run" and not self._run_mode_armed:
+            self._last_teach_status = "Arm + confirm run before enabling hardware playback."
+            self._update_mode_controls()
+            return
+
+        if self._operation_mode == "teach" and mode != "teach":
+            self._finalise_teach_session(auto_save=True)
+
+        if mode == "teach" and self._operation_mode != "teach":
+            self._start_teach_session()
+
+        self._operation_mode = mode
+        if mode != "run":
+            self._run_mode_armed = False
+
+        self._update_mode_controls()
+
+    def _toggle_run_arm(self, _event=None) -> None:  # pragma: no cover - UI interaction
+        self._run_mode_armed = not self._run_mode_armed
+        if not self._run_mode_armed and self._operation_mode == "run":
+            self._operation_mode = "live"
+        self._last_teach_status = (
+            "Run Mode armed. Confirm Run to allow hardware playback."
+            if self._run_mode_armed
+            else "Run Mode disarmed. Hardware playback blocked."
+        )
+        self._update_mode_controls()
+
+    def _start_teach_session(self) -> None:
+        self._teach_samples = []
+        self._smoothed_teach_samples = []
+        self._teach_session_start = time.monotonic()
+        self._last_teach_timestamp = None
+        self._last_teach_status = "Teach Mode: recording virtual moves."
+        self._update_mode_controls()
+
+    def _record_teach_sample(
+        self, joints: Sequence[float], move_time_ms: int | None
+    ) -> None:
+        if self._operation_mode != "teach":
+            return
+        if self._teach_session_start is None:
+            self._start_teach_session()
+        now = time.monotonic()
+        if self._last_teach_timestamp is None:
+            self._last_teach_timestamp = self._teach_session_start or now
+        timestamp = now - (self._teach_session_start or now)
+        dwell_ms = int((now - (self._last_teach_timestamp or now)) * 1000)
+        cartesian = (
+            tuple(map(float, self._setpoint_position))
+            if self._setpoint_position is not None
+            else None
+        )
+        sample = TeachSample(
+            timestamp=timestamp,
+            joints=tuple(float(value) for value in joints),
+            cartesian=cartesian,
+            wrist_pitch=float(self.wrist_pitch),
+            wrist_rotation=float(self.wrist_rotation),
+            gripper_angle=float(self.gripper_angle),
+            move_time_ms=move_time_ms,
+            dwell_ms=dwell_ms,
+            label=None,
+        )
+        self._teach_samples.append(sample)
+        self._last_teach_timestamp = now
+        self._last_teach_status = (
+            f"Recording: {len(self._teach_samples)} samples captured"
+        )
+        self._update_mode_controls()
+
+    def _smooth_teach_session(self, _event=None) -> None:  # pragma: no cover - UI interaction
+        if not self._teach_samples:
+            self._last_teach_status = "No teach samples available to smooth."
+            self._update_mode_controls()
+            return
+        if len(self._teach_samples) < 3:
+            self._smoothed_teach_samples = list(self._teach_samples)
+            self._last_teach_status = "Not enough samples for smoothing; using raw routine."
+            self._update_mode_controls()
+            return
+
+        smoothed: list[TeachSample] = []
+        window_size = 3
+        for index, sample in enumerate(self._teach_samples):
+            if index == 0 or index == len(self._teach_samples) - 1:
+                smoothed.append(sample)
+                continue
+            window = self._teach_samples[index - 1 : index + 2]
+            avg_joints = tuple(
+                float(np.mean([frame.joints[idx] for frame in window]))
+                for idx in range(len(sample.joints))
+            )
+            avg_cartesian = None
+            if all(frame.cartesian is not None for frame in window):
+                avg_cartesian = tuple(
+                    float(np.mean([frame.cartesian[idx] for frame in window]))
+                    for idx in range(3)
+                )
+            avg_pitch = float(np.mean([frame.wrist_pitch for frame in window]))
+            avg_rotation = float(np.mean([frame.wrist_rotation for frame in window]))
+            avg_gripper = float(np.mean([frame.gripper_angle for frame in window]))
+            avg_move_time = int(
+                round(np.mean([frame.move_time_ms or 0 for frame in window]))
+            )
+            avg_dwell = int(round(np.mean([frame.dwell_ms or 0 for frame in window])))
+            smoothed.append(
+                TeachSample(
+                    timestamp=sample.timestamp,
+                    joints=avg_joints,
+                    cartesian=avg_cartesian,
+                    wrist_pitch=avg_pitch,
+                    wrist_rotation=avg_rotation,
+                    gripper_angle=avg_gripper,
+                    move_time_ms=avg_move_time,
+                    dwell_ms=avg_dwell,
+                    label=sample.label,
+                )
+            )
+
+        self._smoothed_teach_samples = smoothed
+        self._last_teach_status = (
+            f"Smoothed {len(smoothed)} samples (window={window_size}) for cleaner playback."
+        )
+        self._update_mode_controls()
+
+    def _save_teach_session(self, *, include_smoothed: bool = True) -> Path | None:
+        if not self._teach_samples:
+            return None
+        TEACH_SESSION_DIR.mkdir(parents=True, exist_ok=True)
+        timestamp = time.strftime("%Y%m%d-%H%M%S")
+        path = TEACH_SESSION_DIR / f"teach_session_{timestamp}.json"
+        routine_duration = (
+            self._teach_samples[-1].timestamp - self._teach_samples[0].timestamp
+            if len(self._teach_samples) > 1
+            else 0.0
+        )
+        payload: dict[str, object] = {
+            "mode": self._operation_mode,
+            "sample_count": len(self._teach_samples),
+            "duration_s": routine_duration,
+            "samples": [sample.to_dict() for sample in self._teach_samples],
+        }
+        if include_smoothed and self._smoothed_teach_samples:
+            payload.update(
+                {
+                    "smoothing": {
+                        "method": "moving_average",
+                        "window": 3,
+                    },
+                    "smoothed_samples": [
+                        sample.to_dict() for sample in self._smoothed_teach_samples
+                    ],
+                }
+            )
+        path.write_text(json.dumps(payload, indent=2))
+        self._last_teach_save_path = path
+        return path
+
+    def _finalise_teach_session(self, _event=None, *, auto_save: bool = False) -> None:
+        if self._operation_mode == "teach" and self._teach_session_start is None:
+            self._start_teach_session()
+        if not self._teach_samples:
+            self._last_teach_status = "No teach samples to save yet."
+            self._update_mode_controls()
+            return
+
+        saved_path = self._save_teach_session(include_smoothed=True)
+        if saved_path:
+            self._last_teach_status = f"Saved routine to {saved_path.name}"
+
+        if auto_save:
+            self._teach_samples = []
+            self._smoothed_teach_samples = []
+        if self._operation_mode == "teach":
+            self._teach_session_start = time.monotonic()
+            self._last_teach_timestamp = None
+        self._update_mode_controls()
+
+    def _update_mode_controls(self) -> None:
+        def _style_button(button: Button | None, active: bool, *, danger: bool = False) -> None:
+            if button is None:
+                return
+            if active:
+                button.color = "#aac8ff" if not danger else "#ffdec3"
+                button.hovercolor = button.color
+            else:
+                button.color = "0.85"
+                button.hovercolor = "0.95"
+            button.ax.set_facecolor(button.color)
+
+        _style_button(self._live_mode_button, self._operation_mode == "live")
+        _style_button(self._teach_mode_button, self._operation_mode == "teach")
+        _style_button(self._run_mode_button, self._operation_mode == "run", danger=True)
+
+        if self._arm_run_button is not None:
+            if self._run_mode_armed:
+                self._arm_run_button.color = "#ffdec3"
+                self._arm_run_button.hovercolor = "#ffdec3"
+                self._arm_run_button.label.set_text("Armed for Run")
+            else:
+                self._arm_run_button.color = "0.85"
+                self._arm_run_button.hovercolor = "0.95"
+                self._arm_run_button.label.set_text("Arm + confirm run")
+            self._arm_run_button.ax.set_facecolor(self._arm_run_button.color)
+
+        sample_count = len(self._teach_samples)
+        smoothed_count = len(self._smoothed_teach_samples)
+        status_parts = [f"Mode: {self._operation_mode.capitalize()}"]
+        if self._operation_mode == "teach":
+            status_parts.append("virtual outputs only")
+        if self._operation_mode == "run":
+            status_parts.append(
+                "ARMED" if self._run_mode_armed else "hardware blocked until armed"
+            )
+        if sample_count:
+            status_parts.append(f"{sample_count} recorded moves")
+        if smoothed_count:
+            status_parts.append(f"smoothed {smoothed_count} points")
+        if self._mode_status_text is not None:
+            details = ", ".join(status_parts)
+            if self._last_teach_status:
+                details = f"{details}\n{self._last_teach_status}"
+            if self._last_teach_save_path:
+                details = f"{details}\nLast save: {self._last_teach_save_path.name}"
+            self._mode_status_text.set_text(details)
+
+        smooth_enabled = sample_count > 0
+        if self._smooth_teach_button is not None:
+            self._smooth_teach_button.eventson = smooth_enabled
+            self._smooth_teach_button.ax.set_alpha(1.0 if smooth_enabled else 0.4)
+        if self._save_teach_button is not None:
+            self._save_teach_button.eventson = smooth_enabled
+            self._save_teach_button.ax.set_alpha(1.0 if smooth_enabled else 0.4)
+
         self.figure.canvas.draw_idle()
 
     def _build_movement_panel(self) -> list:
@@ -4566,6 +5038,14 @@ class InteractiveArm:
                         segment_raw, direction="correct"
                     )
                     self.commanded_joints = list(corrected_segment)
+                    if self._operation_mode == "teach":
+                        self.current_joints = list(corrected_segment)
+                        self._last_commanded_raw = tuple(segment_raw)
+                        self._update_servo_readouts()
+                        self._update_visuals(self.current_joints)
+                        self._record_teach_sample(corrected_segment, segment_time)
+                        continue
+
                     self.controller.move_joints(
                         segment_raw,
                         move_time_ms=segment_time,
@@ -4596,14 +5076,15 @@ class InteractiveArm:
                     self._update_servo_readouts()
                     continue
 
-                feedback_raw = self._read_feedback_from_controller()
-                if feedback_raw:
-                    corrected_feedback = self._apply_offsets(
-                        feedback_raw, direction="correct"
-                    )
-                    self._apply_feedback(corrected_feedback)
-                else:
-                    self.feedback_joints = None
+                if self._operation_mode != "teach":
+                    feedback_raw = self._read_feedback_from_controller()
+                    if feedback_raw:
+                        corrected_feedback = self._apply_offsets(
+                            feedback_raw, direction="correct"
+                        )
+                        self._apply_feedback(corrected_feedback)
+                    else:
+                        self.feedback_joints = None
             except Exception:  # pragma: no cover - runtime safety net
                 _LOGGER.exception("Failed to send move command to controller")
                 self._mark_fault()
