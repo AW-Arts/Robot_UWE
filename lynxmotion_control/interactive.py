@@ -221,10 +221,12 @@ class InteractiveArm:
         self._last_teach_save_path: Path | None = None
         self._last_teach_subroutine_path: Path | None = None
         self._last_teach_status: str = ""
+        self._teach_recording: bool = False
         self._mode_toggle_buttons: dict[str, Button] = {}
         self._recording_indicator: Circle | None = None
         self._recording_indicator_text = None
         self._recording_indicator_label = None
+        self._record_teach_button: Button | None = None
         TEACH_SESSION_DIR.mkdir(parents=True, exist_ok=True)
         self._fault_active = False
         self._motion_active = False
@@ -571,7 +573,7 @@ class InteractiveArm:
 
     def _sync_leds(self, *, fault_just_triggered: bool = False) -> None:
         teach_mode_active = self._operation_mode == "teach" or self._calibration_active
-        teach_recording = self._operation_mode == "teach" or self._calibration_guide_active
+        teach_recording = self._teach_recording or self._calibration_guide_active
         if self._fault_active:
             state = RobotISOState.FAULT
         elif teach_mode_active:
@@ -638,7 +640,7 @@ class InteractiveArm:
         }
         self._led_color_map = led_colors
 
-        y_positions = np.linspace(0.78, 0.12, len(led_order))
+        y_positions = np.linspace(0.82, 0.08, len(led_order))
         for name, y in zip(led_order, y_positions, strict=True):
             color = led_colors.get(name, "#94a3b8")
             circle = Circle(
@@ -1403,7 +1405,7 @@ class InteractiveArm:
         info_ax.axis("off")
         info_text = (
             "Live Mode streams commands to the arm.\n"
-            "Teach Mode mirrors every move to the digital twin only, auto-recording the routine for later playback.\n"
+            "Teach Mode mirrors every move to the digital twin only. Use Start recording to capture routines for later playback.\n"
             "Watch the top-right REC badge and the yellow LED overlay while teaching; save recordings into subroutines to use them in the timeline."
         )
         info_ax.text(
@@ -1420,6 +1422,19 @@ class InteractiveArm:
 
         button_height = 0.08
         button_bottom = self._panel_content_top - 0.3
+
+        record_ax = self._panel_axes(
+            self._panel_margin,
+            button_bottom,
+            1.0 - 2 * self._panel_margin,
+            button_height,
+        )
+        self._record_teach_button = Button(
+            record_ax, "Start recording", hovercolor="#d9e8ff"
+        )
+        self._record_teach_button.on_clicked(self._toggle_teach_recording)
+        self._panel_interactive_widgets[panel_key].append(self._record_teach_button)
+        axes.append(record_ax)
 
         status_ax = self._panel_axes(
             self._panel_margin,
@@ -1507,32 +1522,72 @@ class InteractiveArm:
         if mode not in {"live", "teach"}:
             return
 
-        if self._operation_mode == "teach" and mode != "teach":
-            self._finalise_teach_session(auto_save=True)
+        previous_mode = self._operation_mode
 
-        if mode == "teach" and self._operation_mode != "teach":
-            self._start_teach_session()
+        if previous_mode == "teach" and mode != "teach":
+            self._pause_teach_recording(status="Switched to Live mode; recording paused.")
+            self._finalise_teach_session(auto_save=True)
 
         self._operation_mode = mode
 
+        if mode == "teach" and previous_mode != "teach":
+            self._enter_teach_mode()
+
         self._update_mode_controls()
         self._sync_leds()
+
+    def _enter_teach_mode(self) -> None:
+        self._teach_recording = False
+        self._teach_samples = []
+        self._smoothed_teach_samples = []
+        self._teach_session_start = None
+        self._last_teach_timestamp = None
+        self._last_teach_status = (
+            "Teach Mode: ready to record. Press Start recording to capture moves."
+        )
+        self._update_mode_controls()
 
     def _start_teach_session(self) -> None:
         self._teach_samples = []
         self._smoothed_teach_samples = []
         self._teach_session_start = time.monotonic()
         self._last_teach_timestamp = None
+        self._teach_recording = True
         self._last_teach_status = "Teach Mode: recording virtual moves."
         self._update_mode_controls()
+
+    def _pause_teach_recording(self, *, status: str | None = None) -> None:
+        if not self._teach_recording:
+            return
+        self._teach_recording = False
+        if status is not None:
+            self._last_teach_status = status
+        elif self._teach_samples:
+            self._last_teach_status = (
+                f"Recording paused ({len(self._teach_samples)} samples captured)."
+            )
+        else:
+            self._last_teach_status = "Recording paused."
+        self._update_mode_controls()
+
+    def _toggle_teach_recording(self, _event=None) -> None:
+        if self._operation_mode != "teach":
+            self._last_teach_status = "Switch to Teach mode to record."
+            self._update_mode_controls()
+            return
+
+        if self._teach_recording:
+            self._pause_teach_recording()
+        else:
+            self._start_teach_session()
 
     def _record_teach_sample(
         self, joints: Sequence[float], move_time_ms: int | None
     ) -> None:
-        if self._operation_mode != "teach":
+        if self._operation_mode != "teach" or not self._teach_recording:
             return
         if self._teach_session_start is None:
-            self._start_teach_session()
+            self._teach_session_start = time.monotonic()
         now = time.monotonic()
         if self._last_teach_timestamp is None:
             self._last_teach_timestamp = self._teach_session_start or now
@@ -1719,8 +1774,6 @@ class InteractiveArm:
         return path
 
     def _finalise_teach_session(self, _event=None, *, auto_save: bool = False) -> None:
-        if self._operation_mode == "teach" and self._teach_session_start is None:
-            self._start_teach_session()
         if not self._teach_samples:
             self._last_teach_status = "No teach samples to save yet."
             self._update_mode_controls()
@@ -1740,9 +1793,9 @@ class InteractiveArm:
         if auto_save:
             self._teach_samples = []
             self._smoothed_teach_samples = []
-        if self._operation_mode == "teach":
-            self._teach_session_start = time.monotonic()
-            self._last_teach_timestamp = None
+        self._teach_recording = False
+        self._teach_session_start = None
+        self._last_teach_timestamp = None
         self._update_mode_controls()
 
     def _update_mode_controls(self) -> None:
@@ -1765,6 +1818,9 @@ class InteractiveArm:
         status_parts = [f"Mode: {self._operation_mode.capitalize()}"]
         if self._operation_mode == "teach":
             status_parts.append("virtual outputs only")
+            status_parts.append(
+                "recording" if self._teach_recording else "recording paused"
+            )
         if sample_count:
             status_parts.append(f"{sample_count} recorded moves")
         if smoothed_count:
@@ -1782,6 +1838,15 @@ class InteractiveArm:
             self._mode_status_text.set_text(details)
 
         self._update_recording_indicator()
+
+        if self._record_teach_button is not None:
+            _style_button(self._record_teach_button, self._teach_recording)
+            self._record_teach_button.label.set_text(
+                "Stop recording" if self._teach_recording else "Start recording"
+            )
+            enabled = self._operation_mode == "teach"
+            self._record_teach_button.eventson = enabled
+            self._record_teach_button.ax.set_alpha(1.0 if enabled else 0.4)
 
         smooth_enabled = sample_count > 0
         if self._smooth_teach_button is not None:
@@ -1801,7 +1866,7 @@ class InteractiveArm:
         ):
             return
 
-        active = self._operation_mode == "teach"
+        active = self._teach_recording
         color = "#ef4444" if active else "#94a3b8"
         edge = "#7f1d1d" if active else "#cbd5e1"
         self._recording_indicator.set_facecolor(color)
@@ -1810,10 +1875,15 @@ class InteractiveArm:
         self._recording_indicator_text.set_text("REC" if active else "IDLE")
         self._recording_indicator_text.set_color("#7f1d1d" if active else "#475569")
 
-        if active and self._smoothed_teach_samples:
+        teach_mode = self._operation_mode == "teach"
+        if teach_mode and self._smoothed_teach_samples and not active:
+            label_text = f"Teach paused – {len(self._smoothed_teach_samples)} smoothed pts"
+        elif active and self._smoothed_teach_samples:
             label_text = f"Smoothed {len(self._smoothed_teach_samples)} pts ready"
         elif active:
             label_text = "Recording (teach mode)"
+        elif teach_mode:
+            label_text = "Recording paused (teach mode)"
         else:
             label_text = "Recording paused"
         self._recording_indicator_label.set_text(label_text)
