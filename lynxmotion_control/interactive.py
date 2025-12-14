@@ -224,6 +224,7 @@ class InteractiveArm:
         self._teach_recording: bool = False
         self._pre_teach_target_position: np.ndarray | None = None
         self._pre_teach_joints: list[float] | None = None
+        self._pre_teach_full_pose: list[float] | None = None
         self._mode_toggle_buttons: dict[str, Button] = {}
         self._recording_indicator: Circle | None = None
         self._recording_indicator_text = None
@@ -579,6 +580,7 @@ class InteractiveArm:
     def _sync_leds(self, *, fault_just_triggered: bool = False) -> None:
         teach_mode_active = self._operation_mode == "teach" or self._calibration_active
         teach_recording = self._teach_recording or self._calibration_guide_active
+        calibration_active = self._calibration_active
         if self._fault_active:
             state = RobotISOState.FAULT
         elif teach_mode_active:
@@ -594,6 +596,12 @@ class InteractiveArm:
             teach_recording=teach_recording,
             fault_just_triggered=fault_just_triggered,
         )
+
+        if calibration_active:
+            self.status_leds.set_attention(
+                active=True, transitioning=self._motion_active or self._playback_active
+            )
+            self.status_leds.set_ready(active=False)
 
     # ------------------------------------------------------------------
     # LED status display
@@ -960,6 +968,10 @@ class InteractiveArm:
             self._setpoint_position = np.array(self._pre_teach_target_position)
         if self._pre_teach_joints is not None:
             self._setpoint_joints = list(self._pre_teach_joints)
+
+        if self._pre_teach_full_pose is not None:
+            self.commanded_joints = list(self._pre_teach_full_pose)
+            self._last_commanded_raw = tuple(self._pre_teach_full_pose)
 
         self.target[:] = final_target
         self.update_robot(move_time_ms=self._return_from_teach_move_time_ms)
@@ -1556,14 +1568,29 @@ class InteractiveArm:
 
     def _remember_pose_before_teach(self) -> None:
         self._pre_teach_target_position = np.array(self.target, dtype=float)
-        if self._setpoint_joints:
-            self._pre_teach_joints = list(self._setpoint_joints)
-        elif self.commanded_joints:
+        if self.commanded_joints:
             self._pre_teach_joints = list(self.commanded_joints[:4])
+        elif self._setpoint_joints:
+            self._pre_teach_joints = list(self._setpoint_joints)
         elif self.current_joints:
             self._pre_teach_joints = list(self.current_joints[:4])
         else:
             self._pre_teach_joints = None
+
+        if self._pre_teach_joints is not None:
+            if self.commanded_joints and len(self.commanded_joints) >= 6:
+                wrist_rotation = self.commanded_joints[4]
+                gripper_angle = self.commanded_joints[5]
+            else:
+                wrist_rotation = self.wrist_rotation if hasattr(self, "wrist_rotation") else 0.0
+                gripper_angle = self.gripper_angle if hasattr(self, "gripper_angle") else 0.0
+
+            self._pre_teach_full_pose = list(self._pre_teach_joints) + [
+                wrist_rotation,
+                gripper_angle,
+            ]
+        else:
+            self._pre_teach_full_pose = None
 
     def _enter_teach_mode(self) -> None:
         self._teach_recording = False
