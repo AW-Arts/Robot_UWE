@@ -338,6 +338,19 @@ class InteractiveArm:
             target=self._command_worker, name="al5a-command-worker", daemon=True
         )
         self._command_thread.start()
+
+        self._calibration_active = False
+        self._calibration_button: Button | None = None
+        self._set_vertical_button: Button | None = None
+        self._calibration_timer = None
+        self._calibration_guide_active = False
+        self._calibration_steps: list[tuple[int, str]] = []
+        self._calibration_step_index: int | None = None
+        self._calibration_status_text = None
+        self._calibration_progress_text = None
+        self._calibration_angle_box: TextBox | None = None
+        self._updating_calibration_angle_box = False
+
         self._initialise_status_leds()
 
         self.drag_state = DragState()
@@ -444,17 +457,6 @@ class InteractiveArm:
         self.figure.canvas.mpl_connect("key_release_event", self._on_key_release)
         self.figure.canvas.mpl_connect("resize_event", self._on_canvas_resized)
 
-        self._calibration_active = False
-        self._calibration_button: Button | None = None
-        self._set_vertical_button: Button | None = None
-        self._calibration_timer = None
-        self._calibration_guide_active = False
-        self._calibration_steps: list[tuple[int, str]] = []
-        self._calibration_step_index: int | None = None
-        self._calibration_status_text = None
-        self._calibration_progress_text = None
-        self._calibration_angle_box: TextBox | None = None
-        self._updating_calibration_angle_box = False
         self._calibration_overlay = self.ax.text2D(
             0.98,
             0.95,
