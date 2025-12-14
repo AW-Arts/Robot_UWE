@@ -51,6 +51,11 @@ The window shows a top-down view of the arm.  Drag the red target to reposition
 the end-effector in the XY plane and use the mouse wheel to move it up or down.
 Commands are streamed to the controller with the configured travel time.
 
+Use the **Modes** panel to switch between:
+- **Live Mode:** sends IK jogs, joint jogs, gripper changes, and subroutines to the real robot in real time.
+- **Teach Mode:** mirrors the Live UI but drives only the digital twin while auto-recording every move with timestamps, gripper states, and dwell metadata; recordings auto-save and can be smoothed before finalizing.
+- **Run Mode:** the only mode that replays routines on hardware, gated by an explicit **Arm + confirm run** step to prevent accidental motion.
+
 ## Running the interactive controller (MATLAB)
 
 If you prefer to remain in MATLAB, use the `al5a_teach.m` helper which is built
@@ -83,6 +88,9 @@ workflows aligned.
   the command rate or batching updates if your hardware requires it.
 - When a manual servo adjustment reaches a configured limit the controller logs
   a warning but still re-sends the command so the hardware stays in sync.
+- See `docs/teach_mode.md` for a breakdown of Live Mode vs. Teach Mode, the
+  post-teach smoothing step, and the Run Mode confirmation rule that prevents
+  accidental motion on hardware.
 
 ## Status LEDs
 
