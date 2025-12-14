@@ -222,6 +222,8 @@ class InteractiveArm:
         self._last_teach_subroutine_path: Path | None = None
         self._last_teach_status: str = ""
         self._teach_recording: bool = False
+        self._pre_teach_target_position: np.ndarray | None = None
+        self._pre_teach_joints: list[float] | None = None
         self._mode_toggle_buttons: dict[str, Button] = {}
         self._recording_indicator: Circle | None = None
         self._recording_indicator_text = None
@@ -327,6 +329,7 @@ class InteractiveArm:
         self._skip_next_command = False
         self._smoothing_step_ms = 60
         self._min_smoothing_segments = 5
+        self._return_from_teach_move_time_ms = 10_000
         self._default_max_joint_speed = math.radians(60.0) / 0.2  # ~300°/s
         self._joint_max_speeds: dict[int, float] = {
             0: math.radians(60.0) / 0.23,  # HS-755HB
@@ -919,7 +922,7 @@ class InteractiveArm:
         # matches the setpoint immediately after homing.
         self._update_visuals(clamped_home)
 
-    def update_robot(self) -> None:
+    def update_robot(self, *, move_time_ms: int | None = None) -> None:
         requested = self._clamp_target(self.target)
         self.target[:] = requested
         compensated_pitch = self._apply_wrist_extension_compensation(
@@ -942,11 +945,24 @@ class InteractiveArm:
         full_joints = self._clamp_joint_list(full_joints)
         self.commanded_joints = list(full_joints)
         self._send_move_command(
-            full_joints, move_time_ms=self.move_time_ms, soft_start=True
+            full_joints,
+            move_time_ms=self.move_time_ms if move_time_ms is None else move_time_ms,
+            soft_start=True,
         )
         self.figure.canvas.draw_idle()
 
         self._update_raw_angle_button_visual()
+
+    def _resume_live_mode_from_teach(self) -> None:
+        final_target = np.array(self.target, dtype=float)
+        if self._pre_teach_target_position is not None:
+            self.target[:] = self._pre_teach_target_position
+            self._setpoint_position = np.array(self._pre_teach_target_position)
+        if self._pre_teach_joints is not None:
+            self._setpoint_joints = list(self._pre_teach_joints)
+
+        self.target[:] = final_target
+        self.update_robot(move_time_ms=self._return_from_teach_move_time_ms)
 
     def _slider_value_from_pitch(self, pitch: float) -> float:
         clamped = float(np.clip(pitch, *self._wrist_pitch_limits))
@@ -1525,18 +1541,29 @@ class InteractiveArm:
             return
 
         previous_mode = self._operation_mode
+        self._operation_mode = mode
 
         if previous_mode == "teach" and mode != "teach":
             self._pause_teach_recording(status="Switched to Live mode; recording paused.")
             self._finalise_teach_session(auto_save=True)
-
-        self._operation_mode = mode
-
-        if mode == "teach" and previous_mode != "teach":
+            self._resume_live_mode_from_teach()
+        elif mode == "teach" and previous_mode != "teach":
+            self._remember_pose_before_teach()
             self._enter_teach_mode()
 
         self._update_mode_controls()
         self._sync_leds()
+
+    def _remember_pose_before_teach(self) -> None:
+        self._pre_teach_target_position = np.array(self.target, dtype=float)
+        if self._setpoint_joints:
+            self._pre_teach_joints = list(self._setpoint_joints)
+        elif self.commanded_joints:
+            self._pre_teach_joints = list(self.commanded_joints[:4])
+        elif self.current_joints:
+            self._pre_teach_joints = list(self.current_joints[:4])
+        else:
+            self._pre_teach_joints = None
 
     def _enter_teach_mode(self) -> None:
         self._teach_recording = False

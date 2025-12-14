@@ -311,6 +311,24 @@ def test_teach_waypoints_preserve_move_and_dwell(monkeypatch, interactive_module
         assert waypoints[1].duration == pytest.approx(1.31, rel=1e-3)
 
 
+def test_returning_from_teach_moves_slowly(monkeypatch, interactive_module) -> None:
+    controller = _BasicController()
+    with _prepare_arm(
+        monkeypatch, interactive_module, controller, move_time_ms=500
+    ) as arm:
+        arm._command_queue.commands.clear()  # type: ignore[attr-defined]
+        arm._set_operation_mode("teach")
+
+        new_target = np.array([0.12, -0.03, 0.18])
+        arm.target[:] = new_target
+
+        arm._set_operation_mode("live")
+
+        assert arm._command_queue.commands  # type: ignore[attr-defined]
+        _, move_time, _ = arm._command_queue.commands[-1]  # type: ignore[attr-defined]
+        assert move_time == 10_000
+
+
 def test_zero_reference_lines_follow_current_pose(monkeypatch, interactive_module) -> None:
     controller = _BasicController()
     with _prepare_arm(monkeypatch, interactive_module, controller) as arm:
