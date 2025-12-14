@@ -274,6 +274,43 @@ def test_teach_recording_throttles_samples(monkeypatch, interactive_module) -> N
         assert second.dwell_ms == pytest.approx(300, rel=0.01)
 
 
+def test_teach_waypoints_preserve_move_and_dwell(monkeypatch, interactive_module) -> None:
+    controller = _BasicController()
+    with _prepare_arm(monkeypatch, interactive_module, controller) as arm:
+        samples = [
+            interactive_module.TeachSample(
+                timestamp=0.0,
+                joints=(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+                cartesian=(0.0, 0.0, 0.0),
+                wrist_pitch=0.0,
+                wrist_rotation=0.0,
+                gripper_angle=0.0,
+                move_time_ms=50,
+                dwell_ms=0,
+                label=None,
+            ),
+            interactive_module.TeachSample(
+                timestamp=1.315,
+                joints=(0.1, 0.1, 0.1, 0.1, 0.1, 0.1),
+                cartesian=(0.1, 0.0, 0.0),
+                wrist_pitch=5.0,
+                wrist_rotation=10.0,
+                gripper_angle=15.0,
+                move_time_ms=60,
+                dwell_ms=1250,
+                label=None,
+            ),
+        ]
+
+        waypoints = arm._teach_samples_to_waypoints(samples)
+
+        assert len(waypoints) == 2
+        # First waypoint clamps to minimum duration
+        assert waypoints[0].duration == pytest.approx(0.1)
+        # Second waypoint should combine move and dwell time
+        assert waypoints[1].duration == pytest.approx(1.31, rel=1e-3)
+
+
 def test_zero_reference_lines_follow_current_pose(monkeypatch, interactive_module) -> None:
     controller = _BasicController()
     with _prepare_arm(monkeypatch, interactive_module, controller) as arm:
