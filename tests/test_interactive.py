@@ -73,6 +73,19 @@ def _prepare_arm(monkeypatch, interactive_module, controller, *, move_time_ms: i
         interactive_module.plt.close(arm.figure)
 
 
+def _install_fake_clock(monkeypatch, interactive_module, *, start: float = 100.0):
+    current = {"now": start}
+
+    def monotonic():
+        return current["now"]
+
+    def advance(seconds: float) -> None:
+        current["now"] += seconds
+
+    monkeypatch.setattr(interactive_module.time, "monotonic", monotonic)
+    return advance
+
+
 def test_initialisation_queues_initial_move(monkeypatch, interactive_module) -> None:
     controller = _BasicController()
     with _prepare_arm(monkeypatch, interactive_module, controller) as arm:
@@ -218,6 +231,47 @@ def test_leds_follow_calibration_state(monkeypatch, interactive_module) -> None:
         assert after["yellow"].pattern == "off"
         assert after["amber"].pattern == "off"
         assert after["green"].pattern == "solid"
+
+
+def test_teach_recording_starts_at_zero(monkeypatch, interactive_module) -> None:
+    controller = _BasicController()
+    advance = _install_fake_clock(monkeypatch, interactive_module, start=50.0)
+
+    with _prepare_arm(monkeypatch, interactive_module, controller) as arm:
+        arm._set_operation_mode("teach")
+        arm._start_teach_session()
+
+        advance(5.0)
+        arm._record_teach_sample((1.0, 2.0, 3.0, 4.0, 5.0, 6.0), move_time_ms=None)
+
+        assert len(arm._teach_samples) == 1
+        first = arm._teach_samples[0]
+        assert first.timestamp == 0.0
+        assert first.dwell_ms == 0
+
+
+def test_teach_recording_throttles_samples(monkeypatch, interactive_module) -> None:
+    controller = _BasicController()
+    advance = _install_fake_clock(monkeypatch, interactive_module, start=80.0)
+
+    with _prepare_arm(monkeypatch, interactive_module, controller) as arm:
+        arm._set_operation_mode("teach")
+        arm._start_teach_session()
+
+        arm._record_teach_sample((0.0, 0.1, 0.2, 0.3, 0.4, 0.5), move_time_ms=None)
+        assert len(arm._teach_samples) == 1
+
+        advance(0.05)
+        arm._record_teach_sample((0.5, 0.4, 0.3, 0.2, 0.1, 0.0), move_time_ms=None)
+        assert len(arm._teach_samples) == 1
+
+        advance(0.25)
+        arm._record_teach_sample((0.6, 0.5, 0.4, 0.3, 0.2, 0.1), move_time_ms=None)
+        assert len(arm._teach_samples) == 2
+
+        second = arm._teach_samples[1]
+        assert second.timestamp == pytest.approx(0.3)
+        assert second.dwell_ms == pytest.approx(300, rel=0.01)
 
 
 def test_zero_reference_lines_follow_current_pose(monkeypatch, interactive_module) -> None:
