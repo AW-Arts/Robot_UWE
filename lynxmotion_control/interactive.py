@@ -1722,11 +1722,18 @@ class InteractiveArm:
             dwell_ms = sample.dwell_ms or 0
             duration_ms = move_ms + dwell_ms
 
-            if duration_ms <= 0 and index > 0:
+            if index > 0:
                 previous = samples[index - 1]
-                duration_ms = int(
+                elapsed_ms = int(
                     max(0.0, (sample.timestamp - previous.timestamp) * 1000)
                 )
+                if elapsed_ms > 0:
+                    # Prefer the recorded timing between samples so teach playback
+                    # mirrors the original recording rate. Any move/dwell metadata
+                    # longer than the real elapsed time is clamped to the recorded
+                    # interval to avoid stretching the routine when move_time_ms
+                    # defaults to 1s per keyframe.
+                    duration_ms = min(duration_ms, elapsed_ms) if duration_ms > 0 else elapsed_ms
             if duration_ms <= 0:
                 duration_ms = 200
 
