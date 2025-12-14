@@ -26,7 +26,7 @@ from .al5a_kinematics import (
     ServoConfig,
 )
 from .led_driver import build_drive_leds, load_led_config
-from .status_leds import LEDState, StatusLEDController
+from .status_leds import LEDState, RobotISOState, StatusLEDController
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -189,6 +189,7 @@ class InteractiveArm:
         self._fault_active = False
         self._motion_active = False
         self._playback_active = False
+        self._base_iso_state = RobotISOState.CONNECTED_NOT_ENABLED
         led_config = load_led_config()
         self._drive_leds_callback = build_drive_leds(
             led_config,
@@ -477,11 +478,8 @@ class InteractiveArm:
         return _writer
 
     def _initialise_status_leds(self) -> None:
-        self.status_leds.set_illumination(on=True, dim=True)
-        self.status_leds.set_controller_link(connected=True, heartbeat=False)
-        self.status_leds.set_ready(active=True, running=False)
-        self.status_leds.set_attention(active=False, transitioning=False)
-        self.status_leds.set_teach_mode(active=False, blinking=False)
+        self._base_iso_state = RobotISOState.CONNECTED_NOT_ENABLED
+        self._sync_leds()
 
     def _on_leds_changed(self, state: dict[str, LEDState]) -> None:
         self._latest_led_states = state
@@ -494,32 +492,16 @@ class InteractiveArm:
                 pass
 
     def _update_idle_leds(self) -> None:
-        if self._fault_active:
-            return
-        self.status_leds.set_controller_link(connected=True, heartbeat=False)
-        self.status_leds.set_attention(
-            active=self._calibration_active,
-            transitioning=self._calibration_guide_active,
-        )
-        self.status_leds.set_teach_mode(
-            active=self._calibration_active,
-            blinking=self._calibration_guide_active,
-        )
-        ready = not (self._calibration_active or self._motion_active or self._playback_active)
-        self.status_leds.set_ready(active=ready, running=False)
+        if not (self._calibration_active or self._motion_active or self._playback_active):
+            self._base_iso_state = RobotISOState.READY_IDLE
+        self._sync_leds()
 
     def _mark_motion_active(self) -> None:
         if self._fault_active:
             self._fault_active = False
-            self.status_leds.set_fault(active=False)
         self._motion_active = True
-        self.status_leds.set_controller_link(connected=True, heartbeat=True)
-        self.status_leds.set_ready(active=True, running=True)
-        if self._calibration_active:
-            self.status_leds.set_attention(active=True, transitioning=True)
-            self.status_leds.set_teach_mode(
-                active=True, blinking=self._calibration_guide_active
-            )
+        self._base_iso_state = RobotISOState.RUNNING
+        self._sync_leds()
 
     def _mark_motion_complete(self) -> None:
         if hasattr(self._command_queue, "empty") and not self._command_queue.empty():
@@ -527,30 +509,37 @@ class InteractiveArm:
         if self._playback_active:
             return
         self._motion_active = False
-        self._update_idle_leds()
+        self._base_iso_state = RobotISOState.READY_IDLE
+        self._sync_leds()
 
     def _mark_fault(self) -> None:
         self._fault_active = True
         self._motion_active = False
-        self.status_leds.set_fault(active=True, just_triggered=True)
-        self.status_leds.set_ready(active=False, running=False)
-        self.status_leds.set_attention(active=False, transitioning=False)
+        self._sync_leds(fault_just_triggered=True)
 
     def _update_calibration_leds(self) -> None:
-        if self._fault_active:
-            return
-        self.status_leds.set_teach_mode(
-            active=self._calibration_active,
-            blinking=self._calibration_guide_active,
-        )
-        self.status_leds.set_attention(
-            active=self._calibration_active,
-            transitioning=self._calibration_guide_active,
-        )
         if self._calibration_active:
-            self.status_leds.set_ready(active=False, running=self._motion_active)
-        elif not self._motion_active and not self._playback_active:
-            self.status_leds.set_ready(active=True, running=False)
+            self._base_iso_state = RobotISOState.TEACH_MODE
+        elif not (self._motion_active or self._playback_active):
+            self._base_iso_state = RobotISOState.READY_IDLE
+        self._sync_leds()
+
+    def _sync_leds(self, *, fault_just_triggered: bool = False) -> None:
+        if self._fault_active:
+            state = RobotISOState.FAULT
+        elif self._motion_active or self._playback_active:
+            state = RobotISOState.RUNNING
+        elif self._calibration_active:
+            state = RobotISOState.TEACH_MODE
+        else:
+            state = self._base_iso_state
+
+        self.status_leds.set_iso_state(
+            state,
+            teach_active=self._calibration_active,
+            teach_recording=self._calibration_guide_active,
+            fault_just_triggered=fault_just_triggered,
+        )
 
     # ------------------------------------------------------------------
     # LED status display
