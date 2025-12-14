@@ -100,9 +100,10 @@ workflows aligned.
   - Linux/other: `~/.config/lynxmotion_al5a`
 - The Motor configuration panel includes an **Open config folder** button that
   opens the directory in your OS file manager.
-- On first launch the app seeds that folder with bundled defaults (servo
-  offsets, LED pin map, etc.) so users start with a working configuration they
-  can edit.
+- On first launch the app seeds that folder **only if it is empty**, copying the
+  entire bundled defaults directory (servo offsets, LED pin map, saved
+  subroutines/timelines, etc.) so users start with a working configuration they
+  can edit or replace.
 
 ## Status LEDs
 

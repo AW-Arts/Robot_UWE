@@ -46,7 +46,9 @@ def seed_default_configs(
 ) -> None:
     """Copy bundled defaults into the user's config folder if missing.
 
-    The copy is idempotent: existing user files are never overwritten.
+    The copy only runs when the user config directory is empty. This allows the
+    bundled defaults (including any nested folders) to serve as a starter kit
+    without overwriting user content on subsequent launches.
     """
 
     bundle = bundle_dir or CONFIG_BUNDLE_DIR
@@ -54,20 +56,21 @@ def seed_default_configs(
     if not bundle.exists() or not bundle.is_dir():
         return
 
-    target.mkdir(parents=True, exist_ok=True)
-    for item in bundle.iterdir():
-        destination = target / item.name
-        if destination.exists():
-            continue
+    # Skip seeding once the user has created or saved any files.
+    if target.exists():
         try:
-            if item.is_dir():
-                shutil.copytree(item, destination)
-            elif item.is_file():
-                shutil.copy2(item, destination)
-        except Exception:  # pragma: no cover - robustness during startup
-            _LOGGER.warning(
-                "Failed to seed default config %s to %s", item, destination, exc_info=True
-            )
+            next(target.iterdir())
+            return
+        except StopIteration:
+            pass
+
+    target.mkdir(parents=True, exist_ok=True)
+    try:
+        shutil.copytree(bundle, target, dirs_exist_ok=True)
+    except Exception:  # pragma: no cover - robustness during startup
+        _LOGGER.warning(
+            "Failed to seed default configs from %s to %s", bundle, target, exc_info=True
+        )
 
 
 def reveal_config_folder(path: Path | None = None) -> None:
