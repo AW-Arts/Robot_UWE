@@ -214,13 +214,17 @@ class InteractiveArm:
         self._invert_button_inactive_color = "0.85"
         self._invert_button_active_color = "#90ee90"
         self._operation_mode: str = "live"
-        self._run_mode_armed = False
         self._teach_session_start: float | None = None
         self._last_teach_timestamp: float | None = None
         self._teach_samples: list[TeachSample] = []
         self._smoothed_teach_samples: list[TeachSample] = []
         self._last_teach_save_path: Path | None = None
+        self._last_teach_subroutine_path: Path | None = None
         self._last_teach_status: str = ""
+        self._mode_toggle_buttons: dict[str, Button] = {}
+        self._recording_indicator: Circle | None = None
+        self._recording_indicator_text = None
+        self._recording_indicator_label = None
         TEACH_SESSION_DIR.mkdir(parents=True, exist_ok=True)
         self._fault_active = False
         self._motion_active = False
@@ -492,10 +496,6 @@ class InteractiveArm:
         self._clear_timeline_button: Button | None = None
         self._play_timeline_button: Button | None = None
         self._mode_status_text = None
-        self._live_mode_button: Button | None = None
-        self._teach_mode_button: Button | None = None
-        self._run_mode_button: Button | None = None
-        self._arm_run_button: Button | None = None
         self._smooth_teach_button: Button | None = None
         self._save_teach_button: Button | None = None
         self.waypoint_ax = None
@@ -570,19 +570,21 @@ class InteractiveArm:
         self._sync_leds()
 
     def _sync_leds(self, *, fault_just_triggered: bool = False) -> None:
+        teach_mode_active = self._operation_mode == "teach" or self._calibration_active
+        teach_recording = self._operation_mode == "teach" or self._calibration_guide_active
         if self._fault_active:
             state = RobotISOState.FAULT
+        elif teach_mode_active:
+            state = RobotISOState.TEACH_MODE
         elif self._motion_active or self._playback_active:
             state = RobotISOState.RUNNING
-        elif self._calibration_active:
-            state = RobotISOState.TEACH_MODE
         else:
             state = self._base_iso_state
 
         self.status_leds.set_iso_state(
             state,
-            teach_active=self._calibration_active,
-            teach_recording=self._calibration_guide_active,
+            teach_active=teach_mode_active,
+            teach_recording=teach_recording,
             fault_just_triggered=fault_just_triggered,
         )
 
@@ -591,11 +593,12 @@ class InteractiveArm:
     def _build_led_status_panel(self) -> None:
         """Create a left-hand summary showing simulated stack lights."""
 
-        self._led_panel_ax = self.figure.add_axes([0.02, 0.08, 0.12, 0.86])
+        self._led_panel_ax = self.figure.add_axes([0.02, 0.08, 0.12, 0.8])
         self._led_panel_ax.set_xlim(0.0, 1.0)
         self._led_panel_ax.set_ylim(0.0, 1.0)
         self._led_panel_ax.axis("off")
         self._led_panel_ax.set_facecolor("#f8fafc")
+        self._led_panel_ax.set_aspect("equal")
 
         self._led_panel_ax.text(
             0.5,
@@ -1187,9 +1190,11 @@ class InteractiveArm:
     def _create_controls(self) -> None:
         """Create on-figure UI elements organised into collapsible panels."""
 
-        self.figure.subplots_adjust(left=0.16, right=0.575, top=0.965, bottom=0.08)
+        self.figure.subplots_adjust(left=0.16, right=0.575, top=0.955, bottom=0.08)
 
+        self._build_mode_toggle_strip()
         self._build_led_status_panel()
+        self._build_recording_indicator()
 
         self._panel_left = 0.61
         self._panel_bottom = 0.08
@@ -1262,6 +1267,64 @@ class InteractiveArm:
         self._refresh_waypoint_display()
         self._update_waypoint_duration_box()
 
+    def _build_mode_toggle_strip(self) -> None:
+        """Place always-visible Live/Teach toggle above the LED stack."""
+
+        self._mode_toggle_buttons = {}
+        label_ax = self.figure.add_axes([0.02, 0.94, 0.14, 0.03])
+        label_ax.axis("off")
+        label_ax.text(
+            0.0,
+            0.5,
+            "Mode",
+            ha="left",
+            va="center",
+            fontsize=9,
+            fontweight="bold",
+            color="#0f172a",
+        )
+
+        toggle_bottom = 0.885
+        button_width = 0.065
+        button_height = 0.05
+        gap = 0.01
+        for index, (mode, label) in enumerate((("live", "Live"), ("teach", "Teach"))):
+            left = 0.02 + index * (button_width + gap)
+            ax = self.figure.add_axes([left, toggle_bottom, button_width, button_height])
+            button = Button(ax, label, hovercolor="#d9e8ff")
+            button.on_clicked(lambda _event, selected=mode: self._set_operation_mode(selected))
+            self._mode_toggle_buttons[mode] = button
+
+    def _build_recording_indicator(self) -> None:
+        indicator_ax = self.figure.add_axes([0.87, 0.93, 0.12, 0.05])
+        indicator_ax.axis("off")
+        indicator_ax.set_facecolor("#f8fafc")
+
+        indicator = Circle((0.12, 0.5), 0.09, transform=indicator_ax.transAxes)
+        indicator_ax.add_patch(indicator)
+        text = indicator_ax.text(
+            0.26,
+            0.5,
+            "REC",
+            ha="left",
+            va="center",
+            fontsize=9,
+            fontweight="bold",
+        )
+        label = indicator_ax.text(
+            0.5,
+            0.5,
+            "Recording paused",
+            ha="left",
+            va="center",
+            fontsize=8,
+            color="#0f172a",
+        )
+
+        self._recording_indicator = indicator
+        self._recording_indicator_text = text
+        self._recording_indicator_label = label
+
     def _panel_axes(
         self, rel_left: float, rel_bottom: float, rel_width: float, rel_height: float
     ):
@@ -1314,7 +1377,7 @@ class InteractiveArm:
         title_ax.text(
             0.0,
             0.6,
-            "Mode selection",
+            "Teach tools & status",
             va="center",
             ha="left",
             fontsize=10,
@@ -1323,7 +1386,7 @@ class InteractiveArm:
         title_ax.text(
             0.0,
             0.0,
-            "Live = real robot, Teach = virtual with auto-recording, Run = guarded playback.",
+            "Use the top-left toggle to flip between Live (hardware) and Teach (virtual recording).",
             va="center",
             ha="left",
             fontsize=8,
@@ -1339,9 +1402,9 @@ class InteractiveArm:
         )
         info_ax.axis("off")
         info_text = (
-            "Live Mode: stream IK jogs, joint jogs, gripper, subroutines to hardware in real time.\n"
-            "Teach Mode: identical controls but no hardware output; updates only the digital twin and auto-records a routine.\n"
-            "Run Mode: only mode that executes a routine on hardware; requires explicit ARM + RUN confirmation."
+            "Live Mode streams commands to the arm.\n"
+            "Teach Mode mirrors every move to the digital twin only, auto-recording the routine for later playback.\n"
+            "Watch the top-right REC badge and the yellow LED overlay while teaching; save recordings into subroutines to use them in the timeline."
         )
         info_ax.text(
             0.0,
@@ -1355,58 +1418,12 @@ class InteractiveArm:
         )
         axes.append(info_ax)
 
-        button_width = (1.0 - 4 * self._panel_margin) / 3
         button_height = 0.08
-        button_bottom = self._panel_content_top - 0.34
-
-        live_ax = self._panel_axes(
-            self._panel_margin,
-            button_bottom,
-            button_width,
-            button_height,
-        )
-        self._live_mode_button = Button(live_ax, "Live Mode", hovercolor="#d9e8ff")
-        self._live_mode_button.on_clicked(lambda _event: self._set_operation_mode("live"))
-        self._panel_interactive_widgets[panel_key].append(self._live_mode_button)
-        axes.append(live_ax)
-
-        teach_ax = self._panel_axes(
-            self._panel_margin * 2 + button_width,
-            button_bottom,
-            button_width,
-            button_height,
-        )
-        self._teach_mode_button = Button(teach_ax, "Teach Mode", hovercolor="#d9e8ff")
-        self._teach_mode_button.on_clicked(lambda _event: self._set_operation_mode("teach"))
-        self._panel_interactive_widgets[panel_key].append(self._teach_mode_button)
-        axes.append(teach_ax)
-
-        run_ax = self._panel_axes(
-            self._panel_margin * 3 + button_width * 2,
-            button_bottom,
-            button_width,
-            button_height,
-        )
-        self._run_mode_button = Button(run_ax, "Run Mode", hovercolor="#ffe4d5")
-        self._run_mode_button.on_clicked(lambda _event: self._set_operation_mode("run"))
-        self._panel_interactive_widgets[panel_key].append(self._run_mode_button)
-        axes.append(run_ax)
-
-        guard_bottom = button_bottom - 0.1
-        arm_ax = self._panel_axes(
-            self._panel_margin,
-            guard_bottom,
-            (1.0 - 3 * self._panel_margin) / 2,
-            button_height,
-        )
-        self._arm_run_button = Button(arm_ax, "Arm + confirm run", hovercolor="#ffd7b5")
-        self._arm_run_button.on_clicked(self._toggle_run_arm)
-        self._panel_interactive_widgets[panel_key].append(self._arm_run_button)
-        axes.append(arm_ax)
+        button_bottom = self._panel_content_top - 0.3
 
         status_ax = self._panel_axes(
             self._panel_margin,
-            guard_bottom - 0.12,
+            button_bottom - 0.12,
             1.0 - 2 * self._panel_margin,
             0.1,
         )
@@ -1474,11 +1491,11 @@ class InteractiveArm:
         summary_ax.text(
             0.0,
             0.3,
-            "Run Mode demands an explicit ARM + RUN click before any hardware motion will occur.",
+            "Saved teach recordings are written to Subroutines so they can be dropped onto the timeline immediately.",
             va="center",
             ha="left",
             fontsize=8,
-            color="#b45309",
+            color="#0f172a",
             fontweight="bold",
         )
         axes.append(summary_ax)
@@ -1487,12 +1504,7 @@ class InteractiveArm:
         return axes
 
     def _set_operation_mode(self, mode: str) -> None:
-        if mode not in {"live", "teach", "run"}:
-            return
-
-        if mode == "run" and not self._run_mode_armed:
-            self._last_teach_status = "Arm + confirm run before enabling hardware playback."
-            self._update_mode_controls()
+        if mode not in {"live", "teach"}:
             return
 
         if self._operation_mode == "teach" and mode != "teach":
@@ -1502,21 +1514,9 @@ class InteractiveArm:
             self._start_teach_session()
 
         self._operation_mode = mode
-        if mode != "run":
-            self._run_mode_armed = False
 
         self._update_mode_controls()
-
-    def _toggle_run_arm(self, _event=None) -> None:  # pragma: no cover - UI interaction
-        self._run_mode_armed = not self._run_mode_armed
-        if not self._run_mode_armed and self._operation_mode == "run":
-            self._operation_mode = "live"
-        self._last_teach_status = (
-            "Run Mode armed. Confirm Run to allow hardware playback."
-            if self._run_mode_armed
-            else "Run Mode disarmed. Hardware playback blocked."
-        )
-        self._update_mode_controls()
+        self._sync_leds()
 
     def _start_teach_session(self) -> None:
         self._teach_samples = []
@@ -1616,9 +1616,42 @@ class InteractiveArm:
         )
         self._update_mode_controls()
 
+    def _teach_samples_to_waypoints(self, samples: list[TeachSample]) -> list[Waypoint]:
+        waypoints: list[Waypoint] = []
+        if not samples:
+            return waypoints
+
+        for index, sample in enumerate(samples):
+            if sample.cartesian is not None:
+                position = np.array(sample.cartesian, dtype=float)
+            else:
+                position = np.array(self.target, dtype=float)
+
+            duration_ms = sample.move_time_ms
+            if (duration_ms is None or duration_ms <= 0) and index > 0:
+                previous = samples[index - 1]
+                duration_ms = int(
+                    max(0.0, (sample.timestamp - previous.timestamp) * 1000)
+                )
+            if duration_ms is None or duration_ms <= 0:
+                duration_ms = sample.dwell_ms or 200
+
+            waypoints.append(
+                Waypoint(
+                    position=position,
+                    duration=max(0.1, duration_ms / 1000.0),
+                    wrist_pitch=sample.wrist_pitch,
+                    wrist_rotation=sample.wrist_rotation,
+                    gripper_angle=sample.gripper_angle,
+                )
+            )
+
+        return waypoints
+
     def _save_teach_session(self, *, include_smoothed: bool = True) -> Path | None:
         if not self._teach_samples:
             return None
+        self._last_teach_subroutine_path = None
         TEACH_SESSION_DIR.mkdir(parents=True, exist_ok=True)
         timestamp = time.strftime("%Y%m%d-%H%M%S")
         path = TEACH_SESSION_DIR / f"teach_session_{timestamp}.json"
@@ -1633,6 +1666,7 @@ class InteractiveArm:
             "duration_s": routine_duration,
             "samples": [sample.to_dict() for sample in self._teach_samples],
         }
+        export_samples: list[TeachSample] = list(self._teach_samples)
         if include_smoothed and self._smoothed_teach_samples:
             payload.update(
                 {
@@ -1645,8 +1679,43 @@ class InteractiveArm:
                     ],
                 }
             )
+            export_samples = list(self._smoothed_teach_samples)
+
         path.write_text(json.dumps(payload, indent=2))
         self._last_teach_save_path = path
+        self._last_teach_subroutine_path = self._save_teach_subroutine(
+            export_samples, timestamp
+        )
+        return path
+
+    def _save_teach_subroutine(
+        self, samples: list[TeachSample], timestamp: str
+    ) -> Path | None:
+        waypoints = self._teach_samples_to_waypoints(samples)
+        if not waypoints:
+            return None
+        try:
+            SUBROUTINE_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+            name = f"Teach session {timestamp}"
+            slug = self._slugify_subroutine_name(name)
+            data = {
+                "name": name,
+                "slug": slug,
+                "waypoints": self._serialise_waypoints(waypoints),
+            }
+            path = SUBROUTINE_STORAGE_DIR / f"{slug}.json"
+            path.write_text(json.dumps(data, indent=2))
+        except Exception:
+            _LOGGER.warning(
+                "Failed to save teach recording as a subroutine", exc_info=True
+            )
+            return None
+
+        self._selected_subroutine_slug = slug
+        self._load_subroutine_catalog()
+        self._highlight_selected_subroutine()
+        self._update_subroutine_name_box()
+        self._update_timeline_entries_for_slug(slug)
         return path
 
     def _finalise_teach_session(self, _event=None, *, auto_save: bool = False) -> None:
@@ -1659,7 +1728,14 @@ class InteractiveArm:
 
         saved_path = self._save_teach_session(include_smoothed=True)
         if saved_path:
-            self._last_teach_status = f"Saved routine to {saved_path.name}"
+            subroutine_note = (
+                f" + {self._last_teach_subroutine_path.name}"
+                if self._last_teach_subroutine_path
+                else ""
+            )
+            self._last_teach_status = (
+                f"Saved routine to {saved_path.name}{subroutine_note}"
+            )
 
         if auto_save:
             self._teach_samples = []
@@ -1681,30 +1757,14 @@ class InteractiveArm:
                 button.hovercolor = "0.95"
             button.ax.set_facecolor(button.color)
 
-        _style_button(self._live_mode_button, self._operation_mode == "live")
-        _style_button(self._teach_mode_button, self._operation_mode == "teach")
-        _style_button(self._run_mode_button, self._operation_mode == "run", danger=True)
-
-        if self._arm_run_button is not None:
-            if self._run_mode_armed:
-                self._arm_run_button.color = "#ffdec3"
-                self._arm_run_button.hovercolor = "#ffdec3"
-                self._arm_run_button.label.set_text("Armed for Run")
-            else:
-                self._arm_run_button.color = "0.85"
-                self._arm_run_button.hovercolor = "0.95"
-                self._arm_run_button.label.set_text("Arm + confirm run")
-            self._arm_run_button.ax.set_facecolor(self._arm_run_button.color)
+        for mode, button in self._mode_toggle_buttons.items():
+            _style_button(button, self._operation_mode == mode)
 
         sample_count = len(self._teach_samples)
         smoothed_count = len(self._smoothed_teach_samples)
         status_parts = [f"Mode: {self._operation_mode.capitalize()}"]
         if self._operation_mode == "teach":
             status_parts.append("virtual outputs only")
-        if self._operation_mode == "run":
-            status_parts.append(
-                "ARMED" if self._run_mode_armed else "hardware blocked until armed"
-            )
         if sample_count:
             status_parts.append(f"{sample_count} recorded moves")
         if smoothed_count:
@@ -1715,7 +1775,13 @@ class InteractiveArm:
                 details = f"{details}\n{self._last_teach_status}"
             if self._last_teach_save_path:
                 details = f"{details}\nLast save: {self._last_teach_save_path.name}"
+            if self._last_teach_subroutine_path:
+                details = (
+                    f"{details}\nSubroutine: {self._last_teach_subroutine_path.name}"
+                )
             self._mode_status_text.set_text(details)
+
+        self._update_recording_indicator()
 
         smooth_enabled = sample_count > 0
         if self._smooth_teach_button is not None:
@@ -1726,6 +1792,35 @@ class InteractiveArm:
             self._save_teach_button.ax.set_alpha(1.0 if smooth_enabled else 0.4)
 
         self.figure.canvas.draw_idle()
+
+    def _update_recording_indicator(self) -> None:
+        if (
+            self._recording_indicator is None
+            or self._recording_indicator_text is None
+            or self._recording_indicator_label is None
+        ):
+            return
+
+        active = self._operation_mode == "teach"
+        color = "#ef4444" if active else "#94a3b8"
+        edge = "#7f1d1d" if active else "#cbd5e1"
+        self._recording_indicator.set_facecolor(color)
+        self._recording_indicator.set_edgecolor(edge)
+        self._recording_indicator.set_alpha(0.95 if active else 0.3)
+        self._recording_indicator_text.set_text("REC" if active else "IDLE")
+        self._recording_indicator_text.set_color("#7f1d1d" if active else "#475569")
+
+        if active and self._smoothed_teach_samples:
+            label_text = f"Smoothed {len(self._smoothed_teach_samples)} pts ready"
+        elif active:
+            label_text = "Recording (teach mode)"
+        else:
+            label_text = "Recording paused"
+        self._recording_indicator_label.set_text(label_text)
+        self._recording_indicator_label.set_color("#0f172a")
+
+        if self.figure.canvas is not None:
+            self.figure.canvas.draw_idle()
 
     def _build_movement_panel(self) -> list:
         panel_key = "movement"

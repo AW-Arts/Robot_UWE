@@ -47,4 +47,11 @@ def test_iso_truth_table_states() -> None:
     assert snapshot["green"].pattern == "solid"
     assert snapshot["yellow"].pattern == "solid"
     assert snapshot["amber"].pattern == "off"
+    assert snapshot["blue"].pattern == "off"
+
+    leds.set_iso_state(
+        RobotISOState.TEACH_MODE, teach_active=True, teach_recording=True
+    )
+    snapshot = leds.snapshot()
+    assert snapshot["yellow"].pattern == "blink_slow"
 
