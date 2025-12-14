@@ -1,6 +1,7 @@
 """Status LED helper following the industrial stack light scheme."""
 from __future__ import annotations
 
+from enum import Enum
 from dataclasses import dataclass
 from typing import Callable, Dict
 
@@ -11,6 +12,19 @@ class LEDState:
 
     pattern: str
     meaning: str
+
+
+class RobotISOState(Enum):
+    """ISO-style stack light truth table for common robot states."""
+
+    POWERED_OFF = "powered_off"
+    CONNECTED_NOT_ENABLED = "connected_not_enabled"
+    ENABLED_NOT_HOMED = "enabled_not_homed"
+    HOMING = "homing"
+    READY_IDLE = "ready_idle"
+    RUNNING = "running"
+    TEACH_MODE = "teach_mode"
+    FAULT = "fault"
 
 
 class StatusLEDController:
@@ -59,12 +73,105 @@ class StatusLEDController:
         self._set("yellow", pattern, "Teach / Calibration / Manual jog")
 
     def set_controller_link(self, *, connected: bool, heartbeat: bool = False) -> None:
-        pattern = "blink_slow" if connected and heartbeat else "solid" if connected else "off"
+        # Per the ISO truth table we surface host presence as solid blue; heartbeat
+        # is intentionally ignored to avoid mirroring the motion (green) LED.
+        pattern = "solid" if connected else "off"
         self._set("blue", pattern, "USB / Host link / Firmware heartbeat")
 
     def set_illumination(self, *, on: bool, dim: bool = False) -> None:
         pattern = "dim" if on and dim else "solid" if on else "off"
         self._set("white", pattern, "Illumination / Presence")
+
+    def set_iso_state(
+        self,
+        state: RobotISOState | str,
+        *,
+        teach_active: bool = False,
+        teach_recording: bool = False,
+        fault_just_triggered: bool = False,
+    ) -> None:
+        """Apply ISO-style stack light defaults for the given robot state."""
+
+        if isinstance(state, str):
+            state = RobotISOState(state)
+
+        patterns: dict[str, str]
+        if state == RobotISOState.POWERED_OFF:
+            patterns = {color: "off" for color in self._state.keys()}
+        elif state == RobotISOState.CONNECTED_NOT_ENABLED:
+            patterns = {
+                "red": "off",
+                "amber": "solid",
+                "green": "off",
+                "blue": "solid",
+                "yellow": "off",
+                "white": "solid",
+            }
+        elif state == RobotISOState.ENABLED_NOT_HOMED:
+            patterns = {
+                "red": "off",
+                "amber": "solid",
+                "green": "off",
+                "blue": "solid",
+                "yellow": "off",
+                "white": "solid",
+            }
+        elif state == RobotISOState.HOMING:
+            patterns = {
+                "red": "off",
+                "amber": "blink_slow",
+                "green": "off",
+                "blue": "solid",
+                "yellow": "off",
+                "white": "solid",
+            }
+        elif state == RobotISOState.READY_IDLE:
+            patterns = {
+                "red": "off",
+                "amber": "off",
+                "green": "solid",
+                "blue": "solid",
+                "yellow": "off",
+                "white": "solid",
+            }
+        elif state == RobotISOState.RUNNING:
+            patterns = {
+                "red": "off",
+                "amber": "off",
+                "green": "blink_slow",
+                "blue": "solid",
+                "yellow": "off",
+                "white": "solid",
+            }
+        elif state == RobotISOState.TEACH_MODE:
+            patterns = {
+                "red": "off",
+                "amber": "off",
+                "green": "solid",
+                "blue": "solid",
+                "yellow": "solid",
+                "white": "solid",
+            }
+        elif state == RobotISOState.FAULT:
+            patterns = {
+                "red": "blink_fast" if fault_just_triggered else "solid",
+                "amber": "off",
+                "green": "off",
+                "blue": "solid",
+                "yellow": "off",
+                "white": "solid",
+            }
+        else:
+            raise ValueError(f"Unrecognised ISO state: {state}")
+
+        # Apply overlays after the base ISO state.
+        yellow_pattern = "blink_slow" if teach_active and teach_recording else "solid"
+        if teach_active:
+            patterns["yellow"] = yellow_pattern
+
+        for color, pattern in patterns.items():
+            meaning = self._state[color].meaning
+            self._set(color, pattern, meaning)
 
     def _set(self, name: str, pattern: str, meaning: str) -> None:
         current = self._state.get(name)
@@ -79,4 +186,4 @@ class StatusLEDController:
                 pass
 
 
-__all__ = ["LEDState", "StatusLEDController"]
+__all__ = ["LEDState", "RobotISOState", "StatusLEDController"]
