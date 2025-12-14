@@ -92,12 +92,24 @@ workflows aligned.
   post-teach smoothing step, and the Run Mode confirmation rule that prevents
   accidental motion on hardware.
 
+### Configuration folder
+
+- Config files live in the per-OS app data folder:
+  - Windows: `%APPDATA%\lynxmotion_al5a`
+  - macOS: `~/Library/Application Support/lynxmotion_al5a`
+  - Linux/other: `~/.config/lynxmotion_al5a`
+- The Motor configuration panel includes an **Open config folder** button that
+  opens the directory in your OS file manager.
+- On first launch the app seeds that folder with bundled defaults (servo
+  offsets, LED pin map, etc.) so users start with a working configuration they
+  can edit.
+
 ## Status LEDs
 
 Stack lights are driven directly from unused SSC-32(U) servo channels (no extra
 GPIO). Follow the locked channel map, wiring rules, and behaviours in
-`docs/status_led_plan.md`, and configure the mapping in
-`~/.config/lynxmotion_al5a/led_pins.json`.
+`docs/status_led_plan.md`, and configure the mapping in the app data folder
+(`led_pins.json` alongside the other config files listed above).
 
 > Prototype limitation: Status indicators are driven using unused servo PWM
 > channels on the SSC-32(U). These outputs are not true GPIO and may exhibit
