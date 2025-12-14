@@ -258,6 +258,8 @@ class InteractiveArm:
         self._soft_start_min_time_ms = 4_000
         self._soft_start_min_segments = 18
         self._home_move_time_ms = move_time_ms
+        self._max_teach_samples_per_second = 10
+        self._teach_sample_min_interval = 1.0 / self._max_teach_samples_per_second
         self._loaded_hard_limits: dict[int, tuple[float, float]] = {}
         self._loaded_workspace: dict[str, tuple[float, float]] = {}
         self._servo_multiplier_limits = (0.8, 1.2)
@@ -1550,7 +1552,7 @@ class InteractiveArm:
     def _start_teach_session(self) -> None:
         self._teach_samples = []
         self._smoothed_teach_samples = []
-        self._teach_session_start = time.monotonic()
+        self._teach_session_start = None
         self._last_teach_timestamp = None
         self._teach_recording = True
         self._last_teach_status = "Teach Mode: recording virtual moves."
@@ -1586,13 +1588,20 @@ class InteractiveArm:
     ) -> None:
         if self._operation_mode != "teach" or not self._teach_recording:
             return
-        if self._teach_session_start is None:
-            self._teach_session_start = time.monotonic()
         now = time.monotonic()
-        if self._last_teach_timestamp is None:
-            self._last_teach_timestamp = self._teach_session_start or now
-        timestamp = now - (self._teach_session_start or now)
-        dwell_ms = int((now - (self._last_teach_timestamp or now)) * 1000)
+        if self._teach_samples:
+            if self._teach_sample_min_interval > 0:
+                elapsed = now - (self._last_teach_timestamp or now)
+                if elapsed < self._teach_sample_min_interval:
+                    return
+            if self._teach_session_start is None:
+                self._teach_session_start = now
+            timestamp = now - self._teach_session_start
+            dwell_ms = int((now - (self._last_teach_timestamp or now)) * 1000)
+        else:
+            self._teach_session_start = now
+            timestamp = 0.0
+            dwell_ms = 0
         cartesian = (
             tuple(map(float, self._setpoint_position))
             if self._setpoint_position is not None
