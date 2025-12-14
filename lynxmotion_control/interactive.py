@@ -1691,14 +1691,17 @@ class InteractiveArm:
             else:
                 position = np.array(self.target, dtype=float)
 
-            duration_ms = sample.move_time_ms
-            if (duration_ms is None or duration_ms <= 0) and index > 0:
+            move_ms = sample.move_time_ms or 0
+            dwell_ms = sample.dwell_ms or 0
+            duration_ms = move_ms + dwell_ms
+
+            if duration_ms <= 0 and index > 0:
                 previous = samples[index - 1]
                 duration_ms = int(
                     max(0.0, (sample.timestamp - previous.timestamp) * 1000)
                 )
-            if duration_ms is None or duration_ms <= 0:
-                duration_ms = sample.dwell_ms or 200
+            if duration_ms <= 0:
+                duration_ms = 200
 
             waypoints.append(
                 Waypoint(
