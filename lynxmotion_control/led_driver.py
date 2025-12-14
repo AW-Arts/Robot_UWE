@@ -11,12 +11,14 @@ import time
 from pathlib import Path
 from typing import Callable, Dict
 
+from .config_paths import CONFIG_ROOT
+
 from .serial_comm import SSC32Command
 from .status_leds import LEDState
 
 _LOGGER = logging.getLogger(__name__)
 
-CONFIG_PATH = Path.home() / ".config" / "lynxmotion_al5a" / "led_pins.json"
+CONFIG_PATH = CONFIG_ROOT / "led_pins.json"
 _ALLOWED_LEDS = {"red", "amber", "green", "yellow", "blue", "white"}
 _DEFAULT_SSC32_PULSES = {"off": 500, "on": 2000, "dim": 1300}
 _DEFAULT_SSC32_BLINK = {"slow_hz": 1.0, "fast_hz": 4.0}

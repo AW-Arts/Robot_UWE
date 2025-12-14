@@ -126,7 +126,12 @@ Blink timing is implemented in software using a timer-based loop (20–50 ms tic
 
 ## 9. Example configuration (authoritative)
 
-Place the configuration at `~/.config/lynxmotion_al5a/led_pins.json`:
+Place the configuration in the app data folder (seeded automatically on first
+launch when the folder is empty):
+
+- Windows: `%APPDATA%\\lynxmotion_al5a\\led_pins.json`
+- macOS: `~/Library/Application Support/lynxmotion_al5a/led_pins.json`
+- Linux/other: `~/.config/lynxmotion_al5a/led_pins.json`
 
 ```json
 {

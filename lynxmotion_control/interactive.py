@@ -25,6 +25,7 @@ from .al5a_kinematics import (
     DEFAULT_SERVO_CONFIGS,
     ServoConfig,
 )
+from .config_paths import CONFIG_ROOT, reveal_config_folder, seed_default_configs
 from .led_driver import build_drive_leds, load_led_config
 from .status_leds import LEDState, RobotISOState, StatusLEDController
 
@@ -32,11 +33,11 @@ from .status_leds import LEDState, RobotISOState, StatusLEDController
 _LOGGER = logging.getLogger(__name__)
 
 
-CALIBRATION_CONFIG_PATH = Path.home() / ".config" / "lynxmotion_al5a" / "servo_offsets.json"
-PATH_STORAGE_PATH = CALIBRATION_CONFIG_PATH.with_name("saved_path.json")
-SUBROUTINE_STORAGE_DIR = PATH_STORAGE_PATH.with_name("subroutines")
-TIMELINE_STORAGE_PATH = PATH_STORAGE_PATH.with_name("timeline.json")
-TEACH_SESSION_DIR = CALIBRATION_CONFIG_PATH.with_name("teach_sessions")
+CALIBRATION_CONFIG_PATH = CONFIG_ROOT / "servo_offsets.json"
+PATH_STORAGE_PATH = CONFIG_ROOT / "saved_path.json"
+SUBROUTINE_STORAGE_DIR = CONFIG_ROOT / "subroutines"
+TIMELINE_STORAGE_PATH = CONFIG_ROOT / "timeline.json"
+TEACH_SESSION_DIR = CONFIG_ROOT / "teach_sessions"
 
 
 _DEFAULT_VERTICAL_JOINTS = [
@@ -231,6 +232,7 @@ class InteractiveArm:
         self._recording_indicator_label = None
         self._record_teach_button: Button | None = None
         TEACH_SESSION_DIR.mkdir(parents=True, exist_ok=True)
+        seed_default_configs()
         self._fault_active = False
         self._motion_active = False
         self._playback_active = False
@@ -2435,7 +2437,22 @@ class InteractiveArm:
         )
         axes.append(guide_ax)
 
-        top_edge = self._panel_content_top - guide_height - 0.13
+        button_height = 0.07
+        button_gap = 0.02
+        config_button_ax = self._panel_axes(
+            self._panel_margin,
+            self._panel_content_top - guide_height - button_height - button_gap,
+            1.0 - 2 * self._panel_margin,
+            button_height,
+        )
+        open_config_button = Button(
+            config_button_ax, "Open config folder", hovercolor="0.95"
+        )
+        open_config_button.on_clicked(self._open_config_folder)
+        self._panel_interactive_widgets[panel_key].append(open_config_button)
+        axes.append(config_button_ax)
+
+        top_edge = config_button_ax.get_position().y0 - 0.06
         bottom_edge = self._panel_margin + 0.12
         row_gap = 0.02
         available_height = max(
@@ -2552,6 +2569,11 @@ class InteractiveArm:
             axes.extend([min_ax, max_ax])
 
         return axes
+
+    def _open_config_folder(self, _event=None) -> None:  # pragma: no cover - UI interaction
+        """Open the user config directory in the platform file manager."""
+
+        reveal_config_folder(CONFIG_ROOT)
 
     def _build_waypoint_panel(self) -> list:
         panel_key = "waypoints"
