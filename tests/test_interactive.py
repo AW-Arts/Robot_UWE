@@ -329,6 +329,34 @@ def test_returning_from_teach_moves_slowly(monkeypatch, interactive_module) -> N
         assert move_time == 10_000
 
 
+def test_manual_move_cancels_playback(monkeypatch, interactive_module) -> None:
+    controller = _BasicController()
+    with _prepare_arm(monkeypatch, interactive_module, controller) as arm:
+        class _FakeThread:
+            def __init__(self) -> None:
+                self.join_called = False
+
+            def is_alive(self) -> bool:
+                return True
+
+            def join(self, timeout=None) -> None:  # pragma: no cover - simple flag
+                self.join_called = True
+
+        waypoint_thread = _FakeThread()
+        timeline_thread = _FakeThread()
+        arm._waypoint_playback_thread = waypoint_thread
+        arm._timeline_playback_thread = timeline_thread
+
+        arm.update_robot()
+
+        assert arm._waypoint_playback_thread is None
+        assert arm._timeline_playback_thread is None
+        assert waypoint_thread.join_called
+        assert timeline_thread.join_called
+        assert not arm._waypoint_stop_event.is_set()
+        assert not arm._timeline_stop_event.is_set()
+
+
 def test_zero_reference_lines_follow_current_pose(monkeypatch, interactive_module) -> None:
     controller = _BasicController()
     with _prepare_arm(monkeypatch, interactive_module, controller) as arm:
