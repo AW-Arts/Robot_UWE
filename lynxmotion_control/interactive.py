@@ -136,6 +136,7 @@ class TeachSample:
 @dataclass
 class WaypointDragState:
     index: int | None = None
+    actual_index: int | None = None
     offset: float = 0.0
 
 
@@ -372,11 +373,17 @@ class InteractiveArm:
         self.waypoints: list[Waypoint] = []
         self._waypoint_patches: list[Rectangle] = []
         self._waypoint_texts: list = []
+        self._waypoint_index_map: list[int] = []
         self._waypoint_drag = WaypointDragState()
         self._waypoint_reordered = False
         self._selected_waypoint_index: int | None = None
+        self._waypoint_scroll_slider: Slider | None = None
+        self._waypoint_scroll_offset = 0
+        self._max_visible_waypoints = 6
+        self._updating_waypoint_scroll = False
         self._waypoint_playback_thread: threading.Thread | None = None
         self._waypoint_stop_event = threading.Event()
+        self._copied_waypoint: Waypoint | None = None
         self._updating_duration_box = False
         self._subroutine_catalog: dict[str, SubroutineSummary] = {}
         self._subroutine_list_ax = None
@@ -579,10 +586,13 @@ class InteractiveArm:
         self._sync_leds()
 
     def _sync_leds(self, *, fault_just_triggered: bool = False) -> None:
-        teach_mode_active = self._operation_mode == "teach" or self._calibration_active
+        calibration_active = self._calibration_active
+        teach_mode_active = self._operation_mode == "teach"
         teach_recording = self._teach_recording or self._calibration_guide_active
         if self._fault_active:
             state = RobotISOState.FAULT
+        elif calibration_active:
+            state = RobotISOState.CONNECTED_NOT_ENABLED
         elif teach_mode_active:
             state = RobotISOState.TEACH_MODE
         elif self._motion_active or self._playback_active:
@@ -592,7 +602,7 @@ class InteractiveArm:
 
         self.status_leds.set_iso_state(
             state,
-            teach_active=teach_mode_active,
+            teach_active=teach_mode_active or calibration_active,
             teach_recording=teach_recording,
             fault_just_triggered=fault_just_triggered,
         )
@@ -2623,15 +2633,91 @@ class InteractiveArm:
 
         axes.extend([add_ax, play_ax, clear_ax])
 
-        waypoint_bottom = self._panel_margin + 0.02
-        waypoint_height = button_bottom - waypoint_bottom - 0.04
-        self._waypoint_item_height = 0.15
-        self._waypoint_item_gap = 0.045
+        secondary_height = 0.07
+        secondary_bottom = button_bottom - secondary_height - 0.025
+        secondary_width = (
+            1.0 - 2 * self._panel_margin - 5 * button_gap
+        ) / 6
 
+        update_ax = self._panel_axes(
+            self._panel_margin,
+            secondary_bottom,
+            secondary_width,
+            secondary_height,
+        )
+        copy_ax = self._panel_axes(
+            self._panel_margin + secondary_width + button_gap,
+            secondary_bottom,
+            secondary_width,
+            secondary_height,
+        )
+        paste_ax = self._panel_axes(
+            self._panel_margin + 2 * (secondary_width + button_gap),
+            secondary_bottom,
+            secondary_width,
+            secondary_height,
+        )
+        delete_ax = self._panel_axes(
+            self._panel_margin + 3 * (secondary_width + button_gap),
+            secondary_bottom,
+            secondary_width,
+            secondary_height,
+        )
+        step_back_ax = self._panel_axes(
+            self._panel_margin + 4 * (secondary_width + button_gap),
+            secondary_bottom,
+            secondary_width,
+            secondary_height,
+        )
+        step_next_ax = self._panel_axes(
+            self._panel_margin + 5 * (secondary_width + button_gap),
+            secondary_bottom,
+            secondary_width,
+            secondary_height,
+        )
+
+        update_button = Button(update_ax, "Update", hovercolor="0.95")
+        update_button.on_clicked(self._handle_update_waypoint)
+        copy_button = Button(copy_ax, "Copy", hovercolor="0.95")
+        copy_button.on_clicked(self._handle_copy_waypoint)
+        paste_button = Button(paste_ax, "Paste", hovercolor="0.95")
+        paste_button.on_clicked(self._handle_paste_waypoint)
+        delete_button = Button(delete_ax, "Delete", hovercolor="0.95")
+        delete_button.on_clicked(self._handle_delete_waypoint)
+        step_back_button = Button(step_back_ax, "Step back", hovercolor="0.95")
+        step_back_button.on_clicked(self._handle_step_previous_waypoint)
+        step_next_button = Button(step_next_ax, "Step forward", hovercolor="0.95")
+        step_next_button.on_clicked(self._handle_step_next_waypoint)
+
+        self._panel_interactive_widgets[panel_key].extend(
+            [
+                update_button,
+                copy_button,
+                paste_button,
+                delete_button,
+                step_back_button,
+                step_next_button,
+            ]
+        )
+        axes.extend([
+            update_ax,
+            copy_ax,
+            paste_ax,
+            delete_ax,
+            step_back_ax,
+            step_next_ax,
+        ])
+
+        waypoint_bottom = self._panel_margin + 0.02
+        waypoint_height = secondary_bottom - waypoint_bottom - 0.04
+
+        scroll_gap = 0.015
+        scroll_width = 0.05
+        waypoint_width = 1.0 - 2 * self._panel_margin - scroll_width - scroll_gap
         self.waypoint_ax = self._panel_axes(
             self._panel_margin,
             waypoint_bottom,
-            1.0 - 2 * self._panel_margin,
+            waypoint_width,
             waypoint_height,
         )
         self.waypoint_ax.set_xlim(0, 1)
@@ -2641,6 +2727,24 @@ class InteractiveArm:
         self.waypoint_ax.set_facecolor("#f7f7f7")
         self.waypoint_ax.set_title("Waypoints", pad=8)
         axes.append(self.waypoint_ax)
+
+        scroll_ax = self._panel_axes(
+            self._panel_margin + waypoint_width + scroll_gap,
+            waypoint_bottom,
+            scroll_width,
+            waypoint_height,
+        )
+        self._waypoint_scroll_slider = Slider(
+            scroll_ax,
+            "",  # label hidden to save space
+            0,
+            0,
+            valinit=0,
+            orientation="vertical",
+        )
+        self._waypoint_scroll_slider.on_changed(self._handle_waypoint_scroll)
+        self._panel_interactive_widgets[panel_key].append(self._waypoint_scroll_slider)
+        axes.append(scroll_ax)
 
         self._refresh_waypoint_display()
 
@@ -3054,6 +3158,15 @@ class InteractiveArm:
         self.waypoint_ax.set_title("Waypoints", pad=8)
         self._waypoint_patches = []
         self._waypoint_texts = []
+        self._waypoint_index_map = []
+
+        total_waypoints = len(self.waypoints)
+        visible_count = min(total_waypoints, self._max_visible_waypoints)
+        max_scroll = max(total_waypoints - visible_count, 0)
+        self._waypoint_scroll_offset = int(
+            np.clip(self._waypoint_scroll_offset, 0, max_scroll)
+        )
+        self._update_waypoint_scroll_slider()
 
         if not self.waypoints:
             self.waypoint_ax.text(
@@ -3068,9 +3181,25 @@ class InteractiveArm:
             self.figure.canvas.draw_idle()
             return
 
-        for index, waypoint in enumerate(self.waypoints):
-            y = 1.0 - (index + 1) * self._waypoint_item_height - index * self._waypoint_item_gap
-            y = max(y, 0.02)
+        if visible_count <= 0:
+            self.figure.canvas.draw_idle()
+            return
+
+        centers = np.linspace(0.9, 0.1, num=visible_count)
+        self._waypoint_item_height = min(0.18, 0.75 / visible_count)
+        if visible_count > 1:
+            spacing = float(np.diff(centers).min()) if visible_count > 1 else 0.0
+            self._waypoint_item_gap = max(spacing - self._waypoint_item_height, 0.01)
+        else:
+            self._waypoint_item_gap = 0.05
+
+        start_index = self._waypoint_scroll_offset
+        end_index = min(start_index + visible_count, total_waypoints)
+
+        for visible_idx, index in enumerate(range(start_index, end_index)):
+            waypoint = self.waypoints[index]
+            center = centers[visible_idx]
+            y = center - self._waypoint_item_height / 2
             rect = Rectangle(
                 (0.02, y),
                 0.96,
@@ -3083,6 +3212,7 @@ class InteractiveArm:
                 rect.set_facecolor("#cfe8fc")
             self.waypoint_ax.add_patch(rect)
             self._waypoint_patches.append(rect)
+            self._waypoint_index_map.append(index)
 
             position_text = (
                 f"#{index + 1}: x={waypoint.position[0]:.3f}, "
@@ -3109,7 +3239,8 @@ class InteractiveArm:
 
     def _highlight_selected_waypoint(self) -> None:
         for idx, patch in enumerate(self._waypoint_patches):
-            if idx == self._selected_waypoint_index:
+            actual_index = self._waypoint_index_map[idx] if idx < len(self._waypoint_index_map) else idx
+            if actual_index == self._selected_waypoint_index:
                 patch.set_facecolor("#cfe8fc")
             else:
                 patch.set_facecolor("#ffffff")
@@ -3133,6 +3264,42 @@ class InteractiveArm:
             self._waypoint_duration_box.set_val(value)
         finally:
             self._updating_duration_box = False
+
+    def _update_waypoint_scroll_slider(self) -> None:
+        slider = self._waypoint_scroll_slider
+        if slider is None:
+            return
+        total_waypoints = len(self.waypoints)
+        visible_count = min(total_waypoints, self._max_visible_waypoints)
+        max_scroll = max(total_waypoints - visible_count, 0)
+        try:
+            self._updating_waypoint_scroll = True
+            slider.valmax = max_scroll if max_scroll > 0 else 0
+            slider.valmin = 0
+            slider.ax.set_ylim(slider.valmin, max(slider.valmax, 0.01))
+            clamped_offset = int(np.clip(self._waypoint_scroll_offset, 0, max_scroll))
+            if clamped_offset != slider.val:
+                slider.set_val(clamped_offset)
+            slider.ax.figure.canvas.draw_idle()
+        finally:
+            self._updating_waypoint_scroll = False
+
+    def _ensure_selected_waypoint_visible(self) -> None:
+        if self._selected_waypoint_index is None:
+            return
+        total_waypoints = len(self.waypoints)
+        visible_count = min(total_waypoints, self._max_visible_waypoints)
+        if visible_count <= 0:
+            return
+        max_scroll = max(total_waypoints - visible_count, 0)
+        if self._selected_waypoint_index < self._waypoint_scroll_offset:
+            self._waypoint_scroll_offset = self._selected_waypoint_index
+        elif self._selected_waypoint_index >= self._waypoint_scroll_offset + visible_count:
+            self._waypoint_scroll_offset = min(
+                self._selected_waypoint_index - visible_count + 1,
+                max_scroll,
+            )
+        self._update_waypoint_scroll_slider()
 
     def _waypoints_from_serialised(self, data: object) -> list[Waypoint]:
         if not isinstance(data, list):
@@ -3189,6 +3356,7 @@ class InteractiveArm:
 
         loaded = self._waypoints_from_serialised(data)
         self.waypoints = loaded if loaded else []
+        self._waypoint_scroll_offset = 0
 
     def _compute_waypoint_total_duration(self, waypoints: list[Waypoint]) -> float:
         return sum(max(0.1, waypoint.duration) for waypoint in waypoints)
@@ -3945,6 +4113,155 @@ class InteractiveArm:
         self._update_waypoint_duration_box()
         self._save_waypoints()
 
+    def _handle_waypoint_scroll(self, value: float) -> None:  # pragma: no cover - UI interaction
+        if self._updating_waypoint_scroll:
+            return
+        total_waypoints = len(self.waypoints)
+        visible_count = min(total_waypoints, self._max_visible_waypoints)
+        max_scroll = max(total_waypoints - visible_count, 0)
+        clamped = int(np.clip(round(value), 0, max_scroll))
+        if clamped == self._waypoint_scroll_offset:
+            return
+        self._waypoint_scroll_offset = clamped
+        self._refresh_waypoint_display()
+        self._highlight_selected_waypoint()
+
+    def _load_waypoint_for_editing(self, index: int, *, move_robot: bool = False) -> None:
+        if not (0 <= index < len(self.waypoints)):
+            return
+        waypoint = self.waypoints[index]
+        self.target[:] = self._clamp_target(np.array(waypoint.position, dtype=float))
+        self._setpoint_position = np.array(self.target)
+        self._set_wrist_pitch_target(waypoint.wrist_pitch)
+        self.wrist_rotation = waypoint.wrist_rotation
+        self.gripper_angle = waypoint.gripper_angle
+        self._update_wrist_slider_display()
+        self._update_servo_readouts()
+        self._update_raw_angle_button_visual()
+        if move_robot:
+            duration_ms = int(max(0.02, waypoint.duration) * 1000)
+            self.update_robot(move_time_ms=duration_ms)
+
+    def _handle_update_waypoint(self, _event=None) -> None:  # pragma: no cover - UI interaction
+        if self._selected_waypoint_index is None:
+            _LOGGER.info("Select a waypoint to update")
+            return
+        if not (0 <= self._selected_waypoint_index < len(self.waypoints)):
+            return
+        if self._waypoint_duration_box is None:
+            duration = 2.0
+        else:
+            try:
+                duration = float(self._waypoint_duration_box.text)
+            except ValueError:
+                duration = 2.0
+        duration = max(0.1, duration)
+        waypoint = self.waypoints[self._selected_waypoint_index]
+        waypoint.position = self._clamp_target(np.array(self.target))
+        waypoint.duration = duration
+        waypoint.wrist_pitch = self.wrist_pitch
+        waypoint.wrist_rotation = self.wrist_rotation
+        waypoint.gripper_angle = self.gripper_angle
+        self._refresh_waypoint_display()
+        self._update_waypoint_duration_box()
+        self._save_waypoints()
+
+    def _handle_copy_waypoint(self, _event=None) -> None:  # pragma: no cover - UI interaction
+        if self._selected_waypoint_index is None:
+            _LOGGER.info("Select a waypoint to copy")
+            return
+        if not (0 <= self._selected_waypoint_index < len(self.waypoints)):
+            return
+        self._copied_waypoint = deepcopy(self.waypoints[self._selected_waypoint_index])
+
+    def _handle_paste_waypoint(self, _event=None) -> None:  # pragma: no cover - UI interaction
+        if self._copied_waypoint is None:
+            _LOGGER.info("Copy a waypoint before pasting")
+            return
+        insert_at = len(self.waypoints)
+        if self._selected_waypoint_index is not None:
+            insert_at = self._selected_waypoint_index + 1
+        self.waypoints.insert(insert_at, deepcopy(self._copied_waypoint))
+        self._selected_waypoint_index = insert_at
+        self._ensure_selected_waypoint_visible()
+        self._refresh_waypoint_display()
+        self._update_waypoint_duration_box()
+        self._save_waypoints()
+
+    def _handle_delete_waypoint(self, _event=None) -> None:  # pragma: no cover - UI interaction
+        if self._selected_waypoint_index is None:
+            _LOGGER.info("Select a waypoint to delete")
+            return
+        if not (0 <= self._selected_waypoint_index < len(self.waypoints)):
+            return
+        self._stop_waypoint_playback()
+        self.waypoints.pop(self._selected_waypoint_index)
+        if self._selected_waypoint_index >= len(self.waypoints):
+            self._selected_waypoint_index = len(self.waypoints) - 1
+        if self._selected_waypoint_index is not None and self._selected_waypoint_index < 0:
+            self._selected_waypoint_index = None
+        self._ensure_selected_waypoint_visible()
+        self._refresh_waypoint_display()
+        self._update_waypoint_duration_box()
+        self._save_waypoints()
+
+    def _run_single_waypoint(self, index: int) -> None:
+        if not (0 <= index < len(self.waypoints)):
+            return
+        self._stop_waypoint_playback()
+        self._waypoint_stop_event.clear()
+        waypoint = deepcopy(self.waypoints[index])
+
+        def _worker() -> None:
+            try:
+                self._execute_waypoint_sequence(
+                    [waypoint],
+                    stop_event=self._waypoint_stop_event,
+                    selection_callback=self._handle_waypoint_playback_step,
+                )
+            finally:
+                self._update_play_button_label(running=False)
+                self._waypoint_stop_event.clear()
+                self._playback_active = False
+                self._update_idle_leds()
+                self._waypoint_playback_thread = None
+
+        self._waypoint_playback_thread = threading.Thread(
+            target=_worker, name="al5a-waypoint-step", daemon=True
+        )
+        self._waypoint_playback_thread.start()
+        self._update_play_button_label(running=True)
+
+    def _handle_step_previous_waypoint(self, _event=None) -> None:  # pragma: no cover - UI interaction
+        if not self.waypoints:
+            _LOGGER.info("No waypoints to step through")
+            return
+        if self._selected_waypoint_index is None:
+            target_index = 0
+        else:
+            target_index = max(0, self._selected_waypoint_index - 1)
+        self._selected_waypoint_index = target_index
+        self._ensure_selected_waypoint_visible()
+        self._refresh_waypoint_display()
+        self._update_waypoint_duration_box()
+        self._load_waypoint_for_editing(target_index, move_robot=True)
+        self._run_single_waypoint(target_index)
+
+    def _handle_step_next_waypoint(self, _event=None) -> None:  # pragma: no cover - UI interaction
+        if not self.waypoints:
+            _LOGGER.info("No waypoints to step through")
+            return
+        if self._selected_waypoint_index is None:
+            target_index = 0
+        else:
+            target_index = min(len(self.waypoints) - 1, self._selected_waypoint_index + 1)
+        self._selected_waypoint_index = target_index
+        self._ensure_selected_waypoint_visible()
+        self._refresh_waypoint_display()
+        self._update_waypoint_duration_box()
+        self._load_waypoint_for_editing(target_index, move_robot=True)
+        self._run_single_waypoint(target_index)
+
     def _handle_add_waypoint(self, _event=None) -> None:  # pragma: no cover - UI interaction
         if self._waypoint_duration_box is None:
             duration = 2.0
@@ -3965,6 +4282,7 @@ class InteractiveArm:
             )
         )
         self._selected_waypoint_index = len(self.waypoints) - 1
+        self._ensure_selected_waypoint_visible()
         self._refresh_waypoint_display()
         self._update_waypoint_duration_box()
         self._save_waypoints()
@@ -3973,6 +4291,7 @@ class InteractiveArm:
         self._stop_waypoint_playback()
         self.waypoints.clear()
         self._selected_waypoint_index = None
+        self._waypoint_scroll_offset = 0
         self._refresh_waypoint_display()
         self._update_waypoint_duration_box()
         self._save_waypoints()
@@ -4016,6 +4335,7 @@ class InteractiveArm:
             return
         self.waypoints = list(waypoints)
         self._selected_waypoint_index = None
+        self._waypoint_scroll_offset = 0
         self._refresh_waypoint_display()
         self._update_waypoint_duration_box()
         self._selected_subroutine_slug = slug
@@ -4154,8 +4474,10 @@ class InteractiveArm:
 
     def _handle_waypoint_playback_step(self, index: int, _waypoint: Waypoint) -> None:
         self._selected_waypoint_index = index
+        self._ensure_selected_waypoint_visible()
         self._highlight_selected_waypoint()
         self._update_waypoint_duration_box()
+        self._load_waypoint_for_editing(index, move_robot=False)
 
     def _update_timeline_play_button(self, *, running: bool) -> None:
         button = self._play_timeline_button
@@ -4333,11 +4655,18 @@ class InteractiveArm:
         for idx, patch in enumerate(self._waypoint_patches):
             contains, _ = patch.contains(event)
             if contains:
-                self._waypoint_drag = WaypointDragState(index=idx, offset=event.ydata)
-                self._selected_waypoint_index = idx
+                actual_index = (
+                    self._waypoint_index_map[idx]
+                    if idx < len(self._waypoint_index_map)
+                    else idx
+                )
+                self._waypoint_drag = WaypointDragState(
+                    index=idx, actual_index=actual_index, offset=event.ydata
+                )
+                self._selected_waypoint_index = actual_index
                 self._waypoint_reordered = False
-                if 0 <= idx < len(self.waypoints):
-                    self._set_wrist_pitch_target(self.waypoints[idx].wrist_pitch)
+                if 0 <= actual_index < len(self.waypoints):
+                    self._load_waypoint_for_editing(actual_index, move_robot=False)
                 self._highlight_selected_waypoint()
                 self._update_waypoint_duration_box()
                 handled = True
@@ -4389,12 +4718,23 @@ class InteractiveArm:
         distances = [abs(event.ydata - center) for center in centers]
         new_index = int(min(range(len(distances)), key=distances.__getitem__))
         old_index = self._waypoint_drag.index
-        if new_index != old_index:
-            waypoint = self.waypoints.pop(old_index)
-            self.waypoints.insert(new_index, waypoint)
-            self._waypoint_drag.index = new_index
-            self._selected_waypoint_index = new_index
+        old_actual = self._waypoint_drag.actual_index
+        if new_index != old_index and old_actual is not None:
+            new_actual = self._waypoint_index_map[new_index]
+            waypoint = self.waypoints.pop(old_actual)
+            if new_actual > old_actual:
+                new_actual -= 1
+            self.waypoints.insert(new_actual, waypoint)
+            self._selected_waypoint_index = new_actual
+            self._ensure_selected_waypoint_visible()
             self._refresh_waypoint_display()
+            try:
+                refreshed_index = self._waypoint_index_map.index(new_actual)
+            except ValueError:
+                refreshed_index = None
+            self._waypoint_drag = WaypointDragState(
+                index=refreshed_index, actual_index=new_actual, offset=event.ydata
+            )
             self._update_waypoint_duration_box()
             self._waypoint_reordered = True
         return True
