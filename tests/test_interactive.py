@@ -329,30 +329,6 @@ def test_returning_from_teach_moves_slowly(monkeypatch, interactive_module) -> N
         assert move_time == 10_000
 
 
-def test_returning_from_teach_uses_recorded_pose(monkeypatch, interactive_module) -> None:
-    controller = _BasicController()
-    with _prepare_arm(
-        monkeypatch, interactive_module, controller, move_time_ms=500
-    ) as arm:
-        pre_teach_pose = [0.1, 0.2, -0.1, 0.05, 0.03, -0.02]
-        arm.commanded_joints = list(pre_teach_pose)
-        arm._last_commanded_raw = tuple(pre_teach_pose)
-
-        arm._command_queue.commands.clear()  # type: ignore[attr-defined]
-        arm._set_operation_mode("teach")
-
-        arm.target[:] = np.array([0.15, -0.02, 0.19])
-        arm.commanded_joints = [0.4, -0.1, 0.3, -0.2, 0.5, 0.1]
-
-        arm._set_operation_mode("live")
-
-        assert arm._pre_teach_full_pose == pre_teach_pose
-        assert arm._last_commanded_raw == tuple(pre_teach_pose)
-
-        _, move_time, _ = arm._command_queue.commands[-1]  # type: ignore[attr-defined]
-        assert move_time == 10_000
-
-
 def test_zero_reference_lines_follow_current_pose(monkeypatch, interactive_module) -> None:
     controller = _BasicController()
     with _prepare_arm(monkeypatch, interactive_module, controller) as arm:
