@@ -5,6 +5,7 @@ import json
 import logging
 import math
 import queue
+import random
 import threading
 import time
 from copy import deepcopy
@@ -87,6 +88,7 @@ def _ensure_interactive_backend() -> None:
 
 _ensure_interactive_backend()
 
+import matplotlib.colors as mcolors  # noqa: E402
 import matplotlib.pyplot as plt  # noqa: E402  (import after backend selection)
 
 
@@ -100,6 +102,7 @@ class DragState:
 
 @dataclass
 class Waypoint:
+    name: str
     position: np.ndarray
     duration: float
     wrist_pitch: float
@@ -389,6 +392,8 @@ class InteractiveArm:
         self._waypoint_stop_event = threading.Event()
         self._copied_waypoint: Waypoint | None = None
         self._updating_duration_box = False
+        self._updating_name_box = False
+        self._waypoint_name_box: TextBox | None = None
         self._subroutine_catalog: dict[str, SubroutineSummary] = {}
         self._subroutine_list_ax = None
         self._subroutine_patches: list[Rectangle] = []
@@ -1763,6 +1768,7 @@ class InteractiveArm:
 
             waypoints.append(
                 Waypoint(
+                    name=self._normalise_waypoint_name(sample.label, index),
                     position=position,
                     duration=max(0.1, duration_ms / 1000.0),
                     wrist_pitch=sample.wrist_pitch,
@@ -2574,11 +2580,15 @@ class InteractiveArm:
         panel_key = "waypoints"
         axes: list = []
 
+        y_cursor = self._panel_content_top
+
+        title_gap = 0.02
+        title_height = 0.06
         title_ax = self._panel_axes(
             self._panel_margin,
-            self._panel_content_top - 0.08,
+            y_cursor - title_gap - title_height,
             1.0 - 2 * self._panel_margin,
-            0.06,
+            title_height,
         )
         title_ax.axis("off")
         title_ax.text(
@@ -2592,8 +2602,30 @@ class InteractiveArm:
         )
         axes.append(title_ax)
 
+        y_cursor = y_cursor - title_gap - title_height
+
+        name_gap = 0.02
+        name_height = 0.08
+        name_bottom = y_cursor - name_gap - name_height
+        name_ax = self._panel_axes(
+            self._panel_margin,
+            name_bottom,
+            1.0 - 2 * self._panel_margin,
+            name_height,
+        )
+        self._waypoint_name_box = TextBox(
+            name_ax, "Keyframe name", initial=self._next_waypoint_default_name()
+        )
+        self._waypoint_name_box.on_submit(self._handle_waypoint_name_submit)
+        self._apply_random_textbox_style(self._waypoint_name_box)
+        self._panel_interactive_widgets[panel_key].append(self._waypoint_name_box)
+        axes.append(name_ax)
+
+        y_cursor = name_bottom
+
+        duration_gap = 0.02
         duration_height = 0.08
-        duration_bottom = self._panel_content_top - 0.12
+        duration_bottom = y_cursor - duration_gap - duration_height
         duration_ax = self._panel_axes(
             self._panel_margin,
             duration_bottom,
@@ -3217,6 +3249,42 @@ class InteractiveArm:
         except Exception:
             pass
 
+    def _contrasting_text_color(self, background: str) -> str:
+        rgb = np.array(mcolors.to_rgb(background))
+        luminance = float(0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2])
+        return "#0f172a" if luminance > 0.6 else "#f8fafc"
+
+    def _apply_random_textbox_style(self, textbox: TextBox) -> None:
+        palette = [
+            "#e0f2fe",  # powder blue
+            "#fef3c7",  # soft amber
+            "#fce7f3",  # pastel pink
+            "#e0f7f4",  # minty teal
+            "#ede9fe",  # lavender haze
+            "#f1f5f9",  # slate wash
+            "#d9f2ff",  # icy blue
+        ]
+        background = random.choice(palette)
+        text_color = self._contrasting_text_color(background)
+        textbox.ax.set_facecolor(background)
+        textbox.text_disp.set_color(text_color)
+        textbox.label.set_color(text_color)
+        try:
+            textbox.cursor.color = text_color
+        except Exception:
+            pass
+        for spine in textbox.ax.spines.values():
+            spine.set_edgecolor("#94a3b8")
+
+    def _next_waypoint_default_name(self) -> str:
+        return str(len(self.waypoints) + 1)
+
+    def _normalise_waypoint_name(self, raw: str | None, index: int) -> str:
+        cleaned = " ".join(str(raw or "").split())
+        if cleaned:
+            return cleaned
+        return str(index + 1)
+
     def _refresh_waypoint_display(self) -> None:
         if not hasattr(self, "waypoint_ax"):
             return
@@ -3285,8 +3353,10 @@ class InteractiveArm:
             self._waypoint_patches.append(rect)
             self._waypoint_index_map.append(index)
 
+            display_name = waypoint.name or f"{index + 1}"
+            name_line = f"#{index + 1}: {display_name}"
             position_text = (
-                f"#{index + 1}: x={waypoint.position[0]:.3f}, "
+                f"x={waypoint.position[0]:.3f}, "
                 f"y={waypoint.position[1]:.3f}, z={waypoint.position[2]:.3f}"
             )
             pitch_text = (
@@ -3297,7 +3367,7 @@ class InteractiveArm:
             text = self.waypoint_ax.text(
                 0.04,
                 y + self._waypoint_item_height / 2,
-                f"{position_text}\n{waypoint.duration:.2f} s, {pitch_text}\n"
+                f"{name_line}\n{position_text}\n{waypoint.duration:.2f} s, {pitch_text}\n"
                 f"{rotation_text}, {gripper_text}",
                 va="center",
                 ha="left",
@@ -3317,6 +3387,21 @@ class InteractiveArm:
                 patch.set_facecolor("#ffffff")
         self.figure.canvas.draw_idle()
 
+    def _update_waypoint_name_box(self) -> None:
+        if self._waypoint_name_box is None or self._updating_name_box:
+            return
+        value = self._next_waypoint_default_name()
+        if (
+            self._selected_waypoint_index is not None
+            and 0 <= self._selected_waypoint_index < len(self.waypoints)
+        ):
+            value = self.waypoints[self._selected_waypoint_index].name
+        try:
+            self._updating_name_box = True
+            self._waypoint_name_box.set_val(value)
+        finally:
+            self._updating_name_box = False
+
     def _update_waypoint_duration_box(self) -> None:
         if not hasattr(self, "_waypoint_duration_box"):
             return
@@ -3335,6 +3420,7 @@ class InteractiveArm:
             self._waypoint_duration_box.set_val(value)
         finally:
             self._updating_duration_box = False
+        self._update_waypoint_name_box()
 
     def _update_waypoint_scroll_slider(self) -> None:
         slider = self._waypoint_scroll_slider
@@ -3408,6 +3494,7 @@ class InteractiveArm:
             wrist_pitch = entry.get("wrist_pitch")
             wrist_rotation = entry.get("wrist_rotation", self.wrist_rotation)
             gripper_angle = entry.get("gripper_angle", self.gripper_angle)
+            name = entry.get("name")
             try:
                 position_array = np.array(position, dtype=float)
                 if position_array.shape != (3,):
@@ -3428,6 +3515,7 @@ class InteractiveArm:
 
             loaded.append(
                 Waypoint(
+                    name=self._normalise_waypoint_name(name, len(loaded)),
                     position=position_array,
                     duration=max(0.1, duration_value),
                     wrist_pitch=float(np.clip(pitch_value, *self._wrist_pitch_limits)),
@@ -3588,6 +3676,7 @@ class InteractiveArm:
     def _serialise_waypoints(self, waypoints: list[Waypoint]) -> list[dict[str, object]]:
         return [
             {
+                "name": waypoint.name,
                 "position": waypoint.position.tolist(),
                 "duration": float(waypoint.duration),
                 "wrist_pitch": float(waypoint.wrist_pitch),
@@ -4208,6 +4297,37 @@ class InteractiveArm:
         self._update_waypoint_duration_box()
         self._save_waypoints()
 
+    def _handle_waypoint_name_submit(self, text: str) -> None:  # pragma: no cover - UI interaction
+        if self._updating_name_box:
+            return
+        index = (
+            self._selected_waypoint_index
+            if self._selected_waypoint_index is not None
+            else len(self.waypoints)
+        )
+        cleaned = self._normalise_waypoint_name(text, index)
+        if self._selected_waypoint_index is None:
+            if self._waypoint_name_box is not None:
+                try:
+                    self._updating_name_box = True
+                    self._waypoint_name_box.set_val(cleaned)
+                finally:
+                    self._updating_name_box = False
+            return
+
+        if not (0 <= self._selected_waypoint_index < len(self.waypoints)):
+            return
+        waypoint = self.waypoints[self._selected_waypoint_index]
+        waypoint.name = cleaned
+        if self._waypoint_name_box is not None:
+            try:
+                self._updating_name_box = True
+                self._waypoint_name_box.set_val(cleaned)
+            finally:
+                self._updating_name_box = False
+        self._refresh_waypoint_display()
+        self._save_waypoints()
+
     def _handle_waypoint_scroll(self, value: float) -> None:  # pragma: no cover - UI interaction
         if self._updating_waypoint_scroll:
             return
@@ -4278,6 +4398,10 @@ class InteractiveArm:
         waypoint.wrist_pitch = self.wrist_pitch
         waypoint.wrist_rotation = self.wrist_rotation
         waypoint.gripper_angle = self.gripper_angle
+        name_text = self._waypoint_name_box.text if self._waypoint_name_box else waypoint.name
+        waypoint.name = self._normalise_waypoint_name(
+            name_text, self._selected_waypoint_index
+        )
         self._refresh_waypoint_display()
         self._update_waypoint_duration_box()
         self._save_waypoints()
@@ -4388,8 +4512,11 @@ class InteractiveArm:
                 duration = 2.0
         duration = max(0.1, duration)
         position = self._clamp_target(np.array(self.target))
+        name_text = self._waypoint_name_box.text if self._waypoint_name_box else ""
+        name = self._normalise_waypoint_name(name_text, len(self.waypoints))
         self.waypoints.append(
             Waypoint(
+                name=name,
                 position=position.copy(),
                 duration=duration,
                 wrist_pitch=self.wrist_pitch,
