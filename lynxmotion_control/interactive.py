@@ -934,7 +934,15 @@ class InteractiveArm:
         # matches the setpoint immediately after homing.
         self._update_visuals(clamped_home)
 
+    def _cancel_playback(self) -> None:
+        """Stop any running waypoint or timeline playback before manual control."""
+        if self._timeline_playback_thread and self._timeline_playback_thread.is_alive():
+            self._stop_timeline_playback()
+        if self._waypoint_playback_thread and self._waypoint_playback_thread.is_alive():
+            self._stop_waypoint_playback()
+
     def update_robot(self, *, move_time_ms: int | None = None) -> None:
+        self._cancel_playback()
         requested = self._clamp_target(self.target)
         self.target[:] = requested
         compensated_pitch = self._apply_wrist_extension_compensation(
@@ -3619,6 +3627,7 @@ class InteractiveArm:
         if config is None:
             return
 
+        self._cancel_playback()
         source = self.feedback_joints or self.current_joints
         if not source:
             return
