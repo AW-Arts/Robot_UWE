@@ -381,6 +381,10 @@ class InteractiveArm:
         self._waypoint_scroll_offset = 0
         self._max_visible_waypoints = 6
         self._updating_waypoint_scroll = False
+        self._subroutine_scroll_slider: Slider | None = None
+        self._subroutine_scroll_offset = 0
+        self._max_visible_subroutines = 5
+        self._updating_subroutine_scroll = False
         self._waypoint_playback_thread: threading.Thread | None = None
         self._waypoint_stop_event = threading.Event()
         self._copied_waypoint: Waypoint | None = None
@@ -2887,10 +2891,15 @@ class InteractiveArm:
 
         y_cursor = button_bottom - subroutine_gap
         subroutine_bottom = y_cursor - subroutine_height
+        subroutine_scroll_gap = 0.015
+        subroutine_scroll_width = 0.05
+        subroutine_list_width = (
+            1.0 - 2 * self._panel_margin - subroutine_scroll_gap - subroutine_scroll_width
+        )
         self._subroutine_list_ax = self._panel_axes(
             self._panel_margin,
             subroutine_bottom,
-            1.0 - 2 * self._panel_margin,
+            subroutine_list_width,
             subroutine_height,
         )
         self._subroutine_list_ax.set_xlim(0, 1)
@@ -2900,6 +2909,24 @@ class InteractiveArm:
         self._subroutine_list_ax.set_facecolor("#f7f7f7")
         self._subroutine_list_ax.set_title("Saved subroutines", pad=8)
         axes.append(self._subroutine_list_ax)
+
+        subroutine_scroll_ax = self._panel_axes(
+            self._panel_margin + subroutine_list_width + subroutine_scroll_gap,
+            subroutine_bottom,
+            subroutine_scroll_width,
+            subroutine_height,
+        )
+        self._subroutine_scroll_slider = Slider(
+            subroutine_scroll_ax,
+            "",
+            0,
+            0,
+            valinit=0,
+            orientation="vertical",
+        )
+        self._subroutine_scroll_slider.on_changed(self._handle_subroutine_scroll)
+        self._panel_interactive_widgets[panel_key].append(self._subroutine_scroll_slider)
+        axes.append(subroutine_scroll_ax)
 
         timeline_button_count = 5
         timeline_button_width = (
@@ -3019,6 +3046,26 @@ class InteractiveArm:
         summaries = sorted(
             self._subroutine_catalog.values(), key=lambda item: item.name.lower()
         )
+        total_subroutines = len(summaries)
+        visible_count = min(total_subroutines, self._max_visible_subroutines)
+        max_scroll = max(total_subroutines - visible_count, 0)
+
+        if self._selected_subroutine_slug and visible_count > 0:
+            for idx, summary in enumerate(summaries):
+                if summary.slug == self._selected_subroutine_slug:
+                    if idx < self._subroutine_scroll_offset:
+                        self._subroutine_scroll_offset = idx
+                    elif idx >= self._subroutine_scroll_offset + visible_count:
+                        self._subroutine_scroll_offset = min(
+                            idx - visible_count + 1, max_scroll
+                        )
+                    break
+
+        self._subroutine_scroll_offset = int(
+            np.clip(self._subroutine_scroll_offset, 0, max_scroll)
+        )
+        self._update_subroutine_scroll_slider()
+
         if not summaries:
             ax.text(
                 0.5,
@@ -3032,10 +3079,26 @@ class InteractiveArm:
             self.figure.canvas.draw_idle()
             return
 
-        for index, summary in enumerate(summaries):
-            y = 1.0 - (index + 1) * self._subroutine_item_height
-            y -= index * self._subroutine_item_gap
-            y = max(y, 0.02)
+        if visible_count <= 0:
+            self.figure.canvas.draw_idle()
+            return
+
+        centers = np.linspace(0.9, 0.1, num=visible_count)
+        self._subroutine_item_height = min(0.18, 0.75 / visible_count)
+        if visible_count > 1:
+            spacing = float(np.diff(centers).min()) if visible_count > 1 else 0.0
+            self._subroutine_item_gap = max(
+                spacing - self._subroutine_item_height, 0.01
+            )
+        else:
+            self._subroutine_item_gap = 0.05
+
+        start_index = self._subroutine_scroll_offset
+        end_index = min(start_index + visible_count, total_subroutines)
+
+        for visible_idx, summary in enumerate(summaries[start_index:end_index]):
+            center = centers[visible_idx]
+            y = center - self._subroutine_item_height / 2
             rect = Rectangle(
                 (0.02, y),
                 0.96,
@@ -3286,11 +3349,34 @@ class InteractiveArm:
             slider.valmin = 0
             slider.ax.set_ylim(slider.valmin, max(slider.valmax, 0.01))
             clamped_offset = int(np.clip(self._waypoint_scroll_offset, 0, max_scroll))
-            if clamped_offset != slider.val:
-                slider.set_val(clamped_offset)
+            target_val = slider.valmax - clamped_offset
+            if target_val != slider.val:
+                slider.set_val(target_val)
             slider.ax.figure.canvas.draw_idle()
         finally:
             self._updating_waypoint_scroll = False
+
+    def _update_subroutine_scroll_slider(self) -> None:
+        slider = self._subroutine_scroll_slider
+        if slider is None:
+            return
+        total_subroutines = len(self._subroutine_catalog)
+        visible_count = min(total_subroutines, self._max_visible_subroutines)
+        max_scroll = max(total_subroutines - visible_count, 0)
+        try:
+            self._updating_subroutine_scroll = True
+            slider.valmax = max_scroll if max_scroll > 0 else 0
+            slider.valmin = 0
+            slider.ax.set_ylim(slider.valmin, max(slider.valmax, 0.01))
+            clamped_offset = int(
+                np.clip(self._subroutine_scroll_offset, 0, max_scroll)
+            )
+            target_val = slider.valmax - clamped_offset
+            if target_val != slider.val:
+                slider.set_val(target_val)
+            slider.ax.figure.canvas.draw_idle()
+        finally:
+            self._updating_subroutine_scroll = False
 
     def _ensure_selected_waypoint_visible(self) -> None:
         if self._selected_waypoint_index is None:
@@ -4125,15 +4211,36 @@ class InteractiveArm:
     def _handle_waypoint_scroll(self, value: float) -> None:  # pragma: no cover - UI interaction
         if self._updating_waypoint_scroll:
             return
+        slider = self._waypoint_scroll_slider
         total_waypoints = len(self.waypoints)
         visible_count = min(total_waypoints, self._max_visible_waypoints)
         max_scroll = max(total_waypoints - visible_count, 0)
-        clamped = int(np.clip(round(value), 0, max_scroll))
+        effective_value = value
+        if slider is not None:
+            effective_value = slider.valmax - value
+        clamped = int(np.clip(round(effective_value), 0, max_scroll))
         if clamped == self._waypoint_scroll_offset:
             return
         self._waypoint_scroll_offset = clamped
         self._refresh_waypoint_display()
         self._highlight_selected_waypoint()
+
+    def _handle_subroutine_scroll(self, value: float) -> None:  # pragma: no cover - UI interaction
+        if self._updating_subroutine_scroll:
+            return
+        slider = self._subroutine_scroll_slider
+        total_subroutines = len(self._subroutine_catalog)
+        visible_count = min(total_subroutines, self._max_visible_subroutines)
+        max_scroll = max(total_subroutines - visible_count, 0)
+        effective_value = value
+        if slider is not None:
+            effective_value = slider.valmax - value
+        clamped = int(np.clip(round(effective_value), 0, max_scroll))
+        if clamped == self._subroutine_scroll_offset:
+            return
+        self._subroutine_scroll_offset = clamped
+        self._refresh_subroutine_list_display()
+        self._highlight_selected_subroutine()
 
     def _load_waypoint_for_editing(self, index: int, *, move_robot: bool = False) -> None:
         if not (0 <= index < len(self.waypoints)):
