@@ -263,6 +263,8 @@ class InteractiveArm:
         }
         self._show_raw_angles = False
         self._raw_angle_button: Button | None = None
+        self._align_moves_to_base_frame = False
+        self._move_frame_button: Button | None = None
         self._soft_start_min_time_ms = 4_000
         self._soft_start_min_segments = 18
         self._home_move_time_ms = move_time_ms
@@ -1095,6 +1097,47 @@ class InteractiveArm:
             self._raw_angle_button.label.set_text("Show raw")
         self._raw_angle_button.ax.set_facecolor(self._raw_angle_button.color)
         self.figure.canvas.draw_idle()
+
+    def _update_move_frame_button(self) -> None:
+        if self._move_frame_button is None:
+            return
+        if self._align_moves_to_base_frame:
+            self._move_frame_button.color = "#bfdbfe"
+            self._move_frame_button.hovercolor = "#bfdbfe"
+            self._move_frame_button.label.set_text("Tool\nrelative")
+        else:
+            self._move_frame_button.color = "#e2e8f0"
+            self._move_frame_button.hovercolor = "#dbeafe"
+            self._move_frame_button.label.set_text("Global\naxes")
+        self._move_frame_button.ax.set_facecolor(self._move_frame_button.color)
+        self.figure.canvas.draw_idle()
+
+    def _toggle_move_frame(self, _event=None) -> None:  # pragma: no cover - UI interaction
+        self._align_moves_to_base_frame = not self._align_moves_to_base_frame
+        self._update_move_frame_button()
+
+    def _current_base_yaw(self) -> float | None:
+        for joints in (
+            self._setpoint_joints,
+            self.commanded_joints,
+            self.feedback_joints,
+            self.current_joints,
+        ):
+            if joints and len(joints) >= 1:
+                return float(joints[0])
+        return None
+
+    def _transform_move_delta(self, dx: float, dy: float, dz: float) -> tuple[float, float, float]:
+        if not self._align_moves_to_base_frame:
+            return dx, dy, dz
+        base_yaw = self._current_base_yaw()
+        if base_yaw is None:
+            return dx, dy, dz
+        cos_yaw = math.cos(base_yaw)
+        sin_yaw = math.sin(base_yaw)
+        rotated_dx = cos_yaw * dx - sin_yaw * dy
+        rotated_dy = sin_yaw * dx + cos_yaw * dy
+        return rotated_dx, rotated_dy, dz
 
     def _on_press(self, event) -> None:
         if self._handle_subroutine_press(event):
@@ -2273,22 +2316,18 @@ class InteractiveArm:
             axes.append(ax_btn)
 
         centre_ax = _cell_axes(1, 1)
-        centre_ax.axis("off")
-        centre_ax.text(
-            0.5,
-            0.5,
-            "XY",
-            ha="center",
-            va="center",
-            fontsize=10,
-            fontweight="bold",
-            color="#0f172a",
-            transform=centre_ax.transAxes,
-        )
+        self._move_frame_button = Button(centre_ax, "", hovercolor="#dbeafe")
+        self._move_frame_button.color = "#e2e8f0"
+        self._move_frame_button.hovercolor = "#dbeafe"
+        self._move_frame_button.ax.set_facecolor(self._move_frame_button.color)
+        self._move_frame_button.on_clicked(self._toggle_move_frame)
+        self._panel_interactive_widgets[panel_key].append(self._move_frame_button)
+        self._update_move_frame_button()
         axes.append(centre_ax)
 
         self._update_wrist_slider_display()
         return axes
+
     def _build_servo_panel(self) -> list:
         panel_key = "servos"
         axes: list = []
@@ -3983,6 +4022,7 @@ class InteractiveArm:
         return _callback
 
     def _nudge_target(self, dx: float, dy: float, dz: float) -> None:
+        dx, dy, dz = self._transform_move_delta(dx, dy, dz)
         updated = self.target.copy()
         updated[0] += dx
         updated[1] += dy
