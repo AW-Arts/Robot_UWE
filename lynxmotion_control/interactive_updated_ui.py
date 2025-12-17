@@ -9,6 +9,7 @@ import random
 import threading
 import time
 from copy import deepcopy
+import hashlib
 from typing import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -384,6 +385,7 @@ class InteractiveArm:
         self._waypoint_scroll_offset = 0
         self._max_visible_waypoints = 6
         self._updating_waypoint_scroll = False
+        self._waypoint_color_cache: dict[str, str] = {}
         self._subroutine_scroll_slider: Slider | None = None
         self._subroutine_scroll_offset = 0
         self._max_visible_subroutines = 5
@@ -406,8 +408,13 @@ class InteractiveArm:
         self._timeline_ax = None
         self._timeline_patches: list[Rectangle] = []
         self._timeline_texts: list = []
+        self._timeline_index_map: list[int] = []
         self._timeline_item_height = 0.16
         self._timeline_item_gap = 0.05
+        self._timeline_scroll_slider: Slider | None = None
+        self._timeline_scroll_offset = 0
+        self._max_visible_timeline = 6
+        self._updating_timeline_scroll = False
         self._timeline_drag = TimelineDragState()
         self._timeline_reordered = False
         self._selected_timeline_index: int | None = None
@@ -1414,7 +1421,7 @@ class InteractiveArm:
         self._build_recording_indicator()
 
         self._panel_margin = 0.035
-        self._panel_menu_height = 0.20
+        self._panel_menu_height = 0.17
         self._panel_content_top = 1.0 - self._panel_menu_height - self._panel_margin
 
         background = self._panel_axes(0.0, 0.0, 1.0, 1.0)
@@ -2288,7 +2295,9 @@ class InteractiveArm:
         axes.append(centre_ax)
 
         self._update_wrist_slider_display()
+
         return axes
+
     def _build_servo_panel(self) -> list:
         panel_key = "servos"
         axes: list = []
@@ -2553,7 +2562,7 @@ class InteractiveArm:
             self._panel_margin,
             self._panel_margin + 0.12,
             1.0 - 2 * self._panel_margin,
-            0.055,
+            0.045,
         )
         self._calibration_angle_box = TextBox(
             angle_ax,
@@ -2561,15 +2570,16 @@ class InteractiveArm:
             initial="",
         )
         self._calibration_angle_box.on_submit(self._apply_calibration_angle_from_text)
+        self._style_compact_textbox(self._calibration_angle_box)
         self._panel_interactive_widgets[panel_key].append(self._calibration_angle_box)
         axes.append(angle_ax)
 
-        nudge_height = 0.085
-        nudge_gap = 0.03
+        nudge_height = 0.07
+        nudge_gap = 0.025
         nudge_width = (
             1.0 - 2 * self._panel_margin - nudge_gap
         ) / 2
-        nudge_bottom = self._panel_margin + 0.04
+        nudge_bottom = self._panel_margin + 0.03
 
         nudge_minus_ax = self._panel_axes(
             self._panel_margin,
@@ -2601,7 +2611,7 @@ class InteractiveArm:
             self._panel_margin,
             self._panel_content_top - 0.08,
             1.0 - 2 * self._panel_margin,
-            0.06,
+            0.05,
         )
         title_ax.axis("off")
         title_ax.text(
@@ -2763,6 +2773,8 @@ class InteractiveArm:
             max_box = TextBox(max_ax, "Hard max°", initial="0.0")
             min_box.on_submit(self._make_limit_submit_callback(index, "min"))
             max_box.on_submit(self._make_limit_submit_callback(index, "max"))
+            self._style_compact_textbox(min_box)
+            self._style_compact_textbox(max_box)
 
             self.servo_limit_boxes_min.append(min_box)
             self.servo_limit_boxes_max.append(max_box)
@@ -2807,7 +2819,7 @@ class InteractiveArm:
         y_cursor = y_cursor - title_gap - title_height
 
         name_gap = 0.02
-        name_height = 0.08
+        name_height = 0.065
         name_bottom = y_cursor - name_gap - name_height
         name_ax = self._panel_axes(
             self._panel_margin,
@@ -2826,7 +2838,7 @@ class InteractiveArm:
         y_cursor = name_bottom
 
         duration_gap = 0.02
-        duration_height = 0.08
+        duration_height = 0.06
         duration_bottom = y_cursor - duration_gap - duration_height
         duration_ax = self._panel_axes(
             self._panel_margin,
@@ -2838,11 +2850,12 @@ class InteractiveArm:
             duration_ax, "Duration (s)", initial="2.0"
         )
         self._waypoint_duration_box.on_submit(self._handle_duration_submit)
+        self._style_compact_textbox(self._waypoint_duration_box)
         self._panel_interactive_widgets[panel_key].append(self._waypoint_duration_box)
         axes.append(duration_ax)
 
-        button_height = 0.085
-        button_gap = 0.025
+        button_height = 0.07
+        button_gap = 0.02
         button_width = (
             1.0 - 2 * self._panel_margin - 2 * button_gap
         ) / 3
@@ -2879,8 +2892,8 @@ class InteractiveArm:
 
         axes.extend([add_ax, play_ax, clear_ax])
 
-        secondary_height = 0.07
-        secondary_bottom = button_bottom - secondary_height - 0.025
+        secondary_height = 0.06
+        secondary_bottom = button_bottom - secondary_height - 0.02
         secondary_width = (
             1.0 - 2 * self._panel_margin - 5 * button_gap
         ) / 6
@@ -2954,8 +2967,8 @@ class InteractiveArm:
             step_next_ax,
         ])
 
-        waypoint_bottom = self._panel_margin + 0.02
-        waypoint_height = secondary_bottom - waypoint_bottom - 0.04
+        waypoint_bottom = self._panel_margin + 0.015
+        waypoint_height = secondary_bottom - waypoint_bottom - 0.03
 
         scroll_gap = 0.015
         scroll_width = 0.05
@@ -3003,17 +3016,17 @@ class InteractiveArm:
         title_offset = 0.02
         title_height = 0.05
         name_gap = 0.015
-        name_height = 0.07
-        button_gap = 0.02
-        button_height = 0.07
+        name_height = 0.055
+        button_gap = 0.018
+        button_height = 0.06
         subroutine_gap = 0.03
         timeline_buttons_gap = 0.025
-        timeline_buttons_height = 0.07
+        timeline_buttons_height = 0.06
         slider_gap = 0.025
-        slider_height = 0.045
+        slider_height = 0.04
         min_subroutine_height = 0.14
         preferred_subroutine_height = 0.22
-        min_timeline_height = 0.12
+        min_timeline_height = 0.14
 
         title_ax = self._panel_axes(
             self._panel_margin,
@@ -3080,6 +3093,7 @@ class InteractiveArm:
             name_height,
         )
         self._subroutine_name_box = TextBox(name_ax, "Subroutine", initial="")
+        self._style_compact_textbox(self._subroutine_name_box)
         self._panel_interactive_widgets[panel_key].append(self._subroutine_name_box)
         axes.append(name_ax)
 
@@ -3126,7 +3140,7 @@ class InteractiveArm:
         y_cursor = button_bottom - subroutine_gap
         subroutine_bottom = y_cursor - subroutine_height
         subroutine_scroll_gap = 0.015
-        subroutine_scroll_width = 0.05
+        subroutine_scroll_width = 0.045
         subroutine_list_width = (
             1.0 - 2 * self._panel_margin - subroutine_scroll_gap - subroutine_scroll_width
         )
@@ -3243,10 +3257,16 @@ class InteractiveArm:
 
         timeline_height = max(timeline_height, 0.05)
         timeline_bottom = timeline_bottom_base
+        timeline_scroll_gap = 0.015
+        timeline_scroll_width = 0.045
+        timeline_width = (
+            1.0 - 2 * self._panel_margin - timeline_scroll_gap - timeline_scroll_width
+        )
+        self._max_visible_timeline = max(int((timeline_height + 0.01) / 0.12), 2)
         self._timeline_ax = self._panel_axes(
             self._panel_margin,
             timeline_bottom,
-            1.0 - 2 * self._panel_margin,
+            timeline_width,
             timeline_height,
         )
         self._timeline_ax.set_xlim(0, 1)
@@ -3256,6 +3276,19 @@ class InteractiveArm:
         self._timeline_ax.set_facecolor("#f7f7f7")
         self._timeline_ax.set_title("Timeline schedule", pad=8)
         axes.append(self._timeline_ax)
+
+        timeline_scroll_ax = self._panel_axes(
+            self._panel_margin + timeline_width + timeline_scroll_gap,
+            timeline_bottom,
+            timeline_scroll_width,
+            timeline_height,
+        )
+        self._timeline_scroll_slider = Slider(
+            timeline_scroll_ax, "", 0, 0, valinit=0, orientation="vertical"
+        )
+        self._timeline_scroll_slider.on_changed(self._handle_timeline_scroll)
+        self._panel_interactive_widgets[panel_key].append(self._timeline_scroll_slider)
+        axes.append(timeline_scroll_ax)
 
         self._refresh_subroutine_list_display()
         self._refresh_timeline_display()
@@ -3372,6 +3405,7 @@ class InteractiveArm:
         ax.set_title("Timeline schedule", pad=8)
         self._timeline_patches = []
         self._timeline_texts = []
+        self._timeline_index_map = []
 
         if not self._timeline_entries:
             ax.text(
@@ -3386,10 +3420,28 @@ class InteractiveArm:
             self.figure.canvas.draw_idle()
             return
 
-        for index, entry in enumerate(self._timeline_entries):
-            y = 1.0 - (index + 1) * self._timeline_item_height
-            y -= index * self._timeline_item_gap
-            y = max(y, 0.02)
+        total_entries = len(self._timeline_entries)
+        visible_count = min(total_entries, self._max_visible_timeline)
+        max_scroll = max(total_entries - visible_count, 0)
+        self._timeline_scroll_offset = int(
+            np.clip(self._timeline_scroll_offset, 0, max_scroll)
+        )
+        self._update_timeline_scroll_slider()
+        start_index = self._timeline_scroll_offset
+        end_index = min(start_index + visible_count, total_entries)
+
+        centers = np.linspace(0.9, 0.1, num=visible_count) if visible_count else []
+        self._timeline_item_height = min(0.14, 0.75 / max(visible_count, 1))
+        if visible_count > 1:
+            spacing = float(np.diff(centers).min())
+            self._timeline_item_gap = max(spacing - self._timeline_item_height, 0.015)
+        else:
+            self._timeline_item_gap = 0.04
+
+        for visible_idx, actual_index in enumerate(range(start_index, end_index)):
+            entry = self._timeline_entries[actual_index]
+            center = centers[visible_idx]
+            y = center - self._timeline_item_height / 2
             rect = Rectangle(
                 (0.02, y),
                 0.96,
@@ -3398,7 +3450,7 @@ class InteractiveArm:
                 edgecolor="#cccccc",
                 linewidth=1,
             )
-            if index == self._selected_timeline_index:
+            if actual_index == self._selected_timeline_index:
                 rect.set_facecolor("#cfe8fc")
             ax.add_patch(rect)
             duration_label = f"{entry.duration:.2f} s"
@@ -3411,7 +3463,7 @@ class InteractiveArm:
             text = ax.text(
                 0.04,
                 y + self._timeline_item_height / 2,
-                f"#{index + 1}: {entry.name}\n{duration_label} • {status}",
+                f"#{actual_index + 1}: {entry.name}\n{duration_label} • {status}",
                 va="center",
                 ha="left",
                 fontsize=9,
@@ -3419,6 +3471,7 @@ class InteractiveArm:
             )
             self._timeline_patches.append(rect)
             self._timeline_texts.append(text)
+            self._timeline_index_map.append(actual_index)
 
         self.figure.canvas.draw_idle()
 
@@ -3432,10 +3485,10 @@ class InteractiveArm:
 
     def _highlight_selected_timeline(self) -> None:
         for idx, patch in enumerate(self._timeline_patches):
-            if idx == self._selected_timeline_index:
-                patch.set_facecolor("#cfe8fc")
-            else:
-                patch.set_facecolor("#ffffff")
+            actual_index = (
+                self._timeline_index_map[idx] if idx < len(self._timeline_index_map) else idx
+            )
+            patch.set_facecolor("#cfe8fc" if actual_index == self._selected_timeline_index else "#ffffff")
         self.figure.canvas.draw_idle()
 
     def _update_subroutine_name_box(self) -> None:
@@ -3456,7 +3509,26 @@ class InteractiveArm:
         luminance = float(0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2])
         return "#0f172a" if luminance > 0.6 else "#f8fafc"
 
+    def _style_compact_textbox(self, textbox: TextBox) -> None:
+        self._style_textbox_label(textbox)
+        try:
+            textbox.text_disp.set_fontsize(9)
+        except Exception:
+            pass
+
+    def _style_textbox_label(self, textbox: TextBox, *, label_size: float = 8.0) -> None:
+        try:
+            label = textbox.label
+        except Exception:
+            return
+        label.set_fontsize(label_size)
+        label.set_horizontalalignment("left")
+        label.set_verticalalignment("bottom")
+        label.set_color("#475569")
+        label.set_position((0.02, 1.08))
+
     def _apply_random_textbox_style(self, textbox: TextBox) -> None:
+        self._style_compact_textbox(textbox)
         palette = [
             "#e0f2fe",  # powder blue
             "#fef3c7",  # soft amber
@@ -3480,6 +3552,25 @@ class InteractiveArm:
 
     def _next_waypoint_default_name(self) -> str:
         return str(len(self.waypoints) + 1)
+
+    def _waypoint_color_for_name(self, name: str) -> str:
+        palette = [
+            "#e0f2fe",
+            "#fef3c7",
+            "#f1f5f9",
+            "#ede9fe",
+            "#d9f99d",
+            "#fee2e2",
+            "#cffafe",
+            "#fbcfe8",
+        ]
+        key = name.strip().lower() or "_default"
+        if key not in self._waypoint_color_cache:
+            digest = hashlib.sha256(key.encode("utf-8")).digest()
+            seed = int.from_bytes(digest[:4], "big")
+            rng = random.Random(seed)
+            self._waypoint_color_cache[key] = rng.choice(palette)
+        return self._waypoint_color_cache[key]
 
     def _normalise_waypoint_name(self, raw: str | None, index: int) -> str:
         cleaned = " ".join(str(raw or "").split())
@@ -3527,7 +3618,7 @@ class InteractiveArm:
             return
 
         centers = np.linspace(0.9, 0.1, num=visible_count)
-        self._waypoint_item_height = min(0.18, 0.75 / visible_count)
+        self._waypoint_item_height = min(0.14, 0.7 / visible_count)
         if visible_count > 1:
             spacing = float(np.diff(centers).min()) if visible_count > 1 else 0.0
             self._waypoint_item_gap = max(spacing - self._waypoint_item_height, 0.01)
@@ -3541,12 +3632,13 @@ class InteractiveArm:
             waypoint = self.waypoints[index]
             center = centers[visible_idx]
             y = center - self._waypoint_item_height / 2
+            face_color = self._waypoint_color_for_name(waypoint.name or "")
             rect = Rectangle(
                 (0.02, y),
                 0.96,
                 min(self._waypoint_item_height, 0.9),
-                facecolor="#ffffff",
-                edgecolor="#cccccc",
+                facecolor=face_color,
+                edgecolor="#94a3b8",
                 linewidth=1,
             )
             if index == self._selected_waypoint_index:
@@ -3556,25 +3648,25 @@ class InteractiveArm:
             self._waypoint_index_map.append(index)
 
             display_name = waypoint.name or f"{index + 1}"
-            name_line = f"#{index + 1}: {display_name}"
-            position_text = (
-                f"x={waypoint.position[0]:.3f}, "
-                f"y={waypoint.position[1]:.3f}, z={waypoint.position[2]:.3f}"
+            name_line = f"#{index + 1} {display_name}"
+            meta_text = (
+                f"{waypoint.duration:.2f}s • "
+                f"x={waypoint.position[0]:.3f} • "
+                f"y={waypoint.position[1]:.3f} • "
+                f"z={waypoint.position[2]:.3f} • "
+                f"Wrist {self._slider_value_from_pitch(waypoint.wrist_pitch):.1f}° • "
+                f"Rot {math.degrees(waypoint.wrist_rotation):.1f}° • "
+                f"Grip {math.degrees(waypoint.gripper_angle):.1f}°"
             )
-            pitch_text = (
-                f"Wrist: {self._slider_value_from_pitch(waypoint.wrist_pitch):.1f}°"
-            )
-            rotation_text = f"Rotation: {math.degrees(waypoint.wrist_rotation):.1f}°"
-            gripper_text = f"Gripper: {math.degrees(waypoint.gripper_angle):.1f}°"
             text = self.waypoint_ax.text(
                 0.04,
                 y + self._waypoint_item_height / 2,
-                f"{name_line}\n{position_text}\n{waypoint.duration:.2f} s, {pitch_text}\n"
-                f"{rotation_text}, {gripper_text}",
+                f"{name_line} | {meta_text}",
                 va="center",
                 ha="left",
-                fontsize=9,
-                color="#333333",
+                fontsize=8.5,
+                color=self._contrasting_text_color(face_color),
+                fontweight="bold",
             )
             self._waypoint_texts.append(text)
 
@@ -3665,6 +3757,26 @@ class InteractiveArm:
             slider.ax.figure.canvas.draw_idle()
         finally:
             self._updating_subroutine_scroll = False
+
+    def _update_timeline_scroll_slider(self) -> None:
+        slider = self._timeline_scroll_slider
+        if slider is None:
+            return
+        total_entries = len(self._timeline_entries)
+        visible_count = min(total_entries, self._max_visible_timeline)
+        max_scroll = max(total_entries - visible_count, 0)
+        try:
+            self._updating_timeline_scroll = True
+            slider.valmax = max_scroll if max_scroll > 0 else 0
+            slider.valmin = 0
+            slider.ax.set_ylim(slider.valmin, max(slider.valmax, 0.01))
+            clamped_offset = int(np.clip(self._timeline_scroll_offset, 0, max_scroll))
+            target_val = slider.valmax - clamped_offset
+            if target_val != slider.val:
+                slider.set_val(target_val)
+            slider.ax.figure.canvas.draw_idle()
+        finally:
+            self._updating_timeline_scroll = False
 
     def _ensure_selected_waypoint_visible(self) -> None:
         if self._selected_waypoint_index is None:
@@ -4563,6 +4675,23 @@ class InteractiveArm:
         self._subroutine_scroll_offset = clamped
         self._refresh_subroutine_list_display()
         self._highlight_selected_subroutine()
+
+    def _handle_timeline_scroll(self, value: float) -> None:  # pragma: no cover - UI interaction
+        if self._updating_timeline_scroll:
+            return
+        slider = self._timeline_scroll_slider
+        total_entries = len(self._timeline_entries)
+        visible_count = min(total_entries, self._max_visible_timeline)
+        max_scroll = max(total_entries - visible_count, 0)
+        effective_value = value
+        if slider is not None:
+            effective_value = slider.valmax - value
+        clamped = int(np.clip(round(effective_value), 0, max_scroll))
+        if clamped == self._timeline_scroll_offset:
+            return
+        self._timeline_scroll_offset = clamped
+        self._refresh_timeline_display()
+        self._highlight_selected_timeline()
 
     def _load_waypoint_for_editing(self, index: int, *, move_robot: bool = False) -> None:
         if not (0 <= index < len(self.waypoints)):
