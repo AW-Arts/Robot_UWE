@@ -209,13 +209,21 @@ class InteractiveArm:
         self.wrist_pitch = float(np.clip(wrist_pitch, *self._wrist_pitch_limits))
         self._last_wrist_pitch = self.wrist_pitch
         self.move_time_ms = move_time_ms
+        self._base_step_xy = step_xy
+        self._base_step_z = step_z
         self.step_xy = step_xy
         self.step_z = step_z
+        self._base_nudge_degrees = 5.0
+        self.nudge_multiplier = 1.0
+        self._nudge_multiplier_limits = (0.1, 10.0)
+        self._nudge_multiplier_step = 0.5
         self._base_servo_configs = deepcopy(DEFAULT_SERVO_CONFIGS)
         self.servo_configs: dict[int, ServoConfig] = dict(self._base_servo_configs)
         self.servo_multipliers: dict[int, float] = {
             index: 1.0 for index in self._base_servo_configs
         }
+        self._nudge_multiplier_labels: list[object] = []
+        self._calibration_nudge_buttons: tuple[Button, Button] | None = None
         self.servo_inversions: list[bool] = [False] * len(self._SERVO_METADATA)
         self._invert_button_inactive_color = "0.85"
         self._invert_button_active_color = "#90ee90"
@@ -2236,6 +2244,20 @@ class InteractiveArm:
         )
         axes.append(title_ax)
 
+        multiplier_height = 0.05
+        multiplier_width = 0.26
+        multiplier_bottom = self._panel_content_top - 0.12 - multiplier_height
+        multiplier_left = 1.0 - self._panel_margin - multiplier_width
+        axes.extend(
+            self._build_nudge_multiplier_controls(
+                panel_key,
+                left=multiplier_left,
+                bottom=multiplier_bottom,
+                width=multiplier_width,
+                height=multiplier_height,
+            )
+        )
+
         # Bottom controls (never overlap the pad)
         home_h = 0.11
         slider_h = 0.085
@@ -2276,7 +2298,7 @@ class InteractiveArm:
         axes.append(home_ax)
 
         # D-pad region (3x3 grid: Up/Down/Left/Right + Z+/Z- column)
-        pad_top = self._panel_content_top - 0.12
+        pad_top = multiplier_bottom - 0.02
         pad_bottom = slider_bottom + slider_h + gap
         pad_left = self._panel_margin
         pad_right = 1.0 - self._panel_margin
@@ -2309,12 +2331,12 @@ class InteractiveArm:
             return btn
 
         button_defs = {
-            "up": (1, 2, "▲", (0.0, self.step_xy, 0.0)),
-            "down": (1, 0, "▼", (0.0, -self.step_xy, 0.0)),
-            "left": (0, 1, "◀", (-self.step_xy, 0.0, 0.0)),
-            "right": (2, 1, "▶", (self.step_xy, 0.0, 0.0)),
-            "raise": (2, 2, "Z+", (0.0, 0.0, self.step_z)),
-            "lower": (2, 0, "Z-", (0.0, 0.0, -self.step_z)),
+            "up": (1, 2, "▲", (0.0, self._base_step_xy, 0.0)),
+            "down": (1, 0, "▼", (0.0, -self._base_step_xy, 0.0)),
+            "left": (0, 1, "◀", (-self._base_step_xy, 0.0, 0.0)),
+            "right": (2, 1, "▶", (self._base_step_xy, 0.0, 0.0)),
+            "raise": (2, 2, "Z+", (0.0, 0.0, self._base_step_z)),
+            "lower": (2, 0, "Z-", (0.0, 0.0, -self._base_step_z)),
         }
 
         for name, (col, row, label, delta) in button_defs.items():
@@ -2358,7 +2380,21 @@ class InteractiveArm:
         )
         axes.append(title_ax)
 
-        top_edge = self._panel_content_top - 0.12
+        multiplier_height = 0.045
+        multiplier_width = 0.26
+        multiplier_bottom = self._panel_content_top - 0.12 - multiplier_height
+        multiplier_left = 1.0 - self._panel_margin - multiplier_width
+        axes.extend(
+            self._build_nudge_multiplier_controls(
+                panel_key,
+                left=multiplier_left,
+                bottom=multiplier_bottom,
+                width=multiplier_width,
+                height=multiplier_height,
+            )
+        )
+
+        top_edge = multiplier_bottom - 0.02
         bottom_edge = self._panel_margin + 0.18
         row_gap = 0.02
         available_height = max(
@@ -2426,8 +2462,12 @@ class InteractiveArm:
             plus_button = Button(plus_ax, "+", hovercolor="0.975")
             invert_button = Button(invert_ax, "Inv", hovercolor="0.975")
 
-            minus_button.on_clicked(self._make_servo_adjust_callback(index, -math.radians(5)))
-            plus_button.on_clicked(self._make_servo_adjust_callback(index, math.radians(5)))
+            minus_button.on_clicked(
+                self._make_servo_adjust_callback(index, -math.radians(self._base_nudge_degrees))
+            )
+            plus_button.on_clicked(
+                self._make_servo_adjust_callback(index, math.radians(self._base_nudge_degrees))
+            )
             invert_button.on_clicked(self._make_inversion_toggle_callback(index))
 
             self.servo_buttons.extend([minus_button, plus_button])
@@ -2632,11 +2672,13 @@ class InteractiveArm:
             nudge_height,
         )
 
-        nudge_minus = Button(nudge_minus_ax, "Nudge -5°", hovercolor="0.95")
-        nudge_minus.on_clicked(self._make_calibration_nudge_callback(-5.0))
-        nudge_plus = Button(nudge_plus_ax, "Nudge +5°", hovercolor="0.95")
-        nudge_plus.on_clicked(self._make_calibration_nudge_callback(5.0))
+        nudge_minus = Button(nudge_minus_ax, "", hovercolor="0.95")
+        nudge_minus.on_clicked(self._make_calibration_nudge_callback(-self._base_nudge_degrees))
+        nudge_plus = Button(nudge_plus_ax, "", hovercolor="0.95")
+        nudge_plus.on_clicked(self._make_calibration_nudge_callback(self._base_nudge_degrees))
         self._panel_interactive_widgets[panel_key].extend([nudge_minus, nudge_plus])
+        self._calibration_nudge_buttons = (nudge_minus, nudge_plus)
+        self._update_calibration_nudge_labels()
         axes.extend([nudge_minus_ax, nudge_plus_ax])
 
         return axes
@@ -4039,15 +4081,116 @@ class InteractiveArm:
         ]
 
 
+    def _nudge_step_degrees(self) -> float:
+        return self._base_nudge_degrees * self.nudge_multiplier
+
+    def _update_calibration_nudge_labels(self) -> None:
+        if self._calibration_nudge_buttons is None:
+            return
+
+        minus_button, plus_button = self._calibration_nudge_buttons
+        label = f"{self._nudge_step_degrees():.1f}°"
+        try:
+            minus_button.label.set_text(f"Nudge -{label}")
+            plus_button.label.set_text(f"Nudge +{label}")
+        except Exception:
+            pass
+
+    def _update_nudge_multiplier_labels(self) -> None:
+        label_text = f"Nudge ×{self.nudge_multiplier:.2g} ({self._nudge_step_degrees():.1f}°)"
+        for text in self._nudge_multiplier_labels:
+            try:
+                text.set_text(label_text)
+            except Exception:
+                continue
+        self._update_calibration_nudge_labels()
+        try:
+            self.figure.canvas.draw_idle()
+        except Exception:
+            pass
+
+    def _set_nudge_multiplier(self, multiplier: float) -> None:
+        clamped = float(np.clip(multiplier, *self._nudge_multiplier_limits))
+        self.nudge_multiplier = clamped
+        self._update_nudge_multiplier_labels()
+
+    def _change_nudge_multiplier(self, delta: float) -> None:
+        self._set_nudge_multiplier(self.nudge_multiplier + delta)
+
+    def _build_nudge_multiplier_controls(
+        self,
+        panel_key: str,
+        *,
+        left: float,
+        bottom: float,
+        width: float,
+        height: float,
+    ) -> list:
+        axes: list = []
+        gap = 0.012
+        label_width = width * 0.54
+        button_width = max((width - label_width - gap) / 2.0, 0.05)
+
+        label_ax = self._panel_axes(left, bottom, label_width, height)
+        label_ax.axis("off")
+        label = label_ax.text(
+            0.0,
+            0.5,
+            "",
+            va="center",
+            ha="left",
+            fontsize=8.5,
+            fontweight="bold",
+            color="#0f172a",
+        )
+        self._nudge_multiplier_labels.append(label)
+        axes.append(label_ax)
+
+        minus_ax = self._panel_axes(
+            left + label_width + gap,
+            bottom,
+            button_width,
+            height,
+        )
+        plus_ax = self._panel_axes(
+            left + label_width + gap + button_width,
+            bottom,
+            button_width,
+            height,
+        )
+
+        minus_button = Button(minus_ax, f"-{self._nudge_multiplier_step:.1f}", hovercolor="#dbeafe")
+        minus_button.color = "#e2e8f0"
+        minus_button.hovercolor = "#dbeafe"
+        minus_button.ax.set_facecolor(minus_button.color)
+        minus_button.on_clicked(
+            lambda _event: self._change_nudge_multiplier(-self._nudge_multiplier_step)
+        )
+
+        plus_button = Button(plus_ax, f"+{self._nudge_multiplier_step:.1f}", hovercolor="#dbeafe")
+        plus_button.color = "#e2e8f0"
+        plus_button.hovercolor = "#dbeafe"
+        plus_button.ax.set_facecolor(plus_button.color)
+        plus_button.on_clicked(
+            lambda _event: self._change_nudge_multiplier(self._nudge_multiplier_step)
+        )
+
+        self._panel_interactive_widgets[panel_key].extend([minus_button, plus_button])
+        axes.extend([minus_ax, plus_ax])
+
+        self._update_nudge_multiplier_labels()
+        return axes
+
     def _make_move_callback(self, delta: tuple[float, float, float]):
         def _callback(event) -> None:  # pragma: no cover - UI interaction
-            self._nudge_target(*delta)
+            scaled = tuple(component * self.nudge_multiplier for component in delta)
+            self._nudge_target(*scaled)
 
         return _callback
 
     def _make_servo_adjust_callback(self, index: int, delta: float):
         def _callback(event) -> None:  # pragma: no cover - UI interaction
-            self._adjust_servo(index, delta)
+            self._adjust_servo(index, delta * self.nudge_multiplier)
 
         return _callback
 
@@ -4128,7 +4271,8 @@ class InteractiveArm:
 
     def _make_calibration_nudge_callback(self, delta_degrees: float):
         def _callback(_event=None) -> None:  # pragma: no cover - UI interaction
-            self._nudge_current_calibration_step(math.radians(delta_degrees))
+            scaled = delta_degrees * self.nudge_multiplier
+            self._nudge_current_calibration_step(math.radians(scaled))
 
         return _callback
 
