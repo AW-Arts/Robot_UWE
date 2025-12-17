@@ -976,9 +976,10 @@ class InteractiveArm:
     def _cancel_playback(self) -> None:
         """Stop any running waypoint or timeline playback before manual control."""
         if self._timeline_playback_thread and self._timeline_playback_thread.is_alive():
-            self._stop_timeline_playback()
+            self._stop_timeline_playback(clear_pending=True)
         if self._waypoint_playback_thread and self._waypoint_playback_thread.is_alive():
-            self._stop_waypoint_playback()
+            self._stop_waypoint_playback(clear_pending=True)
+        self._cancel_pending_commands()
 
     def update_robot(self, *, move_time_ms: int | None = None) -> None:
         self._cancel_playback()
@@ -4893,6 +4894,7 @@ class InteractiveArm:
             self.update_robot(move_time_ms=duration_ms)
 
     def _handle_update_waypoint(self, _event=None) -> None:  # pragma: no cover - UI interaction
+        self._cancel_playback()
         if self._selected_waypoint_index is None:
             _LOGGER.info("Select a waypoint to update")
             return
@@ -4948,7 +4950,7 @@ class InteractiveArm:
             return
         if not (0 <= self._selected_waypoint_index < len(self.waypoints)):
             return
-        self._stop_waypoint_playback()
+        self._stop_waypoint_playback(clear_pending=True)
         self.waypoints.pop(self._selected_waypoint_index)
         if self._selected_waypoint_index >= len(self.waypoints):
             self._selected_waypoint_index = len(self.waypoints) - 1
@@ -4962,7 +4964,7 @@ class InteractiveArm:
     def _run_single_waypoint(self, index: int) -> None:
         if not (0 <= index < len(self.waypoints)):
             return
-        self._stop_waypoint_playback()
+        self._stop_waypoint_playback(clear_pending=True)
         self._waypoint_stop_event.clear()
         waypoint = deepcopy(self.waypoints[index])
 
@@ -5045,7 +5047,7 @@ class InteractiveArm:
         self._save_waypoints()
 
     def _handle_clear_waypoints(self, _event=None) -> None:  # pragma: no cover - UI interaction
-        self._stop_waypoint_playback()
+        self._stop_waypoint_playback(clear_pending=True)
         self.waypoints.clear()
         self._selected_waypoint_index = None
         self._waypoint_scroll_offset = 0
@@ -5142,7 +5144,7 @@ class InteractiveArm:
         self._save_timeline()
 
     def _handle_clear_timeline(self, _event=None) -> None:  # pragma: no cover - UI interaction
-        self._stop_timeline_playback()
+        self._stop_timeline_playback(clear_pending=True)
         self._timeline_entries.clear()
         self._selected_timeline_index = None
         self._refresh_timeline_display()
@@ -5151,13 +5153,13 @@ class InteractiveArm:
 
     def _handle_play_timeline(self, _event=None) -> None:  # pragma: no cover - UI interaction
         if self._timeline_playback_thread and self._timeline_playback_thread.is_alive():
-            self._stop_timeline_playback()
+            self._stop_timeline_playback(clear_pending=True)
             return
         valid_entries = [entry for entry in self._timeline_entries if not entry.missing]
         if not valid_entries:
             _LOGGER.info("No playable timeline entries; add subroutines first")
             return
-        self._stop_waypoint_playback()
+        self._stop_waypoint_playback(clear_pending=True)
         self._timeline_stop_event.clear()
         self._playback_active = True
         self._mark_motion_active()
@@ -5178,7 +5180,7 @@ class InteractiveArm:
 
     def _handle_play_waypoints(self, _event=None) -> None:  # pragma: no cover - UI interaction
         if self._waypoint_playback_thread and self._waypoint_playback_thread.is_alive():
-            self._stop_waypoint_playback()
+            self._stop_waypoint_playback(clear_pending=True)
             return
         if not self.waypoints:
             _LOGGER.info("No waypoints queued; add at least one before playback")
@@ -5202,7 +5204,7 @@ class InteractiveArm:
         button.label.set_text(label)
         button.ax.figure.canvas.draw_idle()
 
-    def _stop_waypoint_playback(self) -> None:
+    def _stop_waypoint_playback(self, *, clear_pending: bool = False) -> None:
         if (
             self._waypoint_playback_thread
             and self._waypoint_playback_thread.is_alive()
@@ -5211,6 +5213,8 @@ class InteractiveArm:
             self._waypoint_playback_thread.join(timeout=1.0)
         self._waypoint_playback_thread = None
         self._waypoint_stop_event.clear()
+        if clear_pending:
+            self._cancel_pending_commands()
         self._playback_active = False
         self._update_idle_leds()
         self._update_play_button_label(running=False)
@@ -5254,12 +5258,14 @@ class InteractiveArm:
         button.ax.set_facecolor(facecolor)
         button.ax.figure.canvas.draw_idle()
 
-    def _stop_timeline_playback(self) -> None:
+    def _stop_timeline_playback(self, *, clear_pending: bool = False) -> None:
         if self._timeline_playback_thread and self._timeline_playback_thread.is_alive():
             self._timeline_stop_event.set()
             self._timeline_playback_thread.join(timeout=1.0)
         self._timeline_playback_thread = None
         self._timeline_stop_event.clear()
+        if clear_pending:
+            self._cancel_pending_commands()
         self._playback_active = False
         self._update_idle_leds()
         self._update_timeline_play_button(running=False)
