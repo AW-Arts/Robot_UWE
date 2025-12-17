@@ -357,6 +357,40 @@ def test_manual_move_cancels_playback(monkeypatch, interactive_module) -> None:
         assert not arm._timeline_stop_event.is_set()
 
 
+def test_update_waypoint_uses_latest_joints(monkeypatch, interactive_module) -> None:
+    controller = _BasicController()
+    with _prepare_arm(monkeypatch, interactive_module, controller) as arm:
+        arm.waypoints = [
+            interactive_module.Waypoint(
+                name="1",
+                position=np.zeros(3),
+                duration=1.0,
+                wrist_pitch=0.0,
+                wrist_rotation=0.0,
+                gripper_angle=0.0,
+            )
+        ]
+        arm._selected_waypoint_index = 0
+
+        joint_state = [0.2, 0.4, -0.25, 0.1, 0.3, -0.2]
+        arm.feedback_joints = list(joint_state)
+        arm.commanded_joints = list(joint_state)
+        arm.wrist_pitch = -1.0
+        arm.wrist_rotation = -1.0
+        arm.gripper_angle = 0.5
+        arm.target[:] = np.array([0.05, 0.05, 0.05])
+
+        arm._handle_update_waypoint()
+
+        updated = arm.waypoints[0]
+        expected_pose = arm.kin.forward(joint_state[:4])
+        np.testing.assert_allclose(updated.position, expected_pose[:3, 3])
+        expected_pitch = joint_state[1] + joint_state[2] + joint_state[3]
+        assert math.isclose(updated.wrist_pitch, expected_pitch, rel_tol=1e-6)
+        assert math.isclose(updated.wrist_rotation, joint_state[4], rel_tol=1e-6)
+        assert math.isclose(updated.gripper_angle, joint_state[5], rel_tol=1e-6)
+
+
 def test_zero_reference_lines_follow_current_pose(monkeypatch, interactive_module) -> None:
     controller = _BasicController()
     with _prepare_arm(monkeypatch, interactive_module, controller) as arm:
