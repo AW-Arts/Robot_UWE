@@ -4909,11 +4909,46 @@ class InteractiveArm:
                 duration = 2.0
         duration = max(0.1, duration)
         waypoint = self.waypoints[self._selected_waypoint_index]
-        waypoint.position = self._clamp_target(np.array(self.target))
+
+        joint_snapshot = self.feedback_joints or self.commanded_joints
+        position = self._clamp_target(np.array(self.target))
+        wrist_pitch = self.wrist_pitch
+        wrist_rotation = self.wrist_rotation
+        gripper_angle = self.gripper_angle
+
+        if joint_snapshot and len(joint_snapshot) >= 4:
+            try:
+                pose = self.kin.forward(joint_snapshot[:4])
+            except Exception:
+                pass
+            else:
+                position = np.array(pose[:3, 3], dtype=float)
+                wrist_pitch = float(
+                    np.clip(
+                        joint_snapshot[1] + joint_snapshot[2] + joint_snapshot[3],
+                        *self._wrist_pitch_limits,
+                    )
+                )
+
+        if joint_snapshot and len(joint_snapshot) >= 5:
+            rotation_value = joint_snapshot[4]
+            rotation_config = self.servo_configs.get(4)
+            if rotation_config is not None:
+                rotation_value = rotation_config.clamp_angle(rotation_value)
+            wrist_rotation = rotation_value
+
+        if joint_snapshot and len(joint_snapshot) >= 6:
+            gripper_value = joint_snapshot[5]
+            gripper_config = self.servo_configs.get(5)
+            if gripper_config is not None:
+                gripper_value = gripper_config.clamp_angle(gripper_value)
+            gripper_angle = gripper_value
+
+        waypoint.position = position
         waypoint.duration = duration
-        waypoint.wrist_pitch = self.wrist_pitch
-        waypoint.wrist_rotation = self.wrist_rotation
-        waypoint.gripper_angle = self.gripper_angle
+        waypoint.wrist_pitch = wrist_pitch
+        waypoint.wrist_rotation = wrist_rotation
+        waypoint.gripper_angle = gripper_angle
         name_text = self._waypoint_name_box.text if self._waypoint_name_box else waypoint.name
         waypoint.name = self._normalise_waypoint_name(
             name_text, self._selected_waypoint_index
