@@ -216,6 +216,8 @@ class InteractiveArm:
             index: 1.0 for index in self._base_servo_configs
         }
         self.servo_inversions: list[bool] = [False] * len(self._SERVO_METADATA)
+        self._last_command_at: float | None = None
+        self._last_feedback_at: float | None = None
         self._invert_button_inactive_color = "0.85"
         self._invert_button_active_color = "#90ee90"
         self._operation_mode: str = "live"
@@ -918,6 +920,7 @@ class InteractiveArm:
                 self._update_visuals(self.current_joints)
 
         self.feedback_joints = list(corrected)
+        self._last_feedback_at = time.monotonic()
         self._update_servo_readouts()
         self._initial_feedback_move_pending = True
 
@@ -4620,6 +4623,17 @@ class InteractiveArm:
             duration_ms = int(max(0.02, waypoint.duration) * 1000)
             self.update_robot(move_time_ms=duration_ms)
 
+    def _latest_joint_snapshot(self) -> list[float] | None:
+        feedback = self.feedback_joints
+        command = self.commanded_joints
+        if feedback and command:
+            feedback_time = self._last_feedback_at or float("-inf")
+            command_time = self._last_command_at or float("-inf")
+            return feedback if feedback_time >= command_time else command
+        if command:
+            return command
+        return feedback
+
     def _handle_update_waypoint(self, _event=None) -> None:  # pragma: no cover - UI interaction
         if self._selected_waypoint_index is None:
             _LOGGER.info("Select a waypoint to update")
@@ -4636,7 +4650,7 @@ class InteractiveArm:
         duration = max(0.1, duration)
         waypoint = self.waypoints[self._selected_waypoint_index]
 
-        joint_snapshot = self.feedback_joints or self.commanded_joints
+        joint_snapshot = self._latest_joint_snapshot()
         position = self._clamp_target(np.array(self.target))
         wrist_pitch = self.wrist_pitch
         wrist_rotation = self.wrist_rotation
@@ -5685,6 +5699,7 @@ class InteractiveArm:
 
         self._save_calibration_data()
         self.feedback_joints = list(updated_feedback)
+        self._last_feedback_at = time.monotonic()
         self.current_joints = list(updated_feedback)
         self.commanded_joints = list(updated_feedback)
         self._last_commanded_raw = tuple(
@@ -5708,6 +5723,7 @@ class InteractiveArm:
 
     def _apply_feedback(self, corrected: list[float]) -> None:
         self.feedback_joints = list(corrected)
+        self._last_feedback_at = time.monotonic()
         for idx, angle in enumerate(corrected):
             if idx < len(self.current_joints):
                 self.current_joints[idx] = angle
@@ -6213,6 +6229,7 @@ class InteractiveArm:
 
         self._store_setpoint(joints)
         self.commanded_joints = list(joints)
+        self._last_command_at = time.monotonic()
         if not self._calibration_active:
             self.feedback_joints = None
         self._update_visuals(self.current_joints)
