@@ -391,6 +391,36 @@ def test_update_waypoint_uses_latest_joints(monkeypatch, interactive_module) -> 
         assert math.isclose(updated.gripper_angle, joint_state[5], rel_tol=1e-6)
 
 
+def test_update_waypoint_prefers_recent_commands(monkeypatch, interactive_module) -> None:
+    controller = _BasicController()
+    with _prepare_arm(monkeypatch, interactive_module, controller) as arm:
+        arm.waypoints = [
+            interactive_module.Waypoint(
+                name="1",
+                position=np.zeros(3),
+                duration=1.0,
+                wrist_pitch=0.0,
+                wrist_rotation=0.0,
+                gripper_angle=0.0,
+            )
+        ]
+        arm._selected_waypoint_index = 0
+
+        stale_feedback = [0.0, 0.1, -0.05, 0.02, -0.8, -0.6]
+        recent_command = [0.0, 0.1, -0.05, 0.02, 0.6, 0.8]
+
+        arm.feedback_joints = list(stale_feedback)
+        arm.commanded_joints = list(recent_command)
+        arm._last_feedback_at = 10.0
+        arm._last_command_at = 20.0
+
+        arm._handle_update_waypoint()
+
+        updated = arm.waypoints[0]
+        assert math.isclose(updated.wrist_rotation, recent_command[4], rel_tol=1e-6)
+        assert math.isclose(updated.gripper_angle, recent_command[5], rel_tol=1e-6)
+
+
 def test_zero_reference_lines_follow_current_pose(monkeypatch, interactive_module) -> None:
     controller = _BasicController()
     with _prepare_arm(monkeypatch, interactive_module, controller) as arm:
