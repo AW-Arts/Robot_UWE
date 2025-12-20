@@ -39,6 +39,19 @@ def test_load_led_config_ssc32_structured(tmp_path) -> None:
     assert config["blink"]["fast_hz"] == 4.0
 
 
+def test_load_led_config_seeds_defaults_when_missing(tmp_path) -> None:
+    config_root = tmp_path / "config"
+    config_root.mkdir()
+    (config_root / "servo_offsets.json").write_text("{}")
+    config_path = config_root / "led_pins.json"
+
+    config = load_led_config(config_path)
+
+    assert config_path.exists()
+    assert config["backend"] == "ssc32_pwm_led"
+    assert config["led_channels"]["red"] == 8
+
+
 def test_ssc32_driver_filters_reserved_and_drives() -> None:
     sent: list[bytes] = []
     driver = SSC32PWMLEDDriver(
