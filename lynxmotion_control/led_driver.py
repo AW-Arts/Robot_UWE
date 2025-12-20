@@ -5,13 +5,14 @@ import importlib
 import importlib.util
 import json
 import logging
+import shutil
 import sys
 import threading
 import time
 from pathlib import Path
 from typing import Callable, Dict
 
-from .config_paths import CONFIG_ROOT
+from .config_paths import CONFIG_BUNDLE_DIR, CONFIG_ROOT
 
 from .serial_comm import SSC32Command
 from .status_leds import LEDState
@@ -161,10 +162,28 @@ def load_led_config(config_path: Path = CONFIG_PATH) -> Dict[str, object]:
     """
 
     if not config_path.exists():
-        _LOGGER.info(
-            "No LED pin map found at %s; hardware LEDs will be disabled", config_path
-        )
-        return _NOOP_CONFIG
+        bundled_default = CONFIG_BUNDLE_DIR / config_path.name
+        if bundled_default.exists():
+            try:
+                config_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(bundled_default, config_path)
+                _LOGGER.info(
+                    "Seeded default LED configuration from %s to %s",
+                    bundled_default,
+                    config_path,
+                )
+            except Exception as exc:  # pragma: no cover - depends on filesystem state
+                _LOGGER.warning(
+                    "Failed to seed default LED configuration from %s: %s; hardware LEDs will be disabled",
+                    bundled_default,
+                    exc,
+                )
+                return _NOOP_CONFIG
+        else:
+            _LOGGER.info(
+                "No LED pin map found at %s; hardware LEDs will be disabled", config_path
+            )
+            return _NOOP_CONFIG
     try:
         raw = json.loads(config_path.read_text())
     except Exception as exc:  # pragma: no cover - exercised via log path
