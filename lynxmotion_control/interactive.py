@@ -167,7 +167,15 @@ class TimelineDragState:
 
 
 class InteractiveArm:
-    """Matplotlib based interactive controller."""
+    """Matplotlib-based controller for teleoperation and teaching.
+
+    The class owns the 3D plotting surface, user input hooks, waypoint/timeline
+    editors, and a worker thread that sends smoothed joint commands to either
+    a physical SSC-32 controller or the print-only simulation backend. The
+    constructor wires up the UI, seeds default calibration/limit data, and
+    immediately runs the home sequence so the arm image and controller state
+    start in sync.
+    """
 
     _SERVO_METADATA = [
         ("Base rotation", "HS-755HB", "lower servo, inside the base"),
@@ -6133,6 +6141,13 @@ class InteractiveArm:
         self.target[:] = position
 
     def _command_worker(self) -> None:
+        """Continuously drain the command queue and stream smoothed segments.
+
+        The worker enforces soft-start behaviour, aborts gracefully if
+        calibration mode is toggled mid-motion, mirrors feedback into the
+        Matplotlib display, and ensures the shared servo readout state stays
+        coherent even if an exception occurs.
+        """
         while True:
             joints_raw, move_time, soft_start = self._command_queue.get()
             try:
@@ -6211,6 +6226,13 @@ class InteractiveArm:
         soft_start: bool = True,
         replace: bool = True,
     ) -> None:
+        """Queue a joint target for asynchronous execution.
+
+        This helper centralises smoothing, setpoint bookkeeping, and the logic
+        for skipping commands during calibration or the initial feedback pass.
+        When ``replace`` is true the queue keeps only the newest request, which
+        keeps the UI responsive during rapid dragging or keyboard control.
+        """
         adjusted_move_time = move_time_ms
         if self._initial_feedback_move_pending:
             if adjusted_move_time is None:
