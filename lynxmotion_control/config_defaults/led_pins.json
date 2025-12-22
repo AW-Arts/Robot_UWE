@@ -3,7 +3,10 @@
   "led_channels": {
     "red": 8,
     "amber": 9,
-    "green": 10
+    "green": 10,
+    "blue": 11,
+    "yellow": 12,
+    "white": 13
   },
   "pulse_us": {
     "off": 0,

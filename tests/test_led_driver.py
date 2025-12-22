@@ -24,7 +24,14 @@ def test_load_led_config_ssc32_structured(tmp_path) -> None:
     payload = {
         "backend": "ssc32_pwm_led",
         "servo_reserved_channels": [0, 1, 2, 3, 4, 5, 6, 7],
-        "led_channels": {"red": 8, "amber": 9, "green": 10},
+        "led_channels": {
+            "red": 8,
+            "amber": 9,
+            "green": 10,
+            "blue": 11,
+            "yellow": 12,
+            "white": 13,
+        },
         "pulse_us": {"off": 0, "on": 2000, "dim": 1300},
         "blink": {"slow_hz": 1, "fast_hz": 4},
     }
@@ -34,7 +41,14 @@ def test_load_led_config_ssc32_structured(tmp_path) -> None:
     config = load_led_config(config_path)
 
     assert config["backend"] == "ssc32_pwm_led"
-    assert config["led_channels"] == {"red": 8, "amber": 9, "green": 10}
+    assert config["led_channels"] == {
+        "red": 8,
+        "amber": 9,
+        "green": 10,
+        "blue": 11,
+        "yellow": 12,
+        "white": 13,
+    }
     assert config["pulse_us"]["on"] == 2000
     assert config["blink"]["fast_hz"] == 4.0
 
@@ -49,7 +63,14 @@ def test_load_led_config_seeds_defaults_when_missing(tmp_path) -> None:
 
     assert config_path.exists()
     assert config["backend"] == "ssc32_pwm_led"
-    assert config["led_channels"]["red"] == 8
+    assert config["led_channels"] == {
+        "red": 8,
+        "amber": 9,
+        "green": 10,
+        "blue": 11,
+        "yellow": 12,
+        "white": 13,
+    }
 
 
 def test_ssc32_driver_filters_reserved_and_drives() -> None:
