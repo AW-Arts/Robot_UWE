@@ -237,14 +237,22 @@ def load_led_config(config_path: Path = CONFIG_PATH) -> Dict[str, object]:
         )
         return _NOOP_CONFIG
     if "backend" not in raw:
-        return _parse_legacy_gpio_config(raw, config_path)
-    backend = raw.get("backend")
-    if backend == "gpio":
-        return _parse_gpio_config(raw, config_path)
-    if backend == "ssc32_pwm_led":
-        return _parse_ssc32_config(raw, config_path)
-    _LOGGER.warning("Unsupported LED backend '%s' in %s; disabling hardware LEDs", backend, config_path)
-    return _NOOP_CONFIG
+        config = _parse_legacy_gpio_config(raw, config_path)
+    else:
+        backend = raw.get("backend")
+        if backend == "gpio":
+            config = _parse_gpio_config(raw, config_path)
+        elif backend == "ssc32_pwm_led":
+            config = _parse_ssc32_config(raw, config_path)
+        else:
+            _LOGGER.warning(
+                "Unsupported LED backend '%s' in %s; disabling hardware LEDs", backend, config_path
+            )
+            return _NOOP_CONFIG
+
+    config["_config_path"] = str(config_path)
+    _log_loaded_config(config)
+    return config
 
 
 def build_drive_leds(
@@ -381,6 +389,29 @@ def _parse_ssc32_config(raw: dict, config_path: Path) -> dict[str, object]:
         },
         "servo_reserved_channels": reserved,
     }
+
+
+def _log_loaded_config(config: dict[str, object]) -> None:
+    backend = config.get("backend", "noop")
+    config_path = config.get("_config_path")
+    if backend == "ssc32_pwm_led":
+        channels = config.get("led_channels", {})
+        pulses = config.get("pulse_us", {})
+        blink = config.get("blink", {})
+        reserved = config.get("servo_reserved_channels", set())
+        _LOGGER.info(
+            "Loaded SSC-32 LED config from %s -> channels=%s, pulses=%s, blink=%s, reserved=%s",
+            config_path,
+            channels,
+            pulses,
+            blink,
+            reserved,
+        )
+    elif backend == "gpio":
+        pin_map = config.get("pin_map", {})
+        _LOGGER.info("Loaded GPIO LED config from %s -> pins=%s", config_path, pin_map)
+    else:
+        _LOGGER.info("Loaded LED config from %s -> backend=%s (no hardware drive)", config_path, backend)
 
 
 class SSC32PWMLEDDriver:
