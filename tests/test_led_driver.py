@@ -25,7 +25,7 @@ def test_load_led_config_ssc32_structured(tmp_path) -> None:
         "backend": "ssc32_pwm_led",
         "servo_reserved_channels": [0, 1, 2, 3, 4, 5, 6, 7],
         "led_channels": {"red": 8, "amber": 9, "green": 10},
-        "pulse_us": {"off": 500, "on": 2000, "dim": 1300},
+        "pulse_us": {"off": 0, "on": 2000, "dim": 1300},
         "blink": {"slow_hz": 1, "fast_hz": 4},
     }
     config_path = tmp_path / "led_pins.json"
@@ -57,7 +57,7 @@ def test_ssc32_driver_filters_reserved_and_drives() -> None:
     driver = SSC32PWMLEDDriver(
         channel_map={"red": 8, "amber": 0},
         reserved_channels={0},
-        pulse_us={"off": 500, "on": 2000, "dim": 1300},
+        pulse_us={"off": 0, "on": 2000, "dim": 1300},
         blink={"slow_hz": 1.0, "fast_hz": 4.0},
         serial_writer=sent.append,
         tick_s=0.01,
