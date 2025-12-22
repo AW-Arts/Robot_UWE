@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+import threading
 from typing import Protocol, Sequence
 
 from .al5a_kinematics import (
@@ -52,6 +53,7 @@ class AL5ASerialController:
         self.port_name = port
         self.baudrate = baudrate
         self._serial: SerialLike | None = None
+        self._write_lock = threading.Lock()
 
     def connect(self) -> None:
         if self._serial is not None:
@@ -87,6 +89,11 @@ class AL5ASerialController:
             raise RuntimeError("Unable to establish serial connection")
         return self._serial
 
+    def write_bytes(self, data: bytes) -> None:
+        serial_port = self.ensure_connection()
+        with self._write_lock:
+            serial_port.write(data)
+
     def move_joints(
         self,
         joints: Sequence[float],
@@ -101,7 +108,8 @@ class AL5ASerialController:
             servo_channels=servo_channels or DEFAULT_SERVO_CHANNELS,
         )
         command = SSC32Command(pulses, move_time_ms)
-        serial_port.write(command.to_bytes())
+        with self._write_lock:
+            serial_port.write(command.to_bytes())
 
 
 class PrintController:
