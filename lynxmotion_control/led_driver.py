@@ -226,7 +226,11 @@ def load_led_config(config_path: Path = CONFIG_PATH) -> Dict[str, object]:
             )
             return _NOOP_CONFIG
     try:
-        raw = json.loads(config_path.read_text())
+        config_text = config_path.read_text()
+        _LOGGER.info("Reading LED config from %s", config_path)
+        for idx, line in enumerate(config_text.splitlines(), start=1):
+            _LOGGER.info("LED config line %d: %s", idx, line)
+        raw = json.loads(config_text)
     except Exception as exc:  # pragma: no cover - exercised via log path
         _LOGGER.warning("Failed to parse LED pin map at %s: %s", config_path, exc)
         return _NOOP_CONFIG
