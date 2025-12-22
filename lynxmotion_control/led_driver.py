@@ -93,10 +93,20 @@ class LEDDriver:
         self.pin_map = pin_map
         self.gpio = gpio_module or _load_gpio_module()
         self._pwm_channels: dict[int, object] = {}
+        self._last_state_snapshot: Dict[str, LEDState] = {}
+        self._log_interval_s = 5.0
+        self._log_stop_event = threading.Event()
+        self._log_thread = threading.Thread(
+            target=self._log_signals_periodically,
+            name="led-gpio-signal-logger",
+            daemon=True,
+        )
         if not self.gpio:
             _LOGGER.info(
                 "Status LED pin map present but no GPIO backend available; skipping hardware drive"
             )
+        self._log_thread.start()
+        if not self.gpio:
             return
         self.gpio.setmode(self.gpio.BCM)
         for pin in self.pin_map.values():
@@ -106,6 +116,10 @@ class LEDDriver:
     def drive(self, state: Dict[str, LEDState]) -> None:
         if not self.pin_map or not self.gpio:
             return
+        self._last_state_snapshot = {
+            name: LEDState(led_state.pattern, led_state.meaning)
+            for name, led_state in state.items()
+        }
         for name, led_state in state.items():
             pin = self.pin_map.get(name)
             if pin is None:
@@ -138,6 +152,33 @@ class LEDDriver:
         pwm = self._pwm_channels.pop(pin, None)
         if pwm is not None:
             pwm.stop()
+
+    def _describe_gpio_signal(self, pattern: str) -> str:
+        if pattern == "off":
+            return "LOW (off)"
+        if pattern == "solid":
+            return "HIGH (solid)"
+        frequency = _PWM_FREQUENCIES.get(pattern)
+        duty_cycle = _PWM_DUTY_CYCLES.get(pattern)
+        if frequency is not None and duty_cycle is not None:
+            return f"PWM {frequency:.2f} Hz at {duty_cycle:.1f}% duty"
+        return f"Unknown pattern '{pattern}'"
+
+    def _log_signals_periodically(self) -> None:
+        while not self._log_stop_event.is_set():
+            if self.pin_map and self._last_state_snapshot:
+                entries = []
+                for name, led_state in sorted(self._last_state_snapshot.items()):
+                    pin = self.pin_map.get(name)
+                    if pin is None:
+                        continue
+                    signal = self._describe_gpio_signal(led_state.pattern)
+                    entries.append(
+                        f"{name}: pin {pin}, pattern={led_state.pattern}, signal={signal}"
+                    )
+                if entries:
+                    _LOGGER.info("GPIO LED pin signals -> %s", "; ".join(entries))
+            self._log_stop_event.wait(self._log_interval_s)
 
 
 def load_led_pin_map(config_path: Path = CONFIG_PATH) -> Dict[str, int] | None:
@@ -371,6 +412,8 @@ class SSC32PWMLEDDriver:
         self._update_event = threading.Event()
         self._stop_event = threading.Event()
         self._last_pulses: dict[int, int] = {}
+        self._last_log_time = 0.0
+        self._log_interval_s = 5.0
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
@@ -394,6 +437,9 @@ class SSC32PWMLEDDriver:
             if pulses != self._last_pulses:
                 self._send_pulses(pulses)
                 self._last_pulses = pulses
+            if now - self._last_log_time >= self._log_interval_s:
+                self._log_current_signals(pulses)
+                self._last_log_time = now
             self._update_event.wait(self.tick_s)
             self._update_event.clear()
 
@@ -439,6 +485,19 @@ class SSC32PWMLEDDriver:
             self.serial_writer(command)
         except Exception as exc:  # pragma: no cover - depends on runtime IO
             _LOGGER.warning("Failed to write SSC-32 LED command: %s", exc)
+
+    def _log_current_signals(self, pulses: dict[int, int]) -> None:
+        with self._lock:
+            patterns = dict(self._patterns)
+        entries = []
+        for name, channel in sorted(self.channel_map.items()):
+            pulse = pulses.get(channel, self.pulse_us["off"])
+            pattern = patterns.get(name, "off")
+            entries.append(
+                f"{name}: channel {channel}, pattern={pattern}, pulse_us={pulse}"
+            )
+        if entries:
+            _LOGGER.info("SSC-32 LED channel signals -> %s", "; ".join(entries))
 
     @staticmethod
     def _filter_channel_map(channel_map: Dict[str, int], reserved: set[int]) -> Dict[str, int]:

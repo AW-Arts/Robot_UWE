@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import argparse
+import logging
 
 from .interactive import run_demo
 from .serial_comm import AL5ASerialController, PrintController
 
 
 def main() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
+
     parser = argparse.ArgumentParser(description="Interactive Lynxmotion AL5A controller")
     parser.add_argument("--port", help="Serial port for SSC-32/SSC-32U controller")
     parser.add_argument(
