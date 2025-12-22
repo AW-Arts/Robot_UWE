@@ -9,6 +9,7 @@ import shutil
 import sys
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Callable, Dict
 
@@ -202,6 +203,19 @@ def load_led_config(config_path: Path = CONFIG_PATH) -> Dict[str, object]:
     cause the LEDs to run in a no-op mode while still updating logical state.
     """
 
+    resolved_path = config_path.expanduser()
+    try:
+        resolved_path = resolved_path.resolve(strict=False)
+    except Exception:  # pragma: no cover - depends on platform path semantics
+        pass
+    config_path = resolved_path
+    _LOGGER.info(
+        "LED config target path: %s (exists=%s, is_file=%s)",
+        config_path,
+        config_path.exists(),
+        config_path.is_file(),
+    )
+
     if not config_path.exists():
         bundled_default = CONFIG_BUNDLE_DIR / config_path.name
         if bundled_default.exists():
@@ -226,7 +240,20 @@ def load_led_config(config_path: Path = CONFIG_PATH) -> Dict[str, object]:
             )
             return _NOOP_CONFIG
     try:
-        raw = json.loads(config_path.read_text())
+        config_text = config_path.read_text()
+        try:
+            stat = config_path.stat()
+            _LOGGER.info(
+                "LED config file info: size=%d bytes, modified=%s",
+                stat.st_size,
+                datetime.fromtimestamp(stat.st_mtime),
+            )
+        except OSError as stat_exc:  # pragma: no cover - depends on filesystem state
+            _LOGGER.info("LED config file info unavailable: %s", stat_exc)
+        _LOGGER.info("Reading LED config from %s", config_path)
+        for idx, line in enumerate(config_text.splitlines(), start=1):
+            _LOGGER.info("LED config line %d: %s", idx, line)
+        raw = json.loads(config_text)
     except Exception as exc:  # pragma: no cover - exercised via log path
         _LOGGER.warning("Failed to parse LED pin map at %s: %s", config_path, exc)
         return _NOOP_CONFIG
