@@ -117,7 +117,7 @@ Because we are intentionally reusing servo outputs, logical states map to servo 
 
 | Logical state | Pulse width |
 | --- | --- |
-| OFF | 500 µs |
+| OFF | 0–500 µs (default 0 µs) |
 | ON (“solid”) | 2000 µs |
 | DIM (optional) | 1200–1500 µs (1300 µs default) |
 | BLINK | Toggle OFF / ON using the target pulse widths |
@@ -146,7 +146,7 @@ launch when the folder is empty):
     "white": 13
   },
   "pulse_us": {
-    "off": 500,
+    "off": 0,
     "on": 2000,
     "dim": 1300
   },
@@ -162,4 +162,3 @@ The LED driver validates this mapping, ignores reserved channels, and falls back
 ## 10. Explicit prototype disclaimer (include verbatim)
 
 > Prototype limitation: Status indicators are driven using unused servo PWM channels on the SSC-32(U). These outputs are not true GPIO and may exhibit flicker or brightness variation. This implementation is acceptable for prototype demonstration and functional validation only and is not intended for production or safety-rated use.
-
