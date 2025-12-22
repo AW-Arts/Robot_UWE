@@ -573,6 +573,10 @@ class InteractiveArm:
         if controller is None or not hasattr(controller, "ensure_connection"):
             return None
 
+        write_bytes = getattr(controller, "write_bytes", None)
+        if callable(write_bytes):
+            return write_bytes
+
         def _writer(data: bytes) -> None:
             serial_port = controller.ensure_connection()
             serial_port.write(data)
