@@ -1,0 +1,606 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Lynxmotion AL5A – Subsystem Requirement Evidence</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      --bg: #020617;
+      --card-bg: #020617;
+      --border-subtle: rgba(148, 163, 184, 0.35);
+      --accent: #3b82f6;
+      --accent-soft: rgba(59, 130, 246, 0.16);
+      --text: #e5e7eb;
+      --text-soft: #9ca3af;
+      --radius-lg: 14px;
+      --shadow-soft: 0 18px 40px rgba(0, 0, 0, 0.55);
+      --pass: #22c55e;
+      --fail: #f87171;
+      --warn: #fbbf24;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at top, #111827 0, #020617 45%, #020617 100%);
+      color: var(--text);
+      padding: 2.5rem clamp(1.5rem, 4vw, 3.5rem);
+      display: flex;
+      flex-direction: column;
+      gap: 1.75rem;
+    }
+
+    header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 1rem 2rem;
+    }
+
+    h1 {
+      margin: 0;
+      font-weight: 650;
+      letter-spacing: -0.03em;
+      font-size: clamp(1.9rem, 2.8vw, 2.4rem);
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .badge {
+      font-size: 0.85rem;
+      font-weight: 500;
+      padding: 0.15rem 0.6rem;
+      border-radius: 999px;
+      border: 1px solid var(--accent-soft);
+      background: radial-gradient(circle at top left, var(--accent-soft), transparent 60%);
+      color: var(--text-soft);
+    }
+
+    nav.quick-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      padding: 0.55rem;
+      border-radius: 999px;
+      background: rgba(15, 23, 42, 0.94);
+      border: 1px solid var(--border-subtle);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.7);
+    }
+
+    nav.quick-links a {
+      text-decoration: none;
+      font-size: 0.82rem;
+      padding: 0.3rem 0.9rem;
+      border-radius: 999px;
+      color: var(--text-soft);
+      border: 1px solid transparent;
+      transition: all 0.18s ease-out;
+    }
+
+    nav.quick-links a:hover {
+      color: var(--text);
+      border-color: var(--accent-soft);
+      background: radial-gradient(circle at top left, var(--accent-soft), transparent 70%);
+    }
+
+    main {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+      gap: 1.5rem;
+      align-items: flex-start;
+    }
+
+    @media (max-width: 1024px) {
+      main { grid-template-columns: minmax(0, 1fr); }
+    }
+
+    .card {
+      position: relative;
+      background: var(--card-bg);
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--border-subtle);
+      box-shadow: var(--shadow-soft);
+      padding: 1.2rem 1.25rem 1.3rem;
+      overflow: hidden;
+    }
+
+    .card::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle at top left, rgba(59,130,246,0.18), transparent 60%);
+      mix-blend-mode: soft-light;
+      opacity: 0.7;
+      pointer-events: none;
+    }
+
+    .card-inner { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 0.7rem; }
+
+    .card h2 {
+      margin: 0;
+      font-size: 1.02rem;
+      letter-spacing: -0.01em;
+      font-weight: 620;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      font-size: 0.82rem;
+      padding: 0.18rem 0.65rem;
+      border-radius: 999px;
+      border: 1px solid rgba(148,163,184,0.5);
+      background: rgba(15,23,42,0.95);
+      margin-right: 0.35rem;
+      margin-bottom: 0.2rem;
+      color: var(--text-soft);
+    }
+
+    .status-pill {
+      border: 1px solid rgba(148,163,184,0.5);
+      border-radius: 999px;
+      padding: 0.15rem 0.55rem;
+      font-size: 0.78rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+
+    .status-pass { background: rgba(34, 197, 94, 0.12); color: #86efac; border-color: rgba(34,197,94,0.4); }
+    .status-fail { background: rgba(248, 113, 113, 0.12); color: #fecdd3; border-color: rgba(248,113,113,0.4); }
+    .status-warn { background: rgba(251, 191, 36, 0.12); color: #fef9c3; border-color: rgba(251,191,36,0.4); }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 0.75rem;
+    }
+
+    .summary-tile {
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      padding: 0.65rem 0.8rem;
+      background: rgba(15,23,42,0.75);
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+
+    .summary-tile .label { color: var(--text-soft); font-size: 0.8rem; }
+    .summary-tile .value { font-size: 1.35rem; font-weight: 650; }
+
+    .sub-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.75rem; }
+
+    .sub-item {
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      padding: 0.8rem 0.9rem;
+      background: rgba(15,23,42,0.9);
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 0.6rem;
+    }
+
+    .sub-item .title {
+      font-weight: 620;
+      margin: 0;
+      font-size: 0.96rem;
+    }
+
+    .requirement-meta { color: var(--text-soft); font-size: 0.85rem; margin: 0.15rem 0 0; line-height: 1.4; }
+    .reason { margin: 0.35rem 0 0; color: var(--text); font-size: 0.9rem; line-height: 1.5; }
+
+    .code-button {
+      background: rgba(15,23,42,0.95);
+      color: var(--text);
+      border: 1px solid rgba(148,163,184,0.5);
+      border-radius: 10px;
+      padding: 0.35rem 0.75rem;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: all 0.16s ease-out;
+    }
+
+    .code-button:hover { border-color: var(--accent-soft); color: #fff; }
+
+    .code-tooltip {
+      position: fixed;
+      background: #0b1220;
+      color: var(--text);
+      border: 1px solid rgba(148,163,184,0.3);
+      border-radius: 12px;
+      padding: 0.75rem 0.85rem;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.55);
+      max-width: min(720px, 92vw);
+      display: none;
+      z-index: 9999;
+      pointer-events: none;
+    }
+
+    .code-tooltip h4 {
+      margin: 0 0 0.35rem;
+      font-size: 0.95rem;
+    }
+
+    .code-tooltip .code-meta {
+      color: var(--text-soft);
+      font-size: 0.82rem;
+      margin-bottom: 0.35rem;
+    }
+
+    .code-tooltip pre {
+      margin: 0;
+      max-height: 320px;
+      overflow: auto;
+      background: rgba(15,23,42,0.8);
+      border: 1px solid rgba(148,163,184,0.25);
+      border-radius: 10px;
+      padding: 0.65rem;
+      font-size: 0.82rem;
+      line-height: 1.3;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Subsystem V&amp;V with Code Evidence</h1>
+      <p class="badge">Auto-generated evidence map</p>
+    </div>
+    <nav class="quick-links">
+      <a href="index.html">Diagrams</a>
+      <a href="requirements_validation.html">Legacy V&amp;V map</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="card">
+      <div class="card-inner">
+        <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem;">
+          <h2>Subsystem coverage</h2>
+          <span class="tag" id="sub-count">Loading…</span>
+        </div>
+        <div class="summary-grid" id="sub-summary-grid"></div>
+        <ul class="sub-list" id="sub-list"></ul>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-inner">
+        <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem;">
+          <h2>How to read this</h2>
+          <span class="tag">Guidance</span>
+        </div>
+        <p class="reason">
+          Each subsystem requirement is shown with its latest verdict (pass, at risk, or fail) and a hoverable “Code evidence”
+          button when a concrete implementation reference was found. Warnings denote partial coverage or missing safety/UX polish.
+        </p>
+        <div class="summary-grid">
+          <div class="summary-tile"><div class="label">Pass</div><div class="value">Meets intent</div></div>
+          <div class="summary-tile"><div class="label">At risk</div><div class="value">Partial or fragile</div></div>
+          <div class="summary-tile"><div class="label">Fail</div><div class="value">No mapped evidence</div></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div class="code-tooltip" id="code-tooltip"></div>
+
+  <script>
+    const SNIPPET_DEFS = {
+      panelVisibility: { title: "interactive_updated_ui.py:_set_active_panel", file: "lynxmotion_control/interactive_updated_ui.py", marker: "def _set_active_panel", highlight: "set_visible(visible)" },
+      modeToggle: { title: "interactive_updated_ui.py:mode toggle strip", file: "lynxmotion_control/interactive_updated_ui.py", marker: "_build_mode_toggle_strip", highlight: "_set_operation_mode" },
+      durationValidation: { title: "interactive_updated_ui.py:_handle_duration_submit", file: "lynxmotion_control/interactive_updated_ui.py", marker: "def _handle_duration_submit", highlight: "Ignoring invalid waypoint duration entry" },
+      timelineSpeed: { title: "interactive_updated_ui.py:timeline speed slider", file: "lynxmotion_control/interactive_updated_ui.py", marker: "self._timeline_speed_slider", highlight: "valfmt=\"%0.1fx\"" },
+      servoDiagnostics: { title: "interactive_updated_ui.py:_update_servo_readouts", file: "lynxmotion_control/interactive_updated_ui.py", marker: "def _update_servo_readouts", highlight: "Cmd:" },
+      timelineList: { title: "interactive_updated_ui.py:timeline panel list", file: "lynxmotion_control/interactive_updated_ui.py", marker: "Subroutines & timeline", highlight: "_timeline_ax.set_title" },
+      timelineRemove: { title: "interactive_updated_ui.py:_handle_remove_timeline_entry", file: "lynxmotion_control/interactive_updated_ui.py", marker: "def _handle_remove_timeline_entry", highlight: "pop(self._selected_timeline_index)" },
+      calibrationControls: { title: "interactive_updated_ui.py:calibration controls", file: "lynxmotion_control/interactive_updated_ui.py", marker: "self._calibration_button", highlight: "Calibrate" },
+      calibrationGuide: { title: "interactive_updated_ui.py:guided calibration copy", file: "lynxmotion_control/interactive_updated_ui.py", marker: "\"Guided calibration\"", highlight: "Start the tour" },
+      workspaceClamp: { title: "interactive_updated_ui.py:_clamp_target", file: "lynxmotion_control/interactive_updated_ui.py", marker: "def _clamp_target", highlight: "np.clip" },
+      jogButtons: { title: "interactive_updated_ui.py:servo jog buttons", file: "lynxmotion_control/interactive_updated_ui.py", marker: "invert_button = Button", highlight: "self._make_servo_adjust_callback" },
+      fkForward: { title: "al5a_kinematics.py:forward kinematics", file: "lynxmotion_control/al5a_kinematics.py", marker: "def forward", highlight: "rot = np.array" },
+      ikLimit: { title: "interactive_updated_ui.py:IK limit clamp", file: "lynxmotion_control/interactive_updated_ui.py", marker: "def _apply_hard_limits_to_ik", highlight: "IK solution clipped" },
+      teleopMotion: { title: "interactive_updated_ui.py:_on_motion", file: "lynxmotion_control/interactive_updated_ui.py", marker: "def _on_motion", highlight: "self.update_robot()" },
+      queueDrop: { title: "interactive_updated_ui.py:_send_move_command", file: "lynxmotion_control/interactive_updated_ui.py", marker: "def _send_move_command", highlight: "self._command_queue.put_nowait" },
+      teachSample: { title: "interactive_updated_ui.py:_record_teach_sample", file: "lynxmotion_control/interactive_updated_ui.py", marker: "def _record_teach_sample", highlight: "TeachSample(" },
+      teachVirtual: { title: "interactive_updated_ui.py:_command_worker teach branch", file: "lynxmotion_control/interactive_updated_ui.py", marker: "if self._operation_mode == \"teach\"", highlight: "_record_teach_sample" },
+      timelineAdd: { title: "interactive_updated_ui.py:_handle_add_to_timeline", file: "lynxmotion_control/interactive_updated_ui.py", marker: "def _handle_add_to_timeline", highlight: "self._timeline_entries.append" },
+      timelineStop: { title: "interactive_updated_ui.py:_stop_timeline_playback", file: "lynxmotion_control/interactive_updated_ui.py", marker: "def _stop_timeline_playback", highlight: "self._timeline_stop_event.set" },
+      timelineRepeat: { title: "interactive_updated_ui.py:_timeline_playback_worker", file: "lynxmotion_control/interactive_updated_ui.py", marker: "_timeline_repeat", highlight: "while not self._timeline_stop_event.is_set()" },
+      servoClamp: { title: "al5a_kinematics.py:ServoConfig.clamp_angle", file: "lynxmotion_control/al5a_kinematics.py", marker: "def clamp_angle", highlight: "max(self.min_angle" },
+      servoChannels: { title: "al5a_kinematics.py:DEFAULT_SERVO_CHANNELS", file: "lynxmotion_control/al5a_kinematics.py", marker: "DEFAULT_SERVO_CHANNELS", highlight: "5: 4" },
+      ledPatterns: { title: "led_driver.py:drive patterns", file: "lynxmotion_control/led_driver.py", marker: "def drive", highlight: "pattern == \"solid\"" },
+      isoState: { title: "status_leds.py:set_iso_state", file: "lynxmotion_control/status_leds.py", marker: "def set_iso_state", highlight: "RobotISOState" },
+      ledConfig: { title: "led_driver.py:load_led_config", file: "lynxmotion_control/led_driver.py", marker: "def load_led_config", highlight: "Seeded default LED configuration" },
+      teachLED: { title: "interactive_updated_ui.py:_sync_leds", file: "lynxmotion_control/interactive_updated_ui.py", marker: "_sync_leds", highlight: "teach_active" },
+      configDir: { title: "config_paths.py:get_config_root", file: "lynxmotion_control/config_paths.py", marker: "def get_config_root", highlight: "return base / \"lynxmotion_al5a\"" },
+      requirementsPinned: { title: "requirements.txt", file: "requirements.txt", marker: "matplotlib", highlight: "matplotlib" }
+    };
+
+    const EVIDENCE_MAP = {
+      "SUB-1": { status: "pass", verdict: "Pass: mode panels toggle visibility so inactive controls stay hidden.", snippetKey: "panelVisibility" },
+      "SUB-2": { status: "pass", verdict: "Pass: single-click Live/Teach toggle updates mode and banner.", snippetKey: "modeToggle" },
+      "SUB-5": { status: "pass", verdict: "Pass: numeric inputs are validated and reverted on invalid entry.", snippetKey: "durationValidation" },
+      "SUB-6": { status: "fail", verdict: "Fail: drag handling is blocked by an early return, preventing XY target dragging." },
+      "SUB-7": { status: "fail", verdict: "Fail: no mouse-wheel or slider control for Z with configurable step size." },
+      "SUB-8": { status: "pass", verdict: "Pass: timeline speed slider exposes numeric scaling and applies it to playback.", snippetKey: "timelineSpeed" },
+      "SUB-9": { status: "fail", verdict: "Fail: no global Stop button kept visible across modes." },
+      "SUB-10": { status: "fail", verdict: "Fail: emergency stop control and latched state are not implemented in the UI." },
+      "SUB-11": { status: "warn", verdict: "At risk: Home button exists but lacks in-progress feedback/disablement.", snippetKey: "timelineList" },
+      "SUB-12": { status: "pass", verdict: "Pass: diagnostics pane shows joint angles and limits per servo.", snippetKey: "servoDiagnostics" },
+      "SUB-14": { status: "fail", verdict: "Fail: no routine create/rename/delete flow beyond save/load placeholders." },
+      "SUB-15": { status: "fail", verdict: "Fail: destructive actions such as delete lack confirmation prompts." },
+      "SUB-17": { status: "fail", verdict: "Fail: Teach mode does not expose an editable waypoint list." },
+      "SUB-18": { status: "fail", verdict: "Fail: no dwell-time field or validation is present in waypoint editor." },
+      "SUB-19": { status: "fail", verdict: "Fail: waypoint reorder controls/drag are not exposed in the UI." },
+      "SUB-21": { status: "fail", verdict: "Fail: no colour tagging for duplicate waypoint names." },
+      "SUB-22": { status: "fail", verdict: "Fail: waypoints cannot be grouped into named subroutines beyond saving whole paths." },
+      "SUB-23": { status: "warn", verdict: "At risk: timeline list renders entries but lacks dwell items and editing depth.", snippetKey: "timelineList" },
+      "SUB-24": { status: "warn", verdict: "At risk: delete is wired, but reorder controls are missing; persistence is minimal.", snippetKey: "timelineRemove" },
+      "SUB-25": { status: "fail", verdict: "Fail: playback only supports play/stop; pause/resume/cancel are absent." },
+      "SUB-26": { status: "fail", verdict: "Fail: no playback progress indicator for current/total steps." },
+      "SUB-29": { status: "pass", verdict: "Pass: calibration panel provides limits, inversion, and calibration tour controls.", snippetKey: "calibrationControls" },
+      "SUB-30": { status: "warn", verdict: "At risk: guidance text exists but not a checkbox-driven checklist.", snippetKey: "calibrationGuide" },
+      "SUB-34": { status: "fail", verdict: "Fail: no full-screen toggle or responsive scaling beyond fixed layout." },
+      "SUB-35": { status: "warn", verdict: "At risk: text boxes are compact with labels, but sizing is not consistently small.", snippetKey: "durationValidation" },
+      "SUB-38": { status: "fail", verdict: "Fail: no dry-run toggle to simulate motion without actuating motors." },
+      "SUB-39": { status: "warn", verdict: "At risk: target marker is shown, but workspace bounds visual is not rendered.", snippetKey: "workspaceClamp" },
+      "SUB-40": { status: "pass", verdict: "Pass: per-joint jog buttons with configurable nudge multiplier are available.", snippetKey: "jogButtons" },
+      "SUB-62": { status: "fail", verdict: "Fail: no communications timeout/fault handling is implemented." },
+      "SUB-91": { status: "fail", verdict: "Fail: geometry parameters live in code, not a single configuration file." },
+      "SUB-92": { status: "warn", verdict: "At risk: link lengths note metres, but unit documentation is sparse elsewhere.", snippetKey: "fkForward" },
+      "SUB-93": { status: "pass", verdict: "Pass: forward kinematics computes end-effector pose from joint angles.", snippetKey: "fkForward" },
+      "SUB-94": { status: "warn", verdict: "At risk: inverse kinematics clamps unreachable targets without signalling failure.", snippetKey: "fkForward" },
+      "SUB-95": { status: "pass", verdict: "Pass: IK results are clamped to servo limits with logged notice.", snippetKey: "ikLimit" },
+      "SUB-106": { status: "fail", verdict: "Fail: planner does not publish commanded targets to the UI at 10 Hz." },
+      "SUB-109": { status: "fail", verdict: "Fail: tool/gripper length offset is not configurable in kinematics." },
+      "SUB-121": { status: "pass", verdict: "Pass: teleop updates stream incremental targets via motion handler.", snippetKey: "teleopMotion" },
+      "SUB-122": { status: "pass", verdict: "Pass: command queue drops oldest entries so newest targets win.", snippetKey: "queueDrop" },
+      "SUB-125": { status: "fail", verdict: "Fail: consistent degree/radian conversion contract is missing." },
+      "SUB-131": { status: "fail", verdict: "Fail: saved subroutines omit schema_version metadata.", snippetKey: null },
+      "SUB-132": { status: "fail", verdict: "Fail: waypoints store position/duration only—no IO actions.", snippetKey: null },
+      "SUB-133": { status: "fail", verdict: "Fail: dwell time is not tracked or validated.", snippetKey: null },
+      "SUB-134": { status: "fail", verdict: "Fail: waypoint pose representation lacks an explicit flag.", snippetKey: null },
+      "SUB-135": { status: "fail", verdict: "Fail: routines rely on display names/slugs without stable unique IDs.", snippetKey: null },
+      "SUB-136": { status: "fail", verdict: "Fail: routine saving is not atomic; files are written directly." },
+      "SUB-140": { status: "pass", verdict: "Pass: teach recorder captures commanded pose/timestamp per sample.", snippetKey: "teachSample" },
+      "SUB-141": { status: "pass", verdict: "Pass: teach mode records without driving hardware via the teach branch.", snippetKey: "teachVirtual" },
+      "SUB-142": { status: "warn", verdict: "At risk: duration editing exists, but there is no dedicated dwell field.", snippetKey: "durationValidation" },
+      "SUB-143": { status: "fail", verdict: "Fail: waypoint delete lacks a confirmation step." },
+      "SUB-144": { status: "fail", verdict: "Fail: waypoint reorder controls and persistence are missing." },
+      "SUB-147": { status: "fail", verdict: "Fail: timeline JSON omits schema_version and timestamps.", snippetKey: null },
+      "SUB-149": { status: "pass", verdict: "Pass: selected subroutines can be appended to the timeline list.", snippetKey: "timelineAdd" },
+      "SUB-150": { status: "warn", verdict: "At risk: timeline supports add/delete but not reorder; persistence is minimal.", snippetKey: "timelineRemove" },
+      "SUB-151": { status: "pass", verdict: "Pass: stop event halts timeline execution and clears state.", snippetKey: "timelineStop" },
+      "SUB-152": { status: "fail", verdict: "Fail: no pause/resume state is available for timeline playback." },
+      "SUB-153": { status: "fail", verdict: "Fail: no explicit cancel that clears playback queues immediately." },
+      "SUB-154": { status: "pass", verdict: "Pass: repeat toggle loops the timeline until stopped.", snippetKey: "timelineRepeat" },
+      "SUB-162": { status: "fail", verdict: "Fail: waypoints do not support gripper IO actions at execution time." },
+      "SUB-164": { status: "fail", verdict: "Fail: teleop commands are not blocked during playback; they cancel playback instead." },
+      "SUB-165": { status: "fail", verdict: "Fail: no routine preview list is shown before execution." },
+      "SUB-166": { status: "fail", verdict: "Fail: estimated durations are not calculated or displayed." },
+      "SUB-170": { status: "warn", verdict: "At risk: teach-mode recording indicator exists, but no separate teleop record arm.", snippetKey: "teachSample" },
+      "SUB-187": { status: "pass", verdict: "Pass: teleop queue discards intermediate targets so latest commands win.", snippetKey: "queueDrop" },
+      "SUB-189": { status: "pass", verdict: "Pass: servo command angles are clamped to safe ranges.", snippetKey: "servoClamp" },
+      "SUB-194": { status: "pass", verdict: "Pass: gripper channel mapping is defined for controller output.", snippetKey: "servoChannels" },
+      "SUB-195": { status: "pass", verdict: "Pass: LED driver supports solid/dim/blink patterns per channel.", snippetKey: "ledPatterns" },
+      "SUB-202": { status: "fail", verdict: "Fail: wiring diagram/pin map documentation is absent." },
+      "SUB-211": { status: "pass", verdict: "Pass: ISO-style LED states cover ready/running/teach/fault patterns.", snippetKey: "isoState" },
+      "SUB-213": { status: "pass", verdict: "Pass: blink and dim patterns are configurable and applied to LEDs.", snippetKey: "ledPatterns" },
+      "SUB-220": { status: "pass", verdict: "Pass: LED colour-to-pin mapping loaded from JSON configuration.", snippetKey: "ledConfig" },
+      "SUB-224": { status: "pass", verdict: "Pass: Teach/Calibration sets yellow LED state via sync mapping.", snippetKey: "teachLED" },
+      "SUB-226": { status: "pass", verdict: "Pass: configuration root is dedicated and seeded on startup.", snippetKey: "configDir" },
+      "SUB-230": { status: "warn", verdict: "At risk: JSON saves are indented/readable but lack explicit UTF-8/documentation.", snippetKey: "durationValidation" },
+      "SUB-231": { status: "fail", verdict: "Fail: saved JSON lacks schema_version and timestamp fields.", snippetKey: null },
+      "SUB-247": { status: "warn", verdict: "At risk: requirements.txt pins dependencies, but setup instructions/lockfile are missing.", snippetKey: "requirementsPinned" }
+    };
+
+    const codeTooltip = document.getElementById("code-tooltip");
+
+    function positionTooltip(evt) {
+      const padding = 12;
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+      const tooltipRect = codeTooltip.getBoundingClientRect();
+      let left = evt.clientX + padding;
+      let top = evt.clientY + padding;
+      if (left + tooltipRect.width > viewportWidth - padding) {
+        left = viewportWidth - tooltipRect.width - padding;
+      }
+      if (top + tooltipRect.height > viewportHeight - padding) {
+        top = viewportHeight - tooltipRect.height - padding;
+      }
+      codeTooltip.style.left = `${left}px`;
+      codeTooltip.style.top = `${top}px`;
+    }
+
+    function showTooltip(evt, ref) {
+      const title = escapeHtml(ref.title || "Code reference");
+      const file = escapeHtml(ref.file || "");
+      const line = ref.line ? ` (line ${ref.line})` : "";
+      const code = ref.code || "Code unavailable";
+      codeTooltip.innerHTML = `<h4>${title}</h4><div class="code-meta">${file}${line}</div><pre><code>${code}</code></pre>`;
+      codeTooltip.style.display = "block";
+      positionTooltip(evt);
+    }
+
+    function hideTooltip() {
+      codeTooltip.style.display = "none";
+    }
+
+    function escapeHtml(str) {
+      return (str || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    async function loadFile(path) {
+      const res = await fetch(path);
+      if (!res.ok) throw new Error(`Failed to load ${path}: ${res.status}`);
+      return res.text();
+    }
+
+    function extractSnippet(text, marker, highlight, maxChars = 900) {
+      if (!text) return { code: "Code unavailable", line: null };
+      const lines = text.split(/\r?\n/);
+      let index = lines.findIndex((line) => line.includes(marker));
+      if (index < 0) index = 0;
+
+      let start = index;
+      for (let i = index; i >= 0; i--) {
+        if (/^\\s*(async\\s+)?def\\s+/.test(lines[i]) || /^\\s*class\\s+/.test(lines[i])) {
+          start = i;
+          break;
+        }
+      }
+
+      const startIndent = (lines[start].match(/^(\\s*)/) || ["", ""])[1].length;
+      const snippet = [];
+      let length = 0;
+      let highlightLine = null;
+      for (let i = start; i < lines.length; i++) {
+        const line = lines[i];
+        const indent = (line.match(/^(\\s*)/) || ["", ""])[1].length;
+        const trimmed = line.trim();
+        if (i > start && trimmed && indent < startIndent) break;
+        let escaped = escapeHtml(line);
+        if (highlight && line.includes(highlight) && highlightLine === null) {
+          escaped = escaped.replace(escapeHtml(highlight), `<mark>${escapeHtml(highlight)}</mark>`);
+          highlightLine = i + 1;
+        }
+        snippet.push(escaped);
+        length += line.length + 1;
+        if (length >= maxChars) break;
+      }
+      return { code: snippet.join("\\n").trimEnd() || "Code unavailable", line: highlightLine };
+    }
+
+    async function resolveSnippet(snippetKey) {
+      const def = SNIPPET_DEFS[snippetKey];
+      if (!def) return { title: "Missing mapping", file: "", code: "No snippet configured", line: null };
+      const text = await loadFile(def.file).catch(() => "");
+      const snippet = extractSnippet(text, def.marker, def.highlight, def.context || 900);
+      return { title: def.title, file: def.file, code: snippet.code, line: snippet.line };
+    }
+
+    function buildStatusPill(status) {
+      const span = document.createElement("span");
+      span.className = `status-pill status-${status}`;
+      span.textContent = status === "pass" ? "Pass" : status === "warn" ? "At risk" : "Fail";
+      return span;
+    }
+
+    function summarise(entities, gridId) {
+      const pass = entities.filter((e) => e.status === "pass").length;
+      const fail = entities.filter((e) => e.status === "fail").length;
+      const warn = entities.filter((e) => e.status === "warn").length;
+      document.getElementById("sub-count").textContent = `${entities.length} total · ${pass} pass · ${warn} at risk · ${fail} fail`;
+      const grid = document.getElementById(gridId || "summary-grid");
+      grid.innerHTML = "";
+      const tiles = [
+        { label: "Pass", value: pass },
+        { label: "At risk", value: warn },
+        { label: "Fail", value: fail },
+        { label: "Total", value: entities.length }
+      ];
+      tiles.forEach((tile) => {
+        const div = document.createElement("div");
+        div.className = "summary-tile";
+        div.innerHTML = `<div class="label">${tile.label}</div><div class="value">${tile.value}</div>`;
+        grid.appendChild(div);
+      });
+    }
+
+    function mapSubRow(sub) {
+      const evidence = EVIDENCE_MAP[sub.ID];
+      if (evidence) {
+        return { ...sub, status: evidence.status, verdict: evidence.verdict, snippetKey: evidence.snippetKey };
+      }
+      return { ...sub, status: "fail", verdict: "Fail: No implementation evidence mapped yet.", snippetKey: null };
+    }
+
+    async function render() {
+      const subCsv = await loadFile("Sub_System_req.csv");
+      const subs = parseCsv(subCsv).map(mapSubRow);
+      summarise(subs, "sub-summary-grid");
+
+      const subList = document.getElementById("sub-list");
+      subList.innerHTML = "";
+      for (const sub of subs) {
+        const li = document.createElement("li");
+        li.className = "sub-item";
+        const left = document.createElement("div");
+        const title = document.createElement("p");
+        title.className = "title";
+        title.textContent = `${sub.ID} — ${sub.Requirement}`;
+        left.appendChild(title);
+        const meta = document.createElement("p");
+        meta.className = "requirement-meta";
+        meta.textContent = `Priority: ${sub.Priority || "n/a"} · Linked system: ${sub["Traces from (System IDs)"] || "—"} · V&V: ${sub["Verification activities"] || "—"}`;
+        left.appendChild(meta);
+        const reason = document.createElement("p");
+        reason.className = "reason";
+        reason.textContent = sub.verdict;
+        left.appendChild(reason);
+        li.appendChild(left);
+
+        const right = document.createElement("div");
+        right.style.display = "flex";
+        right.style.flexDirection = "column";
+        right.style.gap = "0.4rem";
+        right.style.alignItems = "flex-end";
+        right.appendChild(buildStatusPill(sub.status));
+
+        if (sub.snippetKey) {
+          const btn = document.createElement("button");
+          btn.className = "code-button";
+          btn.type = "button";
+          btn.textContent = "Code evidence";
+          btn.addEventListener("mouseenter", async (evt) => {
+            const ref = await resolveSnippet(sub.snippetKey);
+            showTooltip(evt, ref);
+          });
+          btn.addEventListener("mousemove", positionTooltip);
+          btn.addEventListener("mouseleave", hideTooltip);
+          right.appendChild(btn);
+        }
+
+        li.appendChild(right);
+        subList.appendChild(li);
+      }
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+      render().catch((err) => {
+        console.error(err);
+        document.getElementById("sub-count").textContent = "Failed to load CSV files.";
+      });
+    });
+
+    function parseCsv(text) {
+      const lines = text.replace(/^\\uFEFF/, "").split(/\\r?\\n/).filter(Boolean);
+      if (!lines.length) return [];
+      const headers = lines[0].split(",").map((h) => h.trim());
+      return lines.slice(1).map((line) => {
+        const cols = line.split(",").map((c) => c.trim());
+        const row = {};
+        headers.forEach((h, idx) => { row[h] = cols[idx] || ""; });
+        return row;
+      });
+    }
+  </script>
+</body>
+</html>
