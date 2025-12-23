@@ -39,6 +39,8 @@ PATH_STORAGE_PATH = CONFIG_ROOT / "saved_path.json"
 SUBROUTINE_STORAGE_DIR = CONFIG_ROOT / "subroutines"
 TIMELINE_STORAGE_PATH = CONFIG_ROOT / "timeline.json"
 TEACH_SESSION_DIR = CONFIG_ROOT / "teach_sessions"
+SUBROUTINE_SCHEMA_VERSION = 1
+TIMELINE_SCHEMA_VERSION = 1
 
 
 _DEFAULT_VERTICAL_JOINTS = [
@@ -158,6 +160,10 @@ class TimelineEntry:
     slug: str
     duration: float
     missing: bool = False
+
+
+def _utc_now_iso() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
 @dataclass
@@ -3852,8 +3858,11 @@ class InteractiveArm:
                     exc_info=True,
                 )
             else:
-                if isinstance(data, list):
-                    for entry in data:
+                payload_entries = data
+                if isinstance(data, dict):
+                    payload_entries = data.get("entries", [])
+                if isinstance(payload_entries, list):
+                    for entry in payload_entries:
                         if not isinstance(entry, dict):
                             continue
                         slug = str(entry.get("slug") or "").strip()
@@ -3885,9 +3894,18 @@ class InteractiveArm:
     def _save_timeline(self) -> None:
         try:
             TIMELINE_STORAGE_PATH.parent.mkdir(parents=True, exist_ok=True)
-            serialisable = [
-                {"name": entry.name, "slug": entry.slug} for entry in self._timeline_entries
-            ]
+            serialisable = {
+                "schema_version": TIMELINE_SCHEMA_VERSION,
+                "saved_at": _utc_now_iso(),
+                "entries": [
+                    {
+                        "name": entry.name,
+                        "slug": entry.slug,
+                        "duration": entry.duration,
+                    }
+                    for entry in self._timeline_entries
+                ],
+            }
             TIMELINE_STORAGE_PATH.write_text(json.dumps(serialisable, indent=2))
         except Exception:
             _LOGGER.warning(
@@ -4845,7 +4863,13 @@ class InteractiveArm:
             name = "Subroutine"
         slug = self._slugify_subroutine_name(name)
         serialised = self._serialise_waypoints(self.waypoints)
-        data = {"name": name, "slug": slug, "waypoints": serialised}
+        data = {
+            "schema_version": SUBROUTINE_SCHEMA_VERSION,
+            "saved_at": _utc_now_iso(),
+            "name": name,
+            "slug": slug,
+            "waypoints": serialised,
+        }
         try:
             SUBROUTINE_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
             path = SUBROUTINE_STORAGE_DIR / f"{slug}.json"

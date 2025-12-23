@@ -352,7 +352,10 @@
       ikLimitRejection: { title: "interactive.py:_apply_hard_limits_to_ik", file: "lynxmotion_control/interactive.py", marker: "def _apply_hard_limits_to_ik", highlight: "IK solution clipped to hard limits" },
       servoClamp: { title: "interactive.py:_clamp_joint_list", file: "lynxmotion_control/interactive.py", marker: "def _clamp_joint_list", highlight: "clamped" },
       timelineStop: { title: "interactive.py:_stop_timeline_playback", file: "lynxmotion_control/interactive.py", marker: "_stop_timeline_playback", highlight: "self._timeline_stop_event.set" },
-      configDir: { title: "config_paths.py:get_config_root", file: "lynxmotion_control/config_paths.py", marker: "def get_config_root", highlight: ".config/lynxmotion_al5a" }
+      configDir: { title: "config_paths.py:get_config_root", file: "lynxmotion_control/config_paths.py", marker: "def get_config_root", highlight: ".config/lynxmotion_al5a" },
+      latestWinsQueue: { title: "interactive.py:_send_move_command", file: "lynxmotion_control/interactive.py", marker: "def _send_move_command", highlight: "put_nowait(command)" },
+      subroutineSchema: { title: "interactive.py:_handle_save_subroutine", file: "lynxmotion_control/interactive.py", marker: "def _handle_save_subroutine", highlight: "schema_version" },
+      timelineMetadata: { title: "interactive.py:_save_timeline", file: "lynxmotion_control/interactive.py", marker: "def _save_timeline", highlight: "\"saved_at\"" }
     };
 
     const EVIDENCE_MAP = {
@@ -362,9 +365,9 @@
       "SUB-6": { status: "pass", verdict: "Pass: XY drag updates target marker with immediate robot update.", snippetKey: "teleopDrag" },
       "SUB-95": { status: "pass", verdict: "Pass: IK solutions violating limits are rejected.", snippetKey: "ikLimitRejection" },
       "SUB-121": { status: "pass", verdict: "Pass: teleop updates stream incremental targets via _on_motion.", snippetKey: "teleopDrag" },
-      "SUB-122": { status: "fail", verdict: "Fail: queue dropping/latest-wins behaviour not explicitly implemented.", snippetKey: null },
-      "SUB-131": { status: "fail", verdict: "Fail: routine save path lacks schema_version metadata.", snippetKey: null },
-      "SUB-147": { status: "fail", verdict: "Fail: timeline file does not include schema_version + timestamp fields.", snippetKey: null },
+      "SUB-122": { status: "pass", verdict: "Pass: command queue replaces the oldest entry when saturated to keep the latest target.", snippetKey: "latestWinsQueue" },
+      "SUB-131": { status: "pass", verdict: "Pass: saved subroutines include schema_version and timestamp metadata.", snippetKey: "subroutineSchema" },
+      "SUB-147": { status: "pass", verdict: "Pass: timeline persistence stores schema_version, saved_at, and entry metadata.", snippetKey: "timelineMetadata" },
       "SUB-189": { status: "pass", verdict: "Pass: joint lists clamped before sending PWM commands.", snippetKey: "servoClamp" },
       "SUB-151": { status: "pass", verdict: "Pass: stop event halts timeline execution.", snippetKey: "timelineStop" },
       "SUB-226": { status: "pass", verdict: "Pass: configuration loaded from dedicated config directory.", snippetKey: "configDir" }
