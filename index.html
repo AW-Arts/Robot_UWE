@@ -270,6 +270,15 @@
       margin-bottom: 0.2rem;
     }
 
+    .pill-link {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .pill-link:hover {
+      color: var(--text);
+    }
+
     .diagram-wrapper {
       position: relative;
     }
@@ -433,6 +442,7 @@
       <a href="#functions">Functions</a>
       <a href="#classes">Classes</a>
       <a href="#journey">Mega journey</a>
+      <a href="#requirements-map">V&amp;V map</a>
     </nav>
   </header>
 
@@ -1137,6 +1147,20 @@ classDiagram
         <h2>Use these references</h2>
         <p class="section-lede">Map diagrams to the marking scheme and surface V&amp;V in planning.</p>
       </div>
+
+      <section class="card" id="requirements-map">
+        <div class="card-inner">
+          <div class="card-header">
+            <h2>Requirements validation map</h2>
+            <span class="tag">V&amp;V evidence</span>
+          </div>
+          <p class="section-lede">
+            Open the dedicated requirements_validation.html page to see every system and subsystem requirement,
+            linked to verification evidence pulled from the codebase.
+          </p>
+          <a class="pill pill-link" href="requirements_validation.html">Open requirements_validation.html</a>
+        </div>
+      </section>
 
       <section class="card" id="report-alignment">
         <div class="card-inner">
