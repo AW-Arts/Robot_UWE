@@ -184,16 +184,17 @@
     .requirement-item {
       border: 1px solid var(--border-subtle);
       border-radius: 12px;
-      padding: 0.8rem 0.9rem;
+      padding: 0.9rem 1rem;
       background: rgba(15,23,42,0.9);
       display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      gap: 0.6rem;
+      grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr) auto;
+      gap: 0.9rem;
+      align-items: start;
     }
 
     .requirement-item .title {
       font-weight: 620;
-      margin: 0;
+      margin: 0 0 0.15rem;
       font-size: 0.96rem;
     }
 
@@ -221,6 +222,25 @@
     }
 
     .code-button:hover { border-color: var(--accent-soft); color: #fff; }
+
+    .suggestion {
+      border: 1px dashed var(--border-subtle);
+      border-radius: 10px;
+      padding: 0.55rem 0.6rem;
+      background: rgba(15,23,42,0.85);
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+
+    .suggestion-title { margin: 0; font-weight: 600; font-size: 0.85rem; color: var(--text-soft); }
+    .suggestion-body { margin: 0; font-size: 0.9rem; line-height: 1.5; color: var(--text); }
+    .evidence-meta { margin: 0; font-size: 0.82rem; color: var(--text-soft); }
+
+    @media (max-width: 900px) {
+      .requirement-item { grid-template-columns: minmax(0, 1fr); }
+      .requirement-item > div:last-child { align-items: flex-start !important; }
+    }
 
     .code-tooltip {
       position: fixed;
@@ -594,6 +614,24 @@
       });
     }
 
+    function stripVerdictPrefix(text) {
+      return (text || "").replace(/^(Pass|Fail|At risk):\s*/i, "").trim();
+    }
+
+    function deriveSuggestedRequirement(row) {
+      const base = stripVerdictPrefix(row.verdict || row.reason);
+      if (base) return `Rephrase to: ${base}`;
+      return "Rephrase spec to the capability currently implemented.";
+    }
+
+    function buildEvidenceMeta(row) {
+      if (!row.snippetKey) return "No mapped code evidence.";
+      const def = SNIPPET_DEFS[row.snippetKey] || {};
+      const title = def.title || "Code evidence";
+      const file = def.file || "File unavailable";
+      return `${title} — ${file}`;
+    }
+
     function mapSubRow(sub) {
       const evidence = EVIDENCE_MAP[sub.ID];
       if (evidence) {
@@ -635,6 +673,22 @@
         reason.textContent = row.verdict || row.reason;
         left.appendChild(reason);
         li.appendChild(left);
+
+        const suggestion = document.createElement("div");
+        suggestion.className = "suggestion";
+        const suggestionTitle = document.createElement("p");
+        suggestionTitle.className = "suggestion-title";
+        suggestionTitle.textContent = "Suggested wording to pass";
+        const suggestionBody = document.createElement("p");
+        suggestionBody.className = "suggestion-body";
+        suggestionBody.textContent = deriveSuggestedRequirement(row);
+        const evidenceMeta = document.createElement("p");
+        evidenceMeta.className = "evidence-meta";
+        evidenceMeta.textContent = buildEvidenceMeta(row);
+        suggestion.appendChild(suggestionTitle);
+        suggestion.appendChild(suggestionBody);
+        suggestion.appendChild(evidenceMeta);
+        li.appendChild(suggestion);
 
         const right = document.createElement("div");
         right.style.display = "flex";
