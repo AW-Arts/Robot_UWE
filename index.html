@@ -476,6 +476,7 @@
       <a href="#modes">Modes</a>
       <a href="#project-management">Project mgmt</a>
       <a href="#architecture">Architecture</a>
+      <a href="#ui-controls">UI map</a>
       <a href="#led-subsystem">Status LEDs</a>
       <a href="#teleop">Teleoperation</a>
       <a href="#teaching">Teach mode</a>
@@ -684,6 +685,135 @@ flowchart LR
         </div>
       </section>
 
+      <div class="section-heading" id="ui-controls">
+        <p class="eyebrow">UI map</p>
+        <h2>Interactive UI: every button &amp; panel</h2>
+        <p class="section-lede">Full control-surface inventory mapped to panels, toggles, and sliders inside the InteractiveArm figure.</p>
+      </div>
+
+      <!-- UI control map -->
+      <section class="card" id="ui-map">
+        <div class="card-inner">
+          <div class="card-header">
+            <h2>UI Controls &amp; Panels</h2>
+            <span class="tag">Flowchart · All buttons + menus</span>
+          </div>
+          <div class="card-meta">
+            <span class="pill">Mode strip + LEDs always visible</span>
+            <span class="pill">Left menu tabs: Modes · Movement · Servos · Motor config · Calibration tour · Path · Timeline</span>
+          </div>
+          <div class="diagram-wrapper">
+            <div class="diagram-actions" aria-label="Diagram actions">
+              <button class="diagram-action fullscreen-btn" type="button"
+                      onclick="openDiagramFullscreen('diagram-ui-controls','UI Controls & Panels')">
+                ⤢ Fullscreen
+              </button>
+              <button class="diagram-action export-btn" type="button"
+                      onclick="exportDiagramSvg('diagram-ui-controls','UI Controls & Panels')">
+                ⬇ Export SVG
+              </button>
+              <button class="diagram-action copy-btn" type="button"
+                      onclick="copyMermaidSource('diagram-ui-controls','UI Controls & Panels')">
+                ⧉ Copy Mermaid
+              </button>
+            </div>
+            <div class="mermaid mermaid-inline" id="diagram-ui-controls"></div>
+            <script type="text/plain" class="mermaid-src" id="src-diagram-ui-controls">
+flowchart TB
+  UI["InteractiveArm UI shell<br/>(matplotlib figure)"]
+  ModeStrip["Mode strip<br/>Live / Teach buttons"]
+  RecBadge["REC badge + label<br/>updates in Teach"]
+  StatusLEDs["Status LEDs stack<br/>read-only indicators"]
+  PanelMenu["Panel menu tabs<br/>Modes · Movement · Servos · Motor config · Calibration tour · Path · Timeline"]
+
+  UI --> ModeStrip --> RecBadge
+  UI --> StatusLEDs
+  UI --> PanelMenu
+
+  ModeStrip --> LiveBtn["Live button<br/>_set_operation_mode('live')"]
+  ModeStrip --> TeachBtn["Teach button<br/>_set_operation_mode('teach')"]
+  RecBadge --> RecState["Teach recording state<br/>_update_mode_controls"]
+
+  subgraph ModesPanel["Modes panel (Teach tools)"]
+    RecordBtn["Start recording / pause<br/>_toggle_teach_recording"]
+    SmoothBtn["Smooth recording<br/>_smooth_teach_session"]
+    SaveTeachBtn["Save routine<br/>_finalise_teach_session"]
+    ModeStatus["Mode status text<br/>_update_mode_controls"]
+  end
+  PanelMenu --> ModesPanel
+  ModesPanel -->|Saved routine| PathPanel
+
+  subgraph MovementPanel["Movement panel"]
+    HomeBtn["Home<br/>_handle_home_button"]
+    WristSlider["Wrist pitch slider<br/>_handle_wrist_slider_change"]
+    FrameToggle["Tool/world toggle<br/>_toggle_move_frame"]
+    DPad["XY/Z nudge buttons<br/>_make_move_callback"]
+  end
+  PanelMenu --> MovementPanel
+
+  subgraph ServosPanel["Servos panel"]
+    ServoRows["6 servo rows<br/>value text + model"]
+    ServoButtons["- / + buttons per servo<br/>_make_servo_adjust_callback"]
+    InvertButtons["Inv toggle per servo<br/>_make_inversion_toggle_callback"]
+    CalibToggle["Calibrate toggle<br/>_toggle_calibration"]
+    SetVertical["Set vertical<br/>_handle_set_vertical"]
+    RawToggle["Show raw<br/>_toggle_raw_angle_display"]
+  end
+  PanelMenu --> ServosPanel
+
+  subgraph MotorPanel["Motor config panel"]
+    OpenConfig["Open config folder<br/>_open_config_folder"]
+    PulseSlider["Pulse slider per servo<br/>_make_pulse_slider_callback"]
+    MultiplierSlider["Fudge × slider per servo<br/>_make_multiplier_slider_callback"]
+    LimitBoxes["Hard min° / max° per servo<br/>_make_limit_submit_callback"]
+  end
+  PanelMenu --> MotorPanel
+
+  subgraph CalibTourPanel["Calibration tour panel"]
+    TourStart["Start tour<br/>_start_calibration_tour"]
+    TourConfirm["Confirm step<br/>_confirm_calibration_step"]
+    TourRestart["Restart tour<br/>_restart_calibration_tour"]
+    AngleBox["Set angle (°) box<br/>_apply_calibration_angle_from_text"]
+    NudgeMinus["Nudge -5°<br/>_make_calibration_nudge_callback"]
+    NudgePlus["Nudge +5°<br/>_make_calibration_nudge_callback"]
+  end
+  PanelMenu --> CalibTourPanel
+
+  subgraph PathPanel["Path panel"]
+    NameBox["Keyframe name box<br/>_next_waypoint_default_name"]
+    DurationBox["Duration box<br/>_handle_duration_submit"]
+    AddWaypoint["Add waypoint<br/>_handle_add_waypoint"]
+    PlayPath["Play path<br/>_handle_play_waypoints"]
+    ClearPath["Clear path<br/>_handle_clear_waypoints"]
+    UpdateWaypoint["Update / Copy / Paste / Delete<br/>waypoint actions"]
+    StepNav["Step back / forward<br/>_handle_step_previous_waypoint / _handle_step_next_waypoint"]
+    PathScroll["Path scroll slider<br/>_handle_waypoint_scroll"]
+  end
+  PanelMenu --> PathPanel
+  PathPanel --> TimelinePanel
+
+  subgraph TimelinePanel["Timeline panel"]
+    SubroutineName["Subroutine name box<br/>_subroutine_name_box"]
+    SaveSubroutine["Save current<br/>_handle_save_subroutine"]
+    LoadSubroutine["Load subroutine<br/>_handle_load_subroutine"]
+    RefreshSubroutine["Refresh list<br/>_handle_refresh_subroutines"]
+    SubroutineList["Subroutine list + scroll<br/>_refresh_subroutine_list_display"]
+    TimelineAdd["Add to timeline<br/>_handle_add_to_timeline"]
+    TimelineRemove["Remove entry<br/>_handle_remove_timeline_entry"]
+    TimelineClear["Clear timeline<br/>_handle_clear_timeline"]
+    TimelinePlay["Play timeline<br/>_handle_play_timeline"]
+    TimelineRepeat["Repeat toggle<br/>_handle_toggle_timeline_repeat"]
+    TimelineSpeed["Speed slider<br/>_handle_timeline_speed_change"]
+    TimelineView["Timeline schedule view<br/>_refresh_timeline_display"]
+  end
+  PanelMenu --> TimelinePanel
+  TimelinePanel --> RunFlow["Run flow (Arm + confirm)\n_play_timeline/_run routine"]
+            </script>
+          </div>
+          <div class="refs">Refs: <code>lynxmotion_control/interactive.py</code> panel builders (<code>_create_controls</code>, <code>_build_mode_panel</code>, <code>_build_movement_panel</code>, <code>_build_servo_panel</code>, <code>_build_motor_config_panel</code>, <code>_build_calibration_tour_panel</code>, <code>_build_waypoint_panel</code>, <code>_build_timeline_panel</code>)</div>
+        </div>
+      </section>
+
       <div class="section-heading" id="led-subsystem">
         <p class="eyebrow">Design level</p>
         <h2>Status LED subsystem</h2>
@@ -867,42 +997,54 @@ flowchart LR
 stateDiagram-v2
   direction LR
   [*] --> Boot
-  Boot --> Home: Launch UI + load config
-  Home --> Live: Home move completes
-  Home --> Fault: init failure / controller missing
+  Boot --> Home: Launch UI + load config\nBuild panels + LED snapshot
+  Boot --> Fault: Init failure / controller missing
+  Home --> Live: Home move completes + Live selected
+  Home --> Teach: Teach selected before homing\n(Virtual only)
+  Home --> Fault: LED init fail / device missing
 
   state Live {
-    [*] --> LiveIdle
-    LiveIdle --> Teleop: Drag/scroll/slider input
-    Teleop --> LiveIdle: Input stops + queue empty
+    [*] --> PanelIdle
+    PanelIdle --> MenuSelection: Click panel tab
+    MenuSelection --> PanelIdle: Panel widgets activated
 
-    LiveIdle --> Timeline: Start waypoint/timeline playback
-    Timeline --> LiveIdle: Playback complete or stop pressed
+    PanelIdle --> Teleop: D-pad / wrist slider / drag target
+    Teleop --> PanelIdle: Input stops + queue empty
 
-    LiveIdle --> Calibration: Calibration toggled ON
-    Calibration --> LiveIdle: Exit calibration + restore offsets
+    PanelIdle --> ServoTune: Servo +/- / Inv / fudge sliders
+    ServoTune --> PanelIdle: Set vertical / calibration toggle
+
+    PanelIdle --> PathEdit: Path add/update/copy/paste\nScroll waypoints
+    PathEdit --> PanelIdle
+
+    PanelIdle --> TimelinePrep: Save/load subroutine\nAdd/remove/clear timeline\nSpeed or repeat toggle
+    TimelinePrep --> PanelIdle
+
+    PanelIdle --> Calibration: Calibration toggle or guided tour start
+    Calibration --> PanelIdle: Confirm step / exit tour
   }
 
-  Live --> Teach: Mode toggle → Teach (no hardware output)
-  state Teach {
-    [*] --> Prep
-    Prep --> Recording: Auto-start teach session
-    Recording --> Prep: Stop recording / auto-save chunk
-    Prep --> Review: Smooth/trim + name routine
-    Review --> Prep: Iterate edits
-  }
-  Teach --> Live: Exit Teach; reload routine list
-
-  Live --> Run: Select Run + Arm + confirm
+  Live --> Run: Timeline panel → Arm + confirm run
   state Run {
     [*] --> Disarmed
     Disarmed --> Armed: Arm + confirm run
-    Armed --> Executing: Play routine on hardware
+    Armed --> Executing: Play timeline on hardware
     Executing --> Armed: Playback complete / stop pressed
     Armed --> Disarmed: Disarm / abort
   }
   Run --> Live: Disarm or safety block
   Run --> Fault: Serial drop / E-stop
+
+  Live --> Teach: Mode toggle → Teach (stop hardware commands)
+  state Teach {
+    [*] --> Prep
+    Prep --> Recording: Start recording (Modes panel)
+    Recording --> Prep: Pause/stop; auto-save chunk
+    Prep --> Review: Smooth recording or save routine
+    Review --> Prep: Iterate edits
+    Prep --> PathEdit: Saved routine populates Path panel
+  }
+  Teach --> Live: Exit Teach; reload lists
 
   Live --> Fault: Connection loss / E-stop
   Teach --> Fault: Connection loss / E-stop
@@ -1682,6 +1824,9 @@ classDiagram
       servoMultiplier: { title: "interactive.py:_servo_config_with_multiplier", file: "lynxmotion_control/interactive.py", marker: "def _servo_config_with_multiplier", context: 500 },
       moveFrame: { title: "interactive.py:_transform_move_delta", file: "lynxmotion_control/interactive.py", marker: "def _transform_move_delta", context: 1100 },
       setOperationMode: { title: "interactive.py:_set_operation_mode", file: "lynxmotion_control/interactive.py", marker: "def _set_operation_mode", context: 1800 },
+      teachToggle: { title: "interactive.py:_toggle_teach_recording", file: "lynxmotion_control/interactive.py", marker: "def _toggle_teach_recording", context: 650 },
+      smoothTeach: { title: "interactive.py:_smooth_teach_session", file: "lynxmotion_control/interactive.py", marker: "def _smooth_teach_session", context: 800 },
+      finaliseTeach: { title: "interactive.py:_finalise_teach_session", file: "lynxmotion_control/interactive.py", marker: "def _finalise_teach_session", context: 1200 },
       teachRecorder: { title: "interactive.py:_start_teach_session", file: "lynxmotion_control/interactive.py", marker: "def _start_teach_session", context: 1850 },
       updateWaypoint: { title: "interactive.py:_handle_update_waypoint", file: "lynxmotion_control/interactive.py", marker: "def _handle_update_waypoint", context: 4700 },
       waypointDisplay: { title: "interactive.py:_refresh_waypoint_display", file: "lynxmotion_control/interactive.py", marker: "def _refresh_waypoint_display", context: 3100 },
@@ -1692,6 +1837,7 @@ classDiagram
       addWaypoint: { title: "interactive.py:_handle_add_waypoint", file: "lynxmotion_control/interactive.py", marker: "def _handle_add_waypoint", context: 900 },
       slugifySubroutine: { title: "interactive.py:_slugify_subroutine_name", file: "lynxmotion_control/interactive.py", marker: "def _slugify_subroutine_name", context: 700 },
       saveSubroutine: { title: "interactive.py:_handle_save_subroutine", file: "lynxmotion_control/interactive.py", marker: "def _handle_save_subroutine", context: 900 },
+      loadSubroutine: { title: "interactive.py:_handle_load_subroutine", file: "lynxmotion_control/interactive.py", marker: "def _handle_load_subroutine", context: 900 },
       addToTimeline: { title: "interactive.py:_handle_add_to_timeline", file: "lynxmotion_control/interactive.py", marker: "def _handle_add_to_timeline", context: 900 },
       loadTimeline: { title: "interactive.py:_load_saved_timeline", file: "lynxmotion_control/interactive.py", marker: "def _load_saved_timeline", context: 900 },
       loadSubroutineWaypoints: { title: "interactive.py:_load_subroutine_waypoints", file: "lynxmotion_control/interactive.py", marker: "def _load_subroutine_waypoints", context: 900 },
@@ -1699,6 +1845,21 @@ classDiagram
       waypointPlayback: { title: "interactive.py:_waypoint_playback_worker", file: "lynxmotion_control/interactive.py", marker: "def _waypoint_playback_worker", context: 900 },
       executeSequence: { title: "interactive.py:_execute_waypoint_sequence", file: "lynxmotion_control/interactive.py", marker: "def _execute_waypoint_sequence", context: 1100 },
       toggleCalibration: { title: "interactive.py:_toggle_calibration", file: "lynxmotion_control/interactive.py", marker: "def _toggle_calibration", context: 900 },
+      homeButton: { title: "interactive.py:_handle_home_button", file: "lynxmotion_control/interactive.py", marker: "def _handle_home_button", context: 900 },
+      wristSlider: { title: "interactive.py:_handle_wrist_slider_change", file: "lynxmotion_control/interactive.py", marker: "def _handle_wrist_slider_change", context: 700 },
+      servoAdjust: { title: "interactive.py:_make_servo_adjust_callback", file: "lynxmotion_control/interactive.py", marker: "def _make_servo_adjust_callback", context: 750 },
+      servoInvert: { title: "interactive.py:_make_inversion_toggle_callback", file: "lynxmotion_control/interactive.py", marker: "def _make_inversion_toggle_callback", context: 700 },
+      setVertical: { title: "interactive.py:_handle_set_vertical", file: "lynxmotion_control/interactive.py", marker: "def _handle_set_vertical", context: 800 },
+      rawAngle: { title: "interactive.py:_toggle_raw_angle_display", file: "lynxmotion_control/interactive.py", marker: "def _toggle_raw_angle_display", context: 700 },
+      openConfig: { title: "interactive.py:_open_config_folder", file: "lynxmotion_control/interactive.py", marker: "def _open_config_folder", context: 500 },
+      pulseSlider: { title: "interactive.py:_make_pulse_slider_callback", file: "lynxmotion_control/interactive.py", marker: "def _make_pulse_slider_callback", context: 750 },
+      multiplierSlider: { title: "interactive.py:_make_multiplier_slider_callback", file: "lynxmotion_control/interactive.py", marker: "def _make_multiplier_slider_callback", context: 750 },
+      limitBoxes: { title: "interactive.py:_make_limit_submit_callback", file: "lynxmotion_control/interactive.py", marker: "def _make_limit_submit_callback", context: 650 },
+      startCalibTour: { title: "interactive.py:_start_calibration_tour", file: "lynxmotion_control/interactive.py", marker: "def _start_calibration_tour", context: 800 },
+      confirmCalibTour: { title: "interactive.py:_confirm_calibration_step", file: "lynxmotion_control/interactive.py", marker: "def _confirm_calibration_step", context: 750 },
+      restartCalibTour: { title: "interactive.py:_restart_calibration_tour", file: "lynxmotion_control/interactive.py", marker: "def _restart_calibration_tour", context: 750 },
+      calibNudge: { title: "interactive.py:_make_calibration_nudge_callback", file: "lynxmotion_control/interactive.py", marker: "def _make_calibration_nudge_callback", context: 750 },
+      angleBox: { title: "interactive.py:_apply_calibration_angle_from_text", file: "lynxmotion_control/interactive.py", marker: "def _apply_calibration_angle_from_text", context: 700 },
       applyFeedback: { title: "interactive.py:_apply_feedback", file: "lynxmotion_control/interactive.py", marker: "def _apply_feedback", context: 900 },
       sendMove: { title: "interactive.py:_send_move_command", file: "lynxmotion_control/interactive.py", marker: "def _send_move_command", context: 1000 },
       saveTimeline: { title: "interactive.py:_save_timeline", file: "lynxmotion_control/interactive.py", marker: "def _save_timeline", context: 900 },
@@ -1718,6 +1879,68 @@ classDiagram
     let SNIPPET_CACHE = {};
 
     const NODE_SNIPPET_KEYS = {
+      "diagram-ui-controls": {
+        UI: "interactiveInit",
+        ModeStrip: "setOperationMode",
+        LiveBtn: "setOperationMode",
+        TeachBtn: "setOperationMode",
+        RecBadge: "setOperationMode",
+        RecState: "setOperationMode",
+        StatusLEDs: "ledSync",
+        PanelMenu: "interactiveInit",
+        ModesPanel: "setOperationMode",
+        RecordBtn: "teachToggle",
+        SmoothBtn: "smoothTeach",
+        SaveTeachBtn: "finaliseTeach",
+        ModeStatus: "setOperationMode",
+        MovementPanel: "onMotion",
+        HomeBtn: "homeButton",
+        WristSlider: "wristSlider",
+        FrameToggle: "moveFrame",
+        DPad: "onMotion",
+        ServosPanel: "servoAdjust",
+        ServoRows: "servoAdjust",
+        ServoButtons: "servoAdjust",
+        InvertButtons: "servoInvert",
+        CalibToggle: "toggleCalibration",
+        SetVertical: "setVertical",
+        RawToggle: "rawAngle",
+        MotorPanel: "openConfig",
+        OpenConfig: "openConfig",
+        PulseSlider: "pulseSlider",
+        MultiplierSlider: "multiplierSlider",
+        LimitBoxes: "limitBoxes",
+        CalibTourPanel: "toggleCalibration",
+        TourStart: "startCalibTour",
+        TourConfirm: "confirmCalibTour",
+        TourRestart: "restartCalibTour",
+        AngleBox: "angleBox",
+        NudgeMinus: "calibNudge",
+        NudgePlus: "calibNudge",
+        PathPanel: "addWaypoint",
+        NameBox: "addWaypoint",
+        DurationBox: "addWaypoint",
+        AddWaypoint: "addWaypoint",
+        PlayPath: "waypointPlayback",
+        ClearPath: "addWaypoint",
+        UpdateWaypoint: "updateWaypoint",
+        StepNav: "updateWaypoint",
+        PathScroll: "waypointDisplay",
+        TimelinePanel: "loadTimeline",
+        SubroutineName: "saveSubroutine",
+        SaveSubroutine: "saveSubroutine",
+        LoadSubroutine: "loadSubroutine",
+        RefreshSubroutine: "loadSubroutine",
+        SubroutineList: "loadSubroutineWaypoints",
+        TimelineAdd: "addToTimeline",
+        TimelineRemove: "addToTimeline",
+        TimelineClear: "addToTimeline",
+        TimelinePlay: "timelineWorker",
+        TimelineRepeat: "loadTimeline",
+        TimelineSpeed: "loadTimeline",
+        TimelineView: "timelineWorker",
+        RunFlow: "timelineWorker"
+      },
       "diagram-journey": {
         User: "mainEntry",
         CLI: "mainEntry",
@@ -1843,15 +2066,22 @@ classDiagram
         Monitor: "applyFeedback"
       },
       "diagram-state": {
-        start: "homeSequence",
+        Boot: "interactiveInit",
         Home: "homeSequence",
-        Idle: "updateRobot",
-        Teleop: "updateRobot",
-        Teaching: "addWaypoint",
+        PanelIdle: "updateRobot",
+        MenuSelection: "interactiveInit",
+        Teleop: "onMotion",
+        ServoTune: "servoAdjust",
+        PathEdit: "addWaypoint",
+        TimelinePrep: "loadTimeline",
+        Calibration: "toggleCalibration",
+        Run: "timelineWorker",
+        Disarmed: "timelineWorker",
+        Armed: "timelineWorker",
+        Executing: "timelineWorker",
         Prep: "setOperationMode",
         Recording: "teachRecorder",
-        Playback: "timelineWorker",
-        Calibration: "toggleCalibration"
+        Review: "smoothTeach"
       },
       "diagram-classes": {
         InteractiveArm: "interactiveClass",
