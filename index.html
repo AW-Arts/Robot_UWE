@@ -731,7 +731,7 @@ flowchart TD
 
   InputCheck -->|Nudge buttons| NudgeTarget["Delta XYZ/pitch -> IK target<br/>tool or world frame"]
   InputCheck -->|Path/joystick/slider updates| TargetUpdate["Update target XYZ + wrist_pitch + wrist_rotation + gripper"]
-  InputCheck -->|Servo motor rotation (FK jog)| JointNudge["Jog joints directly<br/>base/shoulder/elbow/wrist_rotation/gripper"]
+  InputCheck -->|Servo motor rotation – FK jog| JointNudge["Jog joints directly<br/>base/shoulder/elbow/wrist_rotation/gripper"]
 
   NudgeTarget --> TargetUpdate
   TargetUpdate --> FrameMode{Move frame mode?}
