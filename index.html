@@ -807,7 +807,7 @@ flowchart TB
     TimelineView["Timeline schedule view<br/>_refresh_timeline_display"]
   end
   PanelMenu --> TimelinePanel
-  TimelinePanel --> RunFlow["Run flow (Arm + confirm)\n_play_timeline/_run routine"]
+  TimelinePanel --> RunFlow["Run flow (Arm + confirm)<br/>_play_timeline/_run routine"]
             </script>
           </div>
           <div class="refs">Refs: <code>lynxmotion_control/interactive.py</code> panel builders (<code>_create_controls</code>, <code>_build_mode_panel</code>, <code>_build_movement_panel</code>, <code>_build_servo_panel</code>, <code>_build_motor_config_panel</code>, <code>_build_calibration_tour_panel</code>, <code>_build_waypoint_panel</code>, <code>_build_timeline_panel</code>)</div>
@@ -997,10 +997,10 @@ flowchart LR
 stateDiagram-v2
   direction LR
   [*] --> Boot
-  Boot --> Home: Launch UI + load config\nBuild panels + LED snapshot
+  Boot --> Home: Launch UI + load config<br/>Build panels + LED snapshot
   Boot --> Fault: Init failure / controller missing
   Home --> Live: Home move completes + Live selected
-  Home --> Teach: Teach selected before homing\n(Virtual only)
+  Home --> Teach: Teach selected before homing<br/>(Virtual only)
   Home --> Fault: LED init fail / device missing
 
   state Live {
@@ -1014,10 +1014,10 @@ stateDiagram-v2
     PanelIdle --> ServoTune: Servo +/- / Inv / fudge sliders
     ServoTune --> PanelIdle: Set vertical / calibration toggle
 
-    PanelIdle --> PathEdit: Path add/update/copy/paste\nScroll waypoints
+    PanelIdle --> PathEdit: Path add/update/copy/paste<br/>Scroll waypoints
     PathEdit --> PanelIdle
 
-    PanelIdle --> TimelinePrep: Save/load subroutine\nAdd/remove/clear timeline\nSpeed or repeat toggle
+    PanelIdle --> TimelinePrep: Save/load subroutine<br/>Add/remove/clear timeline<br/>Speed or repeat toggle
     TimelinePrep --> PanelIdle
 
     PanelIdle --> Calibration: Calibration toggle or guided tour start
@@ -2508,10 +2508,14 @@ classDiagram
       });
 
       // Render all inline diagrams
-      await mermaid.run({ querySelector: ".mermaid-inline" });
-      document.querySelectorAll(".mermaid-inline").forEach(function (diagram) {
-        annotateDiagram(diagram, NODE_CODE_REFS[diagram.id]);
-      });
+      try {
+        await mermaid.run({ querySelector: ".mermaid-inline" });
+        document.querySelectorAll(".mermaid-inline").forEach(function (diagram) {
+          annotateDiagram(diagram, NODE_CODE_REFS[diagram.id]);
+        });
+      } catch (err) {
+        console.error("Failed to render inline Mermaid diagrams", err);
+      }
 
       // Modal wiring
       var modal = document.getElementById("diagram-modal");
