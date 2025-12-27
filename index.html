@@ -518,6 +518,10 @@
                       onclick="exportDiagramSvg('diagram-journey','End-to-End Journey & Drilldown Map')">
                 ⬇ Export SVG
               </button>
+              <button class="diagram-action copy-btn" type="button"
+                      onclick="copyMermaidSource('diagram-journey','End-to-End Journey & Drilldown Map')">
+                ⧉ Copy Mermaid
+              </button>
             </div>
             <div class="mermaid mermaid-inline" id="diagram-journey"></div>
             <script type="text/plain" class="mermaid-src" id="src-diagram-journey">
@@ -597,6 +601,10 @@ flowchart TD
               <button class="diagram-action export-btn" type="button"
                       onclick="exportDiagramSvg('diagram-architecture','Software Architecture')">
                 ⬇ Export SVG
+              </button>
+              <button class="diagram-action copy-btn" type="button"
+                      onclick="copyMermaidSource('diagram-architecture','Software Architecture')">
+                ⧉ Copy Mermaid
               </button>
             </div>
             <div class="mermaid mermaid-inline" id="diagram-architecture"></div>
@@ -702,6 +710,10 @@ flowchart LR
               <button class="diagram-action export-btn" type="button"
                       onclick="exportDiagramSvg('diagram-leds','Status LEDs: logic → pulses → pins')">
                 ⬇ Export SVG
+              </button>
+              <button class="diagram-action copy-btn" type="button"
+                      onclick="copyMermaidSource('diagram-leds','Status LEDs: logic → pulses → pins')">
+                ⧉ Copy Mermaid
               </button>
             </div>
             <div class="mermaid mermaid-inline" id="diagram-leds"></div>
@@ -845,6 +857,10 @@ flowchart LR
                       onclick="exportDiagramSvg('diagram-state','High-Level UI State Machine')">
                 ⬇ Export SVG
               </button>
+              <button class="diagram-action copy-btn" type="button"
+                      onclick="copyMermaidSource('diagram-state','High-Level UI State Machine')">
+                ⧉ Copy Mermaid
+              </button>
             </div>
             <div class="mermaid mermaid-inline" id="diagram-state"></div>
             <script type="text/plain" class="mermaid-src" id="src-diagram-state">
@@ -902,6 +918,10 @@ stateDiagram-v2
               <button class="diagram-action export-btn" type="button"
                       onclick="exportDiagramSvg('diagram-teleop','Teleoperation Flow')">
                 ⬇ Export SVG
+              </button>
+              <button class="diagram-action copy-btn" type="button"
+                      onclick="copyMermaidSource('diagram-teleop','Teleoperation Flow')">
+                ⧉ Copy Mermaid
               </button>
             </div>
             <div class="mermaid mermaid-inline" id="diagram-teleop"></div>
@@ -968,6 +988,10 @@ flowchart TD
                       onclick="exportDiagramSvg('diagram-teach','Teach Mode – Waypoints & Subroutines')">
                 ⬇ Export SVG
               </button>
+              <button class="diagram-action copy-btn" type="button"
+                      onclick="copyMermaidSource('diagram-teach','Teach Mode – Waypoints & Subroutines')">
+                ⧉ Copy Mermaid
+              </button>
             </div>
             <div class="mermaid mermaid-inline" id="diagram-teach"></div>
             <script type="text/plain" class="mermaid-src" id="src-diagram-teach">
@@ -1019,6 +1043,10 @@ flowchart TD
                       onclick="exportDiagramSvg('diagram-timeline','Autoplay – Timeline Execution')">
                 ⬇ Export SVG
               </button>
+              <button class="diagram-action copy-btn" type="button"
+                      onclick="copyMermaidSource('diagram-timeline','Autoplay – Timeline Execution')">
+                ⧉ Copy Mermaid
+              </button>
             </div>
             <div class="mermaid mermaid-inline" id="diagram-timeline"></div>
             <script type="text/plain" class="mermaid-src" id="src-diagram-timeline">
@@ -1060,6 +1088,10 @@ flowchart TD
               <button class="diagram-action export-btn" type="button"
                       onclick="exportDiagramSvg('diagram-safety','Safety & Calibration Guardrail')">
                 ⬇ Export SVG
+              </button>
+              <button class="diagram-action copy-btn" type="button"
+                      onclick="copyMermaidSource('diagram-safety','Safety & Calibration Guardrail')">
+                ⧉ Copy Mermaid
               </button>
             </div>
             <div class="mermaid mermaid-inline" id="diagram-safety"></div>
@@ -1112,6 +1144,10 @@ flowchart TD
               <button class="diagram-action export-btn" type="button"
                       onclick="exportDiagramSvg('diagram-functions','Complete Function Inventory')">
                 ⬇ Export SVG
+              </button>
+              <button class="diagram-action copy-btn" type="button"
+                      onclick="copyMermaidSource('diagram-functions','Complete Function Inventory')">
+                ⧉ Copy Mermaid
               </button>
             </div>
             <div class="mermaid mermaid-inline" id="diagram-functions"></div>
@@ -1367,6 +1403,10 @@ mindmap
               <button class="diagram-action export-btn" type="button"
                       onclick="exportDiagramSvg('diagram-classes','Core Classes & Responsibilities')">
                 ⬇ Export SVG
+              </button>
+              <button class="diagram-action copy-btn" type="button"
+                      onclick="copyMermaidSource('diagram-classes','Core Classes & Responsibilities')">
+                ⧉ Copy Mermaid
               </button>
             </div>
             <div class="mermaid mermaid-inline" id="diagram-classes"></div>
@@ -2072,6 +2112,71 @@ classDiagram
         || "diagram";
     }
 
+    function getDiagramSource(diagramId) {
+      const srcScript = document.getElementById("src-" + diagramId);
+      if (!srcScript) {
+        console.warn("No Mermaid source found for", diagramId);
+        return "";
+      }
+      return (srcScript.textContent || "").trim();
+    }
+
+    async function copyMermaidSource(diagramId, title) {
+      const source = getDiagramSource(diagramId);
+      if (!source) return;
+
+      const button = typeof event !== "undefined" && event?.currentTarget ? event.currentTarget : null;
+      const originalLabel = button?.textContent;
+
+      const fallbackCopy = () => {
+        const textarea = document.createElement("textarea");
+        textarea.value = source;
+        textarea.setAttribute("readonly", "");
+        textarea.style.position = "absolute";
+        textarea.style.left = "-9999px";
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+      };
+
+      try {
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(source);
+        } else {
+          fallbackCopy();
+        }
+        if (button) {
+          button.textContent = "✓ Copied";
+          button.disabled = true;
+          setTimeout(() => {
+            button.disabled = false;
+            button.textContent = originalLabel;
+          }, 1400);
+        }
+      } catch (err) {
+        try {
+          fallbackCopy();
+          if (button) {
+            button.textContent = "✓ Copied";
+            button.disabled = true;
+            setTimeout(() => {
+              button.disabled = false;
+              button.textContent = originalLabel;
+            }, 1400);
+          }
+        } catch (fallbackErr) {
+          console.error("Failed to copy Mermaid source for", diagramId, err, fallbackErr);
+          if (button && originalLabel) {
+            button.textContent = "Copy failed";
+            setTimeout(() => {
+              button.textContent = originalLabel;
+            }, 1600);
+          }
+        }
+      }
+    }
+
     function exportDiagramSvg(diagramId, title) {
       const diagram = document.getElementById(diagramId);
       if (!diagram) {
@@ -2178,9 +2283,12 @@ classDiagram
 
       // Global so buttons can call it
       window.openDiagramFullscreen = async function (targetId, title) {
-        var srcScript = document.getElementById("src-" + targetId);
-        if (!srcScript) return;
-        var code = srcScript.textContent.trim();
+        var code = getDiagramSource(targetId);
+        if (!code) {
+          modalDiagram.textContent = "No Mermaid source found for " + targetId;
+          modal.classList.add("open");
+          return;
+        }
         var renderId = "fs-" + targetId + "-" + Date.now();
         try {
           var renderResult = await mermaid.render(renderId, code);
@@ -2194,6 +2302,7 @@ classDiagram
         modal.classList.add("open");
       };
 
+      window.copyMermaidSource = copyMermaidSource;
       window.exportDiagramSvg = exportDiagramSvg;
     });
   </script>
