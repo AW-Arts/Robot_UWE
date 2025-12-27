@@ -443,6 +443,7 @@
       <a href="#modes">Modes</a>
       <a href="#project-management">Project mgmt</a>
       <a href="#architecture">Architecture</a>
+      <a href="#led-subsystem">Status LEDs</a>
       <a href="#teleop">Teleoperation</a>
       <a href="#teaching">Teach mode</a>
       <a href="#timeline">Timeline</a>
@@ -639,6 +640,87 @@ flowchart LR
             </script>
           </div>
           <div class="refs">Refs: <code>lynxmotion_control/interactive.py</code>, <code>lynxmotion_control/al5a_kinematics.py</code>, <code>lynxmotion_control/serial_comm.py</code>, <code>lynxmotion_control/status_leds.py</code>, <code>lynxmotion_control/led_driver.py</code>, <code>lynxmotion_control/tests</code></div>
+        </div>
+      </section>
+
+      <div class="section-heading" id="led-subsystem">
+        <p class="eyebrow">Design level</p>
+        <h2>Status LED subsystem</h2>
+        <p class="section-lede">How ISO robot states become LED patterns, pulses, and SSC-32 channels with wiring rules.</p>
+      </div>
+
+      <!-- LED subsystem -->
+      <section class="card" id="leds">
+        <div class="card-inner">
+          <div class="card-header">
+            <h2>Status LEDs: logic → pulses → pins</h2>
+            <span class="tag">Flowchart · Pins + activation</span>
+          </div>
+          <div class="card-meta">
+            <span class="pill">RobotISOState + teach overlays → StatusLEDController patterns</span>
+            <span class="pill">LEDDriver → SSC-32 PWM (channels 8–13, 0–7 reserved) + wiring constraints</span>
+          </div>
+          <div class="diagram-wrapper">
+            <div class="diagram-actions" aria-label="Diagram actions">
+              <button class="diagram-action fullscreen-btn" type="button"
+                      onclick="openDiagramFullscreen('diagram-leds','Status LEDs: logic → pulses → pins')">
+                ⤢ Fullscreen
+              </button>
+              <button class="diagram-action export-btn" type="button"
+                      onclick="exportDiagramSvg('diagram-leds','Status LEDs: logic → pulses → pins')">
+                ⬇ Export SVG
+              </button>
+            </div>
+            <div class="mermaid mermaid-inline" id="diagram-leds"></div>
+            <script type="text/plain" class="mermaid-src" id="src-diagram-leds">
+flowchart LR
+  subgraph Inputs["State inputs (status_leds.py)"]
+    ISOStates["RobotISOState values<br/>powered_off · connected_not_enabled · enabled_not_homed · homing · ready_idle · running · teach_mode · fault"]
+    TeachFlags["Teach overlays<br/>teach_active + teach_recording<br/>(interactive.py:_sync_leds)"]
+    FaultEdge["fault_just_triggered flag"]
+  end
+
+  ISOStates --> Patterns["StatusLEDController.set_iso_state<br/>apply base patterns &amp; overlays"]
+  TeachFlags --> Patterns
+  FaultEdge --> Patterns
+
+  subgraph Meanings["Per-LED activation meaning"]
+    RedLED["Red: fault / E-Stop<br/>solid=fault present<br/>blink_fast=fault just triggered"]
+    AmberLED["Amber: attention / transition<br/>solid=not enabled/waiting<br/>blink_slow=homing or operator confirm"]
+    GreenLED["Green: ready / running<br/>solid=idle ready<br/>blink_slow=motion running"]
+    YellowLED["Yellow: teach/calibration/manual jog<br/>solid=mode active<br/>blink_slow=recording/step"]
+    BlueLED["Blue: host link / controller<br/>solid=USB/host connected<br/>optional slow heartbeat"]
+    WhiteLED["White: illumination/presence<br/>solid or dim via PWM"]
+  end
+
+  Patterns --> RedLED
+  Patterns --> AmberLED
+  Patterns --> GreenLED
+  Patterns --> YellowLED
+  Patterns --> BlueLED
+  Patterns --> WhiteLED
+
+  subgraph Drive["Hardware drive (led_driver.py)"]
+    LEDDriverNode["build_drive_leds → LEDDriver.drive<br/>validates config and snapshots"]
+    PWMBackend["SSC32PWMLEDDriver<br/>backend=ssc32_pwm_led"]
+    GPIOBackend["GPIO backend<br/>(RPi.GPIO when available)"]
+  end
+
+  RedLED & AmberLED & GreenLED & YellowLED & BlueLED & WhiteLED --> LEDDriverNode
+  LEDDriverNode -->|backend=gpio| GPIOBackend
+  LEDDriverNode -->|backend=ssc32_pwm_led| PWMBackend
+
+  subgraph Channels["SSC-32 channel + pulse map<br/>led_pins.json defaults (status_led_plan.md)"]
+    ChannelMap["Channels: red=8, amber=9, green=10,<br/>blue=11, yellow=12, white=13<br/>reserved servo channels: 0–7"]
+    PulseMap["Pulse widths: off=0µs, dim≈1300µs,<br/>on=2000µs · blink_slow=1 Hz · blink_fast=4 Hz"]
+    Wiring["Signal → 220–470Ω resistor → LED → GND<br/>no servo V+, one resistor per LED"]
+  end
+
+  PWMBackend --> ChannelMap --> Wiring
+  PWMBackend --> PulseMap
+            </script>
+          </div>
+          <div class="refs">Refs: <code>lynxmotion_control/status_leds.py</code>, <code>lynxmotion_control/interactive.py</code>, <code>lynxmotion_control/led_driver.py</code>, <code>docs/status_led_plan.md</code></div>
         </div>
       </section>
 
@@ -1498,6 +1580,24 @@ classDiagram
         Classes: "interactiveClass",
         Architecture: "interactiveInit",
         StateMachine: "commandWorker"
+      },
+      "diagram-leds": {
+        ISOStates: "statusLEDController",
+        TeachFlags: "ledSync",
+        FaultEdge: "statusLEDController",
+        Patterns: "statusLEDController",
+        RedLED: "statusLEDController",
+        AmberLED: "statusLEDController",
+        GreenLED: "statusLEDController",
+        YellowLED: "statusLEDController",
+        BlueLED: "statusLEDController",
+        WhiteLED: "statusLEDController",
+        LEDDriverNode: "ledDriver",
+        PWMBackend: "ledDriver",
+        GPIOBackend: "ledDriver",
+        ChannelMap: "ledConfig",
+        PulseMap: "ledConfig",
+        Wiring: "ledConfig"
       },
       "diagram-architecture": {
         User: "mainEntry",
