@@ -1900,7 +1900,11 @@ classDiagram
     mermaid.initialize({
       startOnLoad: false,
       theme: "dark",
-      securityLevel: "loose"
+      securityLevel: "loose",
+
+      // Word-safe: avoid <foreignObject> by using native SVG text for labels
+      htmlLabels: false,
+      flowchart: { htmlLabels: false }
     });
 
     function buildLabelMaps() {
