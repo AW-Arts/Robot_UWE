@@ -339,6 +339,39 @@
 
     .legend-list li { margin-bottom: 0.25rem; }
 
+    .detail-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 0.8rem;
+      margin-top: 0.85rem;
+    }
+
+    .detail-card {
+      padding: 0.85rem 0.9rem;
+      border-radius: 12px;
+      border: 1px solid var(--border-subtle);
+      background: rgba(15,23,42,0.92);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+    }
+
+    .detail-card h3 {
+      margin: 0 0 0.3rem;
+      font-size: 0.92rem;
+      letter-spacing: -0.01em;
+    }
+
+    .detail-card ul {
+      margin: 0;
+      padding-left: 1.15rem;
+      color: var(--text-soft);
+      font-size: 0.88rem;
+      line-height: 1.5;
+    }
+
+    .detail-card li + li {
+      margin-top: 0.2rem;
+    }
+
     /* Fullscreen modal */
 
     .diagram-modal {
@@ -680,9 +713,45 @@ flowchart LR
     FaultEdge["fault_just_triggered flag"]
   end
 
-  ISOStates --> Patterns["StatusLEDController.set_iso_state<br/>apply base patterns &amp; overlays"]
-  TeachFlags --> Patterns
-  FaultEdge --> Patterns
+  subgraph PriorityLogic["Stack-light decision path (red > amber > green)"]
+    FaultDecision{"fault present?"}
+    RedFast["Set red = blink_fast<br/>(fault_just_triggered)"]
+    RedSolid["Set red = solid<br/>(fault latched)"]
+    AmberDecision{"enabled + homed?"}
+    AmberSolid["Set amber = solid<br/>(not enabled / waiting)"]
+    AmberBlink["Set amber = blink_slow<br/>(homing / confirmation)"]
+    MotionDecision{"motion running?"}
+    GreenBlink["Set green = blink_slow<br/>(queue running)"]
+    GreenSolid["Set green = solid<br/>(ready idle)"]
+  end
+
+  ISOStates --> FaultDecision
+  FaultEdge --> RedFast
+  FaultDecision -->|yes| RedSolid
+  FaultDecision -->|edge| RedFast
+  FaultDecision -->|no| AmberDecision
+  AmberDecision -->|not enabled / not homed| AmberSolid
+  AmberDecision -->|homing| AmberBlink
+  AmberDecision -->|ready| MotionDecision
+  MotionDecision -->|yes| GreenBlink
+  MotionDecision -->|no| GreenSolid
+
+  subgraph Overlays["Mode overlays + host/controller indicators"]
+    TeachOverlay{"Teach / calibration?"}
+    RecordingOverlay{"Teach recording / step?"}
+    YellowSolid["Set yellow = solid<br/>(teach / calibration active)"]
+    YellowBlink["Set yellow = blink_slow<br/>(recording / step)"]
+    HostOverlay{"Host connected?"}
+    BlueSolid["Blue = solid<br/>(controller linked)"]
+    BlueHeartbeat["Optional slow heartbeat<br/>when idle"]
+    AwakeOverlay{"Controller awake?"}
+    WhiteSolid["White = solid or dim<br/>(machine awake / light)"]
+  end
+
+  TeachFlags --> TeachOverlay --> YellowSolid
+  TeachOverlay --> RecordingOverlay -->|yes| YellowBlink
+  ISOStates --> HostOverlay --> BlueSolid --> BlueHeartbeat
+  ISOStates --> AwakeOverlay --> WhiteSolid
 
   subgraph Meanings["Per-LED activation meaning"]
     RedLED["Red: fault / E-Stop<br/>solid=fault present<br/>blink_fast=fault just triggered"]
@@ -693,12 +762,17 @@ flowchart LR
     WhiteLED["White: illumination/presence<br/>solid or dim via PWM"]
   end
 
-  Patterns --> RedLED
-  Patterns --> AmberLED
-  Patterns --> GreenLED
-  Patterns --> YellowLED
-  Patterns --> BlueLED
-  Patterns --> WhiteLED
+  RedFast --> RedLED
+  RedSolid --> RedLED
+  AmberSolid --> AmberLED
+  AmberBlink --> AmberLED
+  GreenBlink --> GreenLED
+  GreenSolid --> GreenLED
+  YellowSolid --> YellowLED
+  YellowBlink --> YellowLED
+  BlueSolid --> BlueLED
+  BlueHeartbeat --> BlueLED
+  WhiteSolid --> WhiteLED
 
   subgraph Drive["Hardware drive (led_driver.py)"]
     LEDDriverNode["build_drive_leds → LEDDriver.drive<br/>validates config and snapshots"]
@@ -719,6 +793,32 @@ flowchart LR
   PWMBackend --> ChannelMap --> Wiring
   PWMBackend --> PulseMap
             </script>
+          </div>
+          <div class="detail-grid" aria-label="LED decision notes">
+            <div class="detail-card">
+              <h3>Decision priority</h3>
+              <ul>
+                <li>Red, amber, green follow ISO stack-light rules; red always blocks amber/green.</li>
+                <li>Amber blocks green when the robot is not enabled, not homed, or homing.</li>
+                <li>Green only drives when motion is permissive; running queues blink, idle holds solid.</li>
+              </ul>
+            </div>
+            <div class="detail-card">
+              <h3>Overlays</h3>
+              <ul>
+                <li>Teach/calibration sets yellow solid; recording or calibration steps promote a slow blink.</li>
+                <li>Blue mirrors host/controller link and can heartbeat slowly while idle.</li>
+                <li>White indicates awake/utility; dimming is allowed for presence lighting.</li>
+              </ul>
+            </div>
+            <div class="detail-card">
+              <h3>Driver guarantees</h3>
+              <ul>
+                <li>LEDDriver snapshots the target LEDState and validates SSC-32 channel maps.</li>
+                <li>Reserved servo channels (0–7) are never touched; defaults are in <code>led_pins.json</code>.</li>
+                <li>blink_slow and blink_fast follow the plan in <code>docs/status_led_plan.md</code> (1 Hz, 4 Hz).</li>
+              </ul>
+            </div>
           </div>
           <div class="refs">Refs: <code>lynxmotion_control/status_leds.py</code>, <code>lynxmotion_control/interactive.py</code>, <code>lynxmotion_control/led_driver.py</code>, <code>docs/status_led_plan.md</code></div>
         </div>
