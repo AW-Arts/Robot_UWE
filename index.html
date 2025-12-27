@@ -479,7 +479,9 @@ flowchart TD
   ControllerSel -->|--port| Serial["AL5ASerialController<br/>serial_comm.py"]
 
   ControllerSel --> UI["InteractiveArm UI<br/>interactive.py"]
-  UI --> Mode{Select workspace slice}
+  UI --> ModeToggle["Live ↔ Teach toggle<br/>LEDs reflect mode"]
+  ModeToggle --> LEDs["Status LEDs<br/>status_leds.py + led_driver.py"]
+  ModeToggle --> Mode{Select workspace slice}
 
   Mode --> Teleop["Teleoperation loop<br/>update_robot + smoothing"]
   Mode --> Teach["Teach mode<br/>waypoints/subroutines"]
@@ -497,6 +499,9 @@ flowchart TD
   Inspect --> StateMachine["Global state machine"]
   Code -->|Reference every function| Listing["full_code_listing.md"]
 
+  LEDs --> SafetyState
+  LEDs --> StateMachine
+
   click Teleop call openDiagramFullscreen("diagram-teleop","Teleoperation Flow") "Open teleop flow"
   click Teach href "#teaching" "Scroll to teach mode diagram"
   click Timeline call openDiagramFullscreen("diagram-timeline","Timeline Playback") "Open timeline diagram"
@@ -508,6 +513,8 @@ flowchart TD
   click Classes call openDiagramFullscreen("diagram-classes","Class Diagram") "Open class diagram"
   click Architecture call openDiagramFullscreen("diagram-architecture","Software Architecture") "Open architecture diagram"
   click StateMachine call openDiagramFullscreen("diagram-state","Global State Machine") "Open state machine diagram"
+  click ModeToggle call openDiagramFullscreen("diagram-state","High-Level UI State Machine") "View Live ↔ Teach toggle"
+  click LEDs call openDiagramFullscreen("diagram-architecture","Software Architecture") "See LED stack + drivers"
   click Code href "full_code_listing.md" "Open full code listing"
   click Listing href "full_code_listing.md" "Open full code listing"
             </script>
@@ -547,6 +554,7 @@ flowchart LR
   subgraph ApplicationLayer["Application"]
     CLI["CLI Launcher (__main__.py)"]
     Interactive["InteractiveArm UI (interactive.py)<br/>matplotlib widgets + event loop"]
+    ModeSwitch["Live ↔ Teach toggle<br/>LED + input gating"]
   end
 
   subgraph LogicLayer["Logic"]
@@ -555,6 +563,8 @@ flowchart LR
     Persistence["JSON persistence<br/>servo offsets, subroutines, timeline"]
     Compensation["Wrist extension compensation<br/>pitch scaling vs reach"]
     ServoMultipliers["Servo multipliers<br/>per-servo scaling"]
+    TeachRecorder["Teach recording + smoothing<br/>_start/_pause/_finalise"]
+    MoveFrame["End-effector frame toggle<br/>_transform_move_delta"]
   end
 
   subgraph ControllerLayer["Controllers"]
@@ -568,8 +578,15 @@ flowchart LR
     Timeline["Timeline schedule<br/>timeline.json"]
   end
 
+  subgraph IndicatorLayer["Indicators"]
+    StatusLEDs["StatusLEDController<br/>ISO stack light patterns"]
+    LEDDriver["LED drivers (GPIO / SSC-32 PWM)<br/>led_driver.py"]
+    LEDConfig["User LED config<br/>~/.config/lynxmotion_al5a/led_pins.json"]
+  end
+
   subgraph HardwareLayer["Hardware"]
     Hardware["SSC-32 / SSC-32U + AL5A Servos"]
+    StackLights["Stack lights / tower LEDs"]
   end
 
   subgraph TestLayer["Tests"]
@@ -577,6 +594,7 @@ flowchart LR
   end
 
   User -->|launches| CLI -->|spawns UI| Interactive
+  Interactive --> ModeSwitch
   Interactive -->|FK + IK| Kinematics
   Interactive -->|smooth & queue| Queueing
   Interactive -->|persist/load| Persistence
@@ -587,13 +605,19 @@ flowchart LR
   Persistence --> Paths
   Persistence --> Timeline
   ServoMultipliers --> SerialCtrl
+  MoveFrame --> Queueing
+  TeachRecorder --> Persistence
   Interactive -->|simulation backend| PrintCtrl
+  Interactive -->|sync ISO state| StatusLEDs
+  StatusLEDs --> LEDDriver
+  LEDDriver --> LEDConfig
+  LEDDriver --> StackLights
   SerialCtrl -->|"SSC-32 command bytes"| Hardware
   Tests -->|fixtures & behaviours| Interactive
   Tests -->|IK validation| Kinematics
             </script>
           </div>
-          <div class="refs">Refs: <code>lynxmotion_control/interactive.py</code>, <code>lynxmotion_control/al5a_kinematics.py</code>, <code>lynxmotion_control/serial_comm.py</code>, <code>lynxmotion_control/tests</code></div>
+          <div class="refs">Refs: <code>lynxmotion_control/interactive.py</code>, <code>lynxmotion_control/al5a_kinematics.py</code>, <code>lynxmotion_control/serial_comm.py</code>, <code>lynxmotion_control/status_leds.py</code>, <code>lynxmotion_control/led_driver.py</code>, <code>lynxmotion_control/tests</code></div>
         </div>
       </section>
 
@@ -606,6 +630,7 @@ flowchart LR
           </div>
           <div class="card-meta">
             <span class="pill">Single active state at any time</span>
+            <span class="pill">Live ↔ Teach toggle drives LEDs + recording</span>
           </div>
           <div class="diagram-wrapper">
             <button class="fullscreen-btn" type="button"
@@ -619,11 +644,16 @@ stateDiagram-v2
 
   Home --> Idle: home move completes
 
-  Idle --> Teleop: drag / scroll / slider input
+  Idle --> Teleop: Live mode active + drag/scroll/slider input
   Teleop --> Idle: no input and command queue empty
 
-  Idle --> Teaching: Path panel opened
-  Teaching --> Idle: subroutine saved or cleared
+  Idle --> Teaching: Live ↔ Teach toggle set to Teach
+  Teaching --> Idle: switch to Live or finish teach session
+  state Teaching {
+    [*] --> Prep
+    Prep --> Recording: start teach recording
+    Recording --> Prep: stop recording / auto-save subroutine
+  }
 
   Idle --> Playback: waypoint playback or timeline start
   Playback --> Idle: playback complete or stop pressed
@@ -652,6 +682,7 @@ stateDiagram-v2
           <div class="card-meta">
             <span class="pill">Continuous loop while UI active</span>
             <span class="pill">Workspace clamping + IK + smoothing</span>
+            <span class="pill">Toggle global vs tool-relative moves</span>
           </div>
           <div class="diagram-wrapper">
             <button class="fullscreen-btn" type="button"
@@ -668,7 +699,11 @@ flowchart TD
   InputCheck -->|Drag gizmo / scroll / sliders| TargetUpdate[Update target XYZ + wrist_pitch + wrist_rotation + gripper]
   InputCheck -->|Keyboard modifiers| TargetUpdate
 
-  TargetUpdate --> Clamp["Clamp to workspace &amp; hard servo limits<br/>(_apply_workspace_limits)"]
+  TargetUpdate --> FrameMode{Move frame mode?}
+  FrameMode -->|Tool-relative| Transform["Rotate delta by base yaw<br/>(_transform_move_delta)"]
+  FrameMode -->|Global axes| Transform
+
+  Transform --> Clamp["Clamp to workspace &amp; hard servo limits<br/>(_apply_workspace_limits)"]
   Clamp --> WristComp["Compensate wrist pitch for extension<br/>(_apply_wrist_extension_compensation)"]
   WristComp --> IK["AL5AKinematics.inverse<br/>(XYZ → base/shoulder/elbow/wrist)"]
 
@@ -682,11 +717,12 @@ flowchart TD
   Queue --> Worker[Command worker thread<br/>_command_worker]
   Worker --> ServoScale["Scale servo configs by multipliers<br/>(_servo_config_with_multiplier)"]
   ServoScale --> Controller[controller.move_joints]
-  Controller --> Feedback[Mirror joints + zero reference display]
+  Controller --> LEDs["Sync ISO LEDs<br/>(_sync_leds → StatusLEDController)"]
+  LEDs --> Feedback[Mirror joints + zero reference display]
   Feedback --> InputCheck
             </script>
           </div>
-          <div class="refs">Refs: <code>interactive.py:update_robot</code>, <code>interactive.py:_apply_workspace_limits</code>, <code>interactive.py:_smooth_command</code>, <code>interactive.py:_command_worker</code>, <code>al5a_kinematics.py:AL5AKinematics.inverse</code></div>
+          <div class="refs">Refs: <code>interactive.py:update_robot</code>, <code>interactive.py:_transform_move_delta</code>, <code>interactive.py:_apply_workspace_limits</code>, <code>interactive.py:_sync_leds</code>, <code>interactive.py:_smooth_command</code>, <code>interactive.py:_command_worker</code>, <code>al5a_kinematics.py:AL5AKinematics.inverse</code></div>
         </div>
       </section>
 
@@ -700,6 +736,8 @@ flowchart TD
           <div class="card-meta">
             <span class="pill">InteractiveArm Path panel</span>
             <span class="pill">Subroutines stored as JSON</span>
+            <span class="pill">Keyframe names + copy/paste + update-from-live</span>
+            <span class="pill">Teach recorder smoothing → waypoints</span>
           </div>
           <div class="diagram-wrapper">
             <button class="fullscreen-btn" type="button"
@@ -709,12 +747,20 @@ flowchart TD
             <div class="mermaid mermaid-inline" id="diagram-teach"></div>
             <script type="text/plain" class="mermaid-src" id="src-diagram-teach">
 flowchart TD
-  Enter([Open Path panel]) --> Pose["Use sliders/drag to set pose"]
+  Enter([Open Path panel]) --> ModeGate["Live ↔ Teach toggle<br/>locks autoplay + LEDs"]
+  ModeGate --> Pose["Use sliders/drag to set pose"]
+  ModeGate --> Recording["Teach recorder (virtual moves)<br/>start/stop + smooth samples"]
+  Recording --> Pose
   Pose --> Capture["Capture waypoint (XYZ, wrist_pitch, wrist_rotation, gripper, duration)"]
-  Capture --> More{More waypoints?}
+  Capture --> Manage{Manage keyframes?}
+
+  Manage -->|Update selected| Update["Load live joint snapshot<br/>_handle_update_waypoint"]
+  Manage -->|Copy/Paste/Scroll| EditList["List controls + drag/scroll<br/>copy/paste/delete/reorder"]
+  Update --> More{More waypoints?}
+  EditList --> More
 
   More -->|Yes| Pose
-  More -->|No| Name["Name subroutine (slug)"]
+  More -->|No| Name["Name keyframe + duration fields"]
 
   Name --> Save["Persist JSON as subroutines/slug.json"]
 
@@ -723,7 +769,7 @@ flowchart TD
   Next -->|Add to timeline| Add["Append slug/duration into timeline.json"]
             </script>
           </div>
-          <div class="refs">Refs: <code>interactive.py:_record_current_waypoint</code>, <code>interactive.py:_save_subroutine</code>, <code>interactive.py:_playback_path</code>, <code>interactive.py:SUBROUTINE_STORAGE_DIR</code>, <code>interactive.py:TIMELINE_STORAGE_PATH</code></div>
+          <div class="refs">Refs: <code>interactive.py:_set_operation_mode</code>, <code>interactive.py:_start_teach_session</code>, <code>interactive.py:_record_current_waypoint</code>, <code>interactive.py:_handle_update_waypoint</code>, <code>interactive.py:_save_subroutine</code>, <code>interactive.py:_playback_path</code>, <code>interactive.py:SUBROUTINE_STORAGE_DIR</code>, <code>interactive.py:TIMELINE_STORAGE_PATH</code></div>
         </div>
       </section>
 
@@ -794,12 +840,13 @@ flowchart TD
   Wait --> Limits
 
   Calib -->|No| Execute["Send move_joints to controller"]
-  Execute --> Persist["Auto-save offsets/paths"]
+  Execute --> LEDSync["Sync LEDs for ISO state<br/>(_sync_leds + StatusLEDController)"]
+  LEDSync --> Persist["Auto-save offsets/paths"]
   Persist --> Monitor["Mirror joint feedback"]
   Monitor --> Cmd
             </script>
           </div>
-          <div class="refs">Refs: <code>interactive.py:_apply_workspace_limits</code>, <code>interactive.py:_smooth_command</code>, <code>interactive.py:_enqueue_command_segments</code>, <code>interactive.py:_stop_for_calibration</code></div>
+          <div class="refs">Refs: <code>interactive.py:_apply_workspace_limits</code>, <code>interactive.py:_smooth_command</code>, <code>interactive.py:_enqueue_command_segments</code>, <code>interactive.py:_stop_for_calibration</code>, <code>interactive.py:_sync_leds</code></div>
         </div>
       </section>
       <div class="section-heading" id="reference">
@@ -857,6 +904,19 @@ mindmap
         move_joints
       PrintController
         move_joints
+    status_leds.py
+      LEDState
+      RobotISOState
+      StatusLEDController
+        snapshot
+        set_iso_state
+        set_fault
+        set_ready
+    led_driver.py
+      load_led_config
+      build_drive_leds
+      LEDDriver.drive
+      SSC32PWMLEDDriver.drive
     interactive.py
       _ensure_interactive_backend
       run_demo
@@ -873,6 +933,19 @@ mindmap
           update_robot
           _apply_feedback
           _read_feedback_from_controller
+        Mode toggles & LEDs
+          _set_operation_mode
+          _remember_pose_before_teach
+          _enter_teach_mode
+          _start_teach_session
+          _pause_teach_recording
+          _finalise_teach_session
+          _sync_leds
+          _on_leds_changed
+          _update_idle_leds
+          _build_mode_toggle_strip
+          _build_led_status_panel
+          _render_led_states
         Wrist and axes controls
           _slider_value_from_pitch
           _pitch_from_slider_value
@@ -934,6 +1007,7 @@ mindmap
           _make_calibration_nudge_callback
         Direct manipulations
           _nudge_target
+          _transform_move_delta
           _adjust_servo
           _set_servo_angle
           _toggle_servo_inversion
@@ -959,6 +1033,10 @@ mindmap
           _handle_home_button
           _handle_duration_submit
           _handle_add_waypoint
+          _handle_update_waypoint
+          _handle_copy_waypoint
+          _handle_paste_waypoint
+          _handle_delete_waypoint
           _handle_clear_waypoints
           _handle_save_subroutine
           _handle_load_subroutine
@@ -1023,7 +1101,7 @@ mindmap
           _wait_for_segment
             </script>
           </div>
-          <div class="refs">Refs: <code>lynxmotion_control/__main__.py</code>, <code>lynxmotion_control/interactive.py</code>, <code>lynxmotion_control/al5a_kinematics.py</code>, <code>lynxmotion_control/serial_comm.py</code></div>
+          <div class="refs">Refs: <code>lynxmotion_control/__main__.py</code>, <code>lynxmotion_control/interactive.py</code>, <code>lynxmotion_control/al5a_kinematics.py</code>, <code>lynxmotion_control/serial_comm.py</code>, <code>lynxmotion_control/status_leds.py</code>, <code>lynxmotion_control/led_driver.py</code></div>
         </div>
       </section>
 
@@ -1052,9 +1130,12 @@ classDiagram
     +__init__(controller: SerialLike)
     +run_ui()
     +update_robot(force: bool)
+    +_set_operation_mode(mode: str)
     +_apply_workspace_limits(target_xyz)
+    +_transform_move_delta(dx, dy, dz)
     +_apply_wrist_extension_compensation(pitch)
     +_apply_feedback()
+    +_sync_leds()
     +_send_move_command(joints)
     +_enqueue_command_segments(joints, duration, apply_limits)
     +_servo_config_with_multiplier()
@@ -1092,6 +1173,24 @@ classDiagram
     +write(command: bytes)
     +read_until(delimiter: bytes, timeout: float)
     +close()
+  }
+
+  class RobotISOState {
+    <<enum>>
+    +READY_IDLE
+    +RUNNING
+    +TEACH_MODE
+    +FAULT
+  }
+
+  class StatusLEDController {
+    +set_iso_state(state: RobotISOState, teach_active: bool)
+    +set_fault(active: bool, just_triggered: bool)
+    +snapshot() dict
+  }
+
+  class LEDDriver {
+    +drive(state: dict[str, LEDState])
   }
 
   class AL5ASerialController {
@@ -1132,11 +1231,14 @@ classDiagram
   InteractiveArm --> PrintController : simulation backend
   InteractiveArm --> Waypoint : captures
   InteractiveArm --> TimelineEntry : schedules playback
+  InteractiveArm --> StatusLEDController : updates ISO stack state
+  StatusLEDController --> LEDDriver : drives hardware LEDs
   AL5ASerialController --> SSC32Command : builds commands
   SSC32Command --> ServoConfig : pulse conversion
+  LEDDriver --> SSC32Command : optional PWM LED backend
             </script>
           </div>
-          <div class="refs">Refs: <code>interactive.py</code> dataclasses and methods, <code>al5a_kinematics.py:ServoConfig</code>, <code>serial_comm.py:SSC32Command</code></div>
+          <div class="refs">Refs: <code>interactive.py</code> dataclasses and methods, <code>al5a_kinematics.py:ServoConfig</code>, <code>serial_comm.py:SSC32Command</code>, <code>status_leds.py:StatusLEDController</code>, <code>led_driver.py</code></div>
         </div>
       </section>
     </div>
@@ -1267,6 +1369,15 @@ classDiagram
       commandWorker: { title: "interactive.py:_command_worker", file: "lynxmotion_control/interactive.py", marker: "def _command_worker", context: 1100 },
       wristComp: { title: "interactive.py:_apply_wrist_extension_compensation", file: "lynxmotion_control/interactive.py", marker: "def _apply_wrist_extension_compensation", context: 700 },
       servoMultiplier: { title: "interactive.py:_servo_config_with_multiplier", file: "lynxmotion_control/interactive.py", marker: "def _servo_config_with_multiplier", context: 500 },
+      moveFrame: { title: "interactive.py:_transform_move_delta", file: "lynxmotion_control/interactive.py", marker: "def _transform_move_delta", context: 1100 },
+      setOperationMode: { title: "interactive.py:_set_operation_mode", file: "lynxmotion_control/interactive.py", marker: "def _set_operation_mode", context: 1800 },
+      teachRecorder: { title: "interactive.py:_start_teach_session", file: "lynxmotion_control/interactive.py", marker: "def _start_teach_session", context: 1850 },
+      updateWaypoint: { title: "interactive.py:_handle_update_waypoint", file: "lynxmotion_control/interactive.py", marker: "def _handle_update_waypoint", context: 4700 },
+      waypointDisplay: { title: "interactive.py:_refresh_waypoint_display", file: "lynxmotion_control/interactive.py", marker: "def _refresh_waypoint_display", context: 3100 },
+      ledSync: { title: "interactive.py:_sync_leds", file: "lynxmotion_control/interactive.py", marker: "def _sync_leds", context: 580 },
+      statusLEDController: { title: "status_leds.py:StatusLEDController", file: "lynxmotion_control/status_leds.py", marker: "class StatusLEDController", context: 200 },
+      ledDriver: { title: "led_driver.py:build_drive_leds", file: "lynxmotion_control/led_driver.py", marker: "def build_drive_leds", context: 260 },
+      ledConfig: { title: "led_driver.py:load_led_config", file: "lynxmotion_control/led_driver.py", marker: "def load_led_config", context: 200 },
       addWaypoint: { title: "interactive.py:_handle_add_waypoint", file: "lynxmotion_control/interactive.py", marker: "def _handle_add_waypoint", context: 900 },
       slugifySubroutine: { title: "interactive.py:_slugify_subroutine_name", file: "lynxmotion_control/interactive.py", marker: "def _slugify_subroutine_name", context: 700 },
       saveSubroutine: { title: "interactive.py:_handle_save_subroutine", file: "lynxmotion_control/interactive.py", marker: "def _handle_save_subroutine", context: 900 },
@@ -1304,6 +1415,8 @@ classDiagram
         Serial: "serialMove",
         UI: "interactiveInit",
         Mode: "updateRobot",
+        ModeToggle: "setOperationMode",
+        LEDs: "ledSync",
         Teleop: "updateRobot",
         TeleopState: "commandWorker",
         Teach: "addWaypoint",
@@ -1323,16 +1436,23 @@ classDiagram
         User: "mainEntry",
         CLI: "mainEntry",
         Interactive: "interactiveInit",
+        ModeSwitch: "setOperationMode",
         Kinematics: "kinematicsClass",
         Queueing: "smoothSegments",
         Persistence: "saveTimeline",
         Compensation: "wristComp",
         ServoMultipliers: "servoMultiplier",
+        MoveFrame: "moveFrame",
+        TeachRecorder: "teachRecorder",
         SerialCtrl: "serialControllerClass",
         PrintCtrl: "printMove",
         LocalFiles: "saveTimeline",
         Paths: "saveSubroutine",
         Timeline: "loadTimeline",
+        StatusLEDs: "statusLEDController",
+        LEDDriver: "ledDriver",
+        LEDConfig: "ledConfig",
+        StackLights: "ledDriver",
         Tests: "testsKinematics"
       },
       "diagram-teleop": {
@@ -1340,6 +1460,8 @@ classDiagram
         HomePose: "homeSequence",
         InputCheck: "onMotion",
         TargetUpdate: "onMotion",
+        FrameMode: "moveFrame",
+        Transform: "moveFrame",
         Clamp: "clampTarget",
         WristComp: "wristComp",
         IK: "inverseIk",
@@ -1351,12 +1473,18 @@ classDiagram
         Worker: "commandWorker",
         ServoScale: "servoMultiplier",
         Controller: "serialMove",
+        LEDs: "ledSync",
         Feedback: "applyFeedback"
       },
       "diagram-teach": {
         Enter: "interactiveInit",
+        ModeGate: "setOperationMode",
+        Recording: "teachRecorder",
         Pose: "updateRobot",
         Capture: "addWaypoint",
+        Manage: "updateWaypoint",
+        Update: "updateWaypoint",
+        EditList: "waypointDisplay",
         More: "addWaypoint",
         Name: "slugifySubroutine",
         Save: "saveSubroutine",
@@ -1381,6 +1509,7 @@ classDiagram
         Calib: "toggleCalibration",
         Wait: "toggleCalibration",
         Execute: "sendMove",
+        LEDSync: "ledSync",
         Persist: "saveTimeline",
         Monitor: "applyFeedback"
       },
@@ -1390,6 +1519,8 @@ classDiagram
         Idle: "updateRobot",
         Teleop: "updateRobot",
         Teaching: "addWaypoint",
+        Prep: "setOperationMode",
+        Recording: "teachRecorder",
         Playback: "timelineWorker",
         Calibration: "toggleCalibration"
       },
@@ -1402,6 +1533,9 @@ classDiagram
         SSC32Command: "ssc32Bytes",
         Waypoint: "waypoint",
         TimelineEntry: "timelineEntry",
+        RobotISOState: "statusLEDController",
+        StatusLEDController: "statusLEDController",
+        LEDDriver: "ledDriver",
         angle_to_pulse: "servoConfig",
         pulse_to_angle: "servoConfig",
         forward: "forwardKinematics",
