@@ -729,7 +729,7 @@ flowchart TD
   Start([Start UI]) --> HomePose[Apply DEFAULT_HOME_PULSES]
   HomePose --> InputCheck{User input?}
 
-  InputCheck -->|Nudge buttons (delta XYZ/pitch) and set IK target in tool or world frame| TargetUpdate[Update target XYZ + wrist_pitch + wrist_rotation + gripper]
+  InputCheck -->|Nudge buttons (delta XYZ/pitch) and set IK target in tool or world frame| TargetUpdate["Update target XYZ + wrist_pitch + wrist_rotation + gripper"]
   InputCheck -->|Servo motor rotation (FK jog)| JointNudge[Jog joints directly<br/>base/shoulder/elbow/wrist_rotation/gripper]
 
   TargetUpdate --> FrameMode{Move frame mode?}
@@ -753,7 +753,7 @@ flowchart TD
   Worker --> ServoScale["Scale servo configs by multipliers<br/>(_servo_config_with_multiplier)"]
   ServoScale --> Controller[controller.move_joints]
   Controller --> LEDs["Sync ISO LEDs<br/>(_sync_leds → StatusLEDController)"]
-  LEDs --> Feedback[Mirror joints + zero reference display]
+  LEDs --> Feedback["Mirror joints + zero reference display"]
   Feedback --> InputCheck
             </script>
           </div>
@@ -842,7 +842,7 @@ flowchart TD
   Load[Load timeline.json<br/>_load_saved_timeline] --> SelectEntry[Select first/next entry]
 
   SelectEntry --> Hydrate[Find subroutine JSON<br/>mark missing entries]
-  Hydrate --> QueuePath[Invoke _playback_subroutine<br/>queue XYZ + wrist pitch/rotation + gripper]
+  Hydrate --> QueuePath["Invoke _playback_subroutine<br/>queue XYZ + wrist pitch/rotation + gripper"]
 
   QueuePath --> Monitor[Timeline thread waits<br/>_timeline_playback_worker]
 
