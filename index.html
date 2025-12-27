@@ -283,11 +283,16 @@
       position: relative;
     }
 
-    .fullscreen-btn {
+    .diagram-actions {
       position: absolute;
       top: 0.1rem;
       right: 0.1rem;
       z-index: 2;
+      display: flex;
+      gap: 0.35rem;
+    }
+
+    .diagram-action {
       border: none;
       border-radius: 999px;
       background: rgba(15,23,42,0.9);
@@ -303,11 +308,15 @@
       transition: all 0.18s ease-out;
     }
 
-    .fullscreen-btn:hover {
+    .diagram-action:hover {
       color: var(--text);
       border-color: var(--accent-soft);
       background: rgba(15,23,42,1);
       transform: translateY(-1px);
+    }
+
+    .fullscreen-btn {
+      position: relative;
     }
 
     .mermaid-inline {
@@ -466,10 +475,16 @@
             <span class="pill">Click a node to open the detailed diagram for that slice</span>
           </div>
           <div class="diagram-wrapper">
-            <button class="fullscreen-btn" type="button"
-                    onclick="openDiagramFullscreen('diagram-journey','End-to-End Journey & Drilldown Map')">
-              ⤢ Fullscreen
-            </button>
+            <div class="diagram-actions" aria-label="Diagram actions">
+              <button class="diagram-action fullscreen-btn" type="button"
+                      onclick="openDiagramFullscreen('diagram-journey','End-to-End Journey & Drilldown Map')">
+                ⤢ Fullscreen
+              </button>
+              <button class="diagram-action export-btn" type="button"
+                      onclick="exportDiagramSvg('diagram-journey','End-to-End Journey & Drilldown Map')">
+                ⬇ Export SVG
+              </button>
+            </div>
             <div class="mermaid mermaid-inline" id="diagram-journey"></div>
             <script type="text/plain" class="mermaid-src" id="src-diagram-journey">
 flowchart TD
@@ -540,10 +555,16 @@ flowchart TD
             <span class="pill">Operator → UI → Kinematics → Controller → Hardware</span>
           </div>
           <div class="diagram-wrapper">
-            <button class="fullscreen-btn" type="button"
-                    onclick="openDiagramFullscreen('diagram-architecture','Software Architecture')">
-              ⤢ Fullscreen
-            </button>
+            <div class="diagram-actions" aria-label="Diagram actions">
+              <button class="diagram-action fullscreen-btn" type="button"
+                      onclick="openDiagramFullscreen('diagram-architecture','Software Architecture')">
+                ⤢ Fullscreen
+              </button>
+              <button class="diagram-action export-btn" type="button"
+                      onclick="exportDiagramSvg('diagram-architecture','Software Architecture')">
+                ⬇ Export SVG
+              </button>
+            </div>
             <div class="mermaid mermaid-inline" id="diagram-architecture"></div>
             <script type="text/plain" class="mermaid-src" id="src-diagram-architecture">
 flowchart LR
@@ -633,10 +654,16 @@ flowchart LR
             <span class="pill">Live ↔ Teach toggle drives LEDs + recording</span>
           </div>
           <div class="diagram-wrapper">
-            <button class="fullscreen-btn" type="button"
-                    onclick="openDiagramFullscreen('diagram-state','High-Level UI State Machine')">
-              ⤢ Fullscreen
-            </button>
+            <div class="diagram-actions" aria-label="Diagram actions">
+              <button class="diagram-action fullscreen-btn" type="button"
+                      onclick="openDiagramFullscreen('diagram-state','High-Level UI State Machine')">
+                ⤢ Fullscreen
+              </button>
+              <button class="diagram-action export-btn" type="button"
+                      onclick="exportDiagramSvg('diagram-state','High-Level UI State Machine')">
+                ⬇ Export SVG
+              </button>
+            </div>
             <div class="mermaid mermaid-inline" id="diagram-state"></div>
             <script type="text/plain" class="mermaid-src" id="src-diagram-state">
 stateDiagram-v2
@@ -685,10 +712,16 @@ stateDiagram-v2
             <span class="pill">Toggle global vs tool-relative moves</span>
           </div>
           <div class="diagram-wrapper">
-            <button class="fullscreen-btn" type="button"
-                    onclick="openDiagramFullscreen('diagram-teleop','Teleoperation Flow')">
-              ⤢ Fullscreen
-            </button>
+            <div class="diagram-actions" aria-label="Diagram actions">
+              <button class="diagram-action fullscreen-btn" type="button"
+                      onclick="openDiagramFullscreen('diagram-teleop','Teleoperation Flow')">
+                ⤢ Fullscreen
+              </button>
+              <button class="diagram-action export-btn" type="button"
+                      onclick="exportDiagramSvg('diagram-teleop','Teleoperation Flow')">
+                ⬇ Export SVG
+              </button>
+            </div>
             <div class="mermaid mermaid-inline" id="diagram-teleop"></div>
             <!-- Keep <br/> annotations inside node labels for Mermaid v10 compatibility -->
             <script type="text/plain" class="mermaid-src" id="src-diagram-teleop">
@@ -740,10 +773,16 @@ flowchart TD
             <span class="pill">Teach recorder smoothing → waypoints</span>
           </div>
           <div class="diagram-wrapper">
-            <button class="fullscreen-btn" type="button"
-                    onclick="openDiagramFullscreen('diagram-teach','Teach Mode – Waypoints & Subroutines')">
-              ⤢ Fullscreen
-            </button>
+            <div class="diagram-actions" aria-label="Diagram actions">
+              <button class="diagram-action fullscreen-btn" type="button"
+                      onclick="openDiagramFullscreen('diagram-teach','Teach Mode – Waypoints & Subroutines')">
+                ⤢ Fullscreen
+              </button>
+              <button class="diagram-action export-btn" type="button"
+                      onclick="exportDiagramSvg('diagram-teach','Teach Mode – Waypoints & Subroutines')">
+                ⬇ Export SVG
+              </button>
+            </div>
             <div class="mermaid mermaid-inline" id="diagram-teach"></div>
             <script type="text/plain" class="mermaid-src" id="src-diagram-teach">
 flowchart TD
@@ -785,10 +824,16 @@ flowchart TD
             <span class="pill">Supports repeat loop</span>
           </div>
           <div class="diagram-wrapper">
-            <button class="fullscreen-btn" type="button"
-                    onclick="openDiagramFullscreen('diagram-timeline','Autoplay – Timeline Execution')">
-              ⤢ Fullscreen
-            </button>
+            <div class="diagram-actions" aria-label="Diagram actions">
+              <button class="diagram-action fullscreen-btn" type="button"
+                      onclick="openDiagramFullscreen('diagram-timeline','Autoplay – Timeline Execution')">
+                ⤢ Fullscreen
+              </button>
+              <button class="diagram-action export-btn" type="button"
+                      onclick="exportDiagramSvg('diagram-timeline','Autoplay – Timeline Execution')">
+                ⬇ Export SVG
+              </button>
+            </div>
             <div class="mermaid mermaid-inline" id="diagram-timeline"></div>
             <script type="text/plain" class="mermaid-src" id="src-diagram-timeline">
 flowchart TD
@@ -821,10 +866,16 @@ flowchart TD
             <span class="pill">Calibration cancels motion</span>
           </div>
           <div class="diagram-wrapper">
-            <button class="fullscreen-btn" type="button"
-                    onclick="openDiagramFullscreen('diagram-safety','Safety & Calibration Guardrail')">
-              ⤢ Fullscreen
-            </button>
+            <div class="diagram-actions" aria-label="Diagram actions">
+              <button class="diagram-action fullscreen-btn" type="button"
+                      onclick="openDiagramFullscreen('diagram-safety','Safety & Calibration Guardrail')">
+                ⤢ Fullscreen
+              </button>
+              <button class="diagram-action export-btn" type="button"
+                      onclick="exportDiagramSvg('diagram-safety','Safety & Calibration Guardrail')">
+                ⬇ Export SVG
+              </button>
+            </div>
             <div class="mermaid mermaid-inline" id="diagram-safety"></div>
             <!-- Keep line breaks inside labels to avoid Mermaid syntax errors -->
             <script type="text/plain" class="mermaid-src" id="src-diagram-safety">
@@ -867,10 +918,16 @@ flowchart TD
             <span class="pill">Mindmap nodes mirror def names for traceability</span>
           </div>
           <div class="diagram-wrapper">
-            <button class="fullscreen-btn" type="button"
-                    onclick="openDiagramFullscreen('diagram-functions','Complete Function Inventory')">
-              ⤢ Fullscreen
-            </button>
+            <div class="diagram-actions" aria-label="Diagram actions">
+              <button class="diagram-action fullscreen-btn" type="button"
+                      onclick="openDiagramFullscreen('diagram-functions','Complete Function Inventory')">
+                ⤢ Fullscreen
+              </button>
+              <button class="diagram-action export-btn" type="button"
+                      onclick="exportDiagramSvg('diagram-functions','Complete Function Inventory')">
+                ⬇ Export SVG
+              </button>
+            </div>
             <div class="mermaid mermaid-inline" id="diagram-functions"></div>
             <script type="text/plain" class="mermaid-src" id="src-diagram-functions">
 mindmap
@@ -1116,10 +1173,16 @@ mindmap
             <span class="pill">UI orchestrates kinematics and controllers</span>
           </div>
           <div class="diagram-wrapper">
-            <button class="fullscreen-btn" type="button"
-                    onclick="openDiagramFullscreen('diagram-classes','Core Classes & Responsibilities')">
-              ⤢ Fullscreen
-            </button>
+            <div class="diagram-actions" aria-label="Diagram actions">
+              <button class="diagram-action fullscreen-btn" type="button"
+                      onclick="openDiagramFullscreen('diagram-classes','Core Classes & Responsibilities')">
+                ⤢ Fullscreen
+              </button>
+              <button class="diagram-action export-btn" type="button"
+                      onclick="exportDiagramSvg('diagram-classes','Core Classes & Responsibilities')">
+                ⬇ Export SVG
+              </button>
+            </div>
             <div class="mermaid mermaid-inline" id="diagram-classes"></div>
             <script type="text/plain" class="mermaid-src" id="src-diagram-classes">
 classDiagram
@@ -1795,6 +1858,45 @@ classDiagram
       });
     }
 
+    function slugifyFilename(text) {
+      if (!text) return "diagram";
+      return text
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .replace(/-{2,}/g, "-")
+        || "diagram";
+    }
+
+    function exportDiagramSvg(diagramId, title) {
+      const diagram = document.getElementById(diagramId);
+      if (!diagram) {
+        console.warn("No diagram container found for", diagramId);
+        return;
+      }
+      const svg = diagram.querySelector("svg");
+      if (!svg) {
+        console.warn("No rendered SVG found for", diagramId);
+        return;
+      }
+      const cloned = svg.cloneNode(true);
+      if (!cloned.getAttribute("xmlns")) {
+        cloned.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+      }
+      const serializer = new XMLSerializer();
+      const svgString = serializer.serializeToString(cloned);
+      const blob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const filename = slugifyFilename(title || diagramId) + ".svg";
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 400);
+    }
+
     mermaid.initialize({
       startOnLoad: false,
       theme: "dark",
@@ -1883,6 +1985,8 @@ classDiagram
         modalTitle.textContent = title || "Diagram";
         modal.classList.add("open");
       };
+
+      window.exportDiagramSvg = exportDiagramSvg;
     });
   </script>
 </body>
