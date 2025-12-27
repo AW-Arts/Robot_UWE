@@ -729,11 +729,11 @@ flowchart TD
   Start([Start UI]) --> HomePose[Apply DEFAULT_HOME_PULSES]
   HomePose --> InputCheck{User input?}
 
-  InputCheck -->|Nudge buttons (ΔXYZ/Δpitch), IK target in tool or world frame| TargetUpdate[Update target XYZ + wrist_pitch + wrist_rotation + gripper]
+  InputCheck -->|Nudge buttons (delta XYZ/pitch) &amp; set IK target in tool or world frame| TargetUpdate[Update target XYZ + wrist_pitch + wrist_rotation + gripper]
   InputCheck -->|Servo motor rotation (FK jog)| JointNudge[Jog joints directly<br/>base/shoulder/elbow/wrist_rotation/gripper]
 
   TargetUpdate --> FrameMode{Move frame mode?}
-  FrameMode -->|Tool-relative ΔXYZ| Transform["Rotate delta by base yaw<br/>(_transform_move_delta)"]
+  FrameMode -->|Tool-relative delta XYZ| Transform["Rotate delta by base yaw<br/>(_transform_move_delta)"]
   FrameMode -->|Global/world axes| Transform
 
   Transform --> Clamp["Clamp to workspace &amp; hard servo limits<br/>(_apply_workspace_limits)"]
