@@ -1024,7 +1024,7 @@ stateDiagram-v2
     Calibration --> PanelIdle: Confirm step / exit tour
   }
 
-  Live --> Run: Timeline panel → Arm + confirm run
+  Live --> Run: Timeline panel -> Arm + confirm run
   state Run {
     [*] --> Disarmed
     Disarmed --> Armed: Arm + confirm run
@@ -1035,11 +1035,11 @@ stateDiagram-v2
   Run --> Live: Disarm or safety block
   Run --> Fault: Serial drop / E-stop
 
-  Live --> Teach: Mode toggle → Teach (stop hardware commands)
+  Live --> Teach: Mode toggle -> Teach (stop hardware commands)
   state Teach {
     [*] --> Prep
     Prep --> Recording: Start recording (Modes panel)
-    Recording --> Prep: Pause/stop; auto-save chunk
+    Recording --> Prep: Pause or stop and auto-save chunk
     Prep --> Review: Smooth recording or save routine
     Review --> Prep: Iterate edits
     Prep --> PathEdit: Saved routine populates Path panel

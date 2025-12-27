@@ -634,11 +634,11 @@ stateDiagram-v2
     Calibration --> LiveIdle: Exit calibration + restore offsets
   }
 
-  Live --> Teach: Mode toggle → Teach (no hardware output)
+  Live --> Teach: Mode toggle -> Teach (no hardware output)
   state Teach {
     [*] --> Prep
     Prep --> Recording: Auto-start teach session
-    Recording --> Prep: Stop recording / auto-save chunk
+    Recording --> Prep: Stop recording and auto-save chunk
     Prep --> Review: Smooth/trim + name routine
     Review --> Prep: Iterate edits
   }
