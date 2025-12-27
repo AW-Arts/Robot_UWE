@@ -729,9 +729,9 @@ flowchart TD
   Start([Start UI]) --> HomePose[Apply DEFAULT_HOME_PULSES]
   HomePose --> InputCheck{User input?}
 
-  InputCheck -->|Nudge buttons| NudgeTarget[Delta XYZ/pitch → IK target<br/>tool or world frame]
+  InputCheck -->|Nudge buttons| NudgeTarget["Delta XYZ/pitch -> IK target<br/>tool or world frame"]
   InputCheck -->|Path/joystick/slider updates| TargetUpdate["Update target XYZ + wrist_pitch + wrist_rotation + gripper"]
-  InputCheck -->|Servo motor rotation (FK jog)| JointNudge[Jog joints directly<br/>base/shoulder/elbow/wrist_rotation/gripper]
+  InputCheck -->|Servo motor rotation (FK jog)| JointNudge["Jog joints directly<br/>base/shoulder/elbow/wrist_rotation/gripper"]
 
   NudgeTarget --> TargetUpdate
   TargetUpdate --> FrameMode{Move frame mode?}
@@ -740,21 +740,21 @@ flowchart TD
 
   Transform --> Clamp["Clamp to workspace &amp; hard servo limits<br/>(_apply_workspace_limits)"]
   Clamp --> WristComp["Compensate wrist pitch for extension<br/>(_apply_wrist_extension_compensation)"]
-  WristComp --> IK["AL5AKinematics.inverse<br/>(XYZ → base/shoulder/elbow/wrist)"]
+  WristComp --> IK["AL5AKinematics.inverse<br/>(XYZ -> base/shoulder/elbow/wrist)"]
 
   IK --> ValidIK{IK valid?}
-  ValidIK -->|No| Reject[Reject move &amp; log warning]
+  ValidIK -->|No| Reject["Reject move &amp; log warning"]
   Reject --> InputCheck
 
   ValidIK --> Append["Append wrist rotation + gripper<br/>(_clamp_joint_list)"]
   JointNudge --> JointClamp["Clamp joint targets + servo limits<br/>(_clamp_joint_list)"]
-  JointClamp --> Smooth[Blend path<br/>_smooth_command]
-  Append --> Smooth[Blend path<br/>_smooth_command]
-  Smooth --> Queue[Queue joint segments<br/>_command_queue]
-  Queue --> Worker[Command worker thread<br/>_command_worker]
+  JointClamp --> Smooth["Blend path<br/>_smooth_command"]
+  Append --> Smooth["Blend path<br/>_smooth_command"]
+  Smooth --> Queue["Queue joint segments<br/>_command_queue"]
+  Queue --> Worker["Command worker thread<br/>_command_worker"]
   Worker --> ServoScale["Scale servo configs by multipliers<br/>(_servo_config_with_multiplier)"]
   ServoScale --> Controller[controller.move_joints]
-  Controller --> LEDs["Sync ISO LEDs<br/>(_sync_leds → StatusLEDController)"]
+  Controller --> LEDs["Sync ISO LEDs<br/>(_sync_leds -> StatusLEDController)"]
   LEDs --> Feedback["Mirror joints + zero reference display"]
   Feedback --> InputCheck
             </script>
