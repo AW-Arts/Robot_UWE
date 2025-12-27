@@ -729,14 +729,14 @@ flowchart TD
   Start([Start UI]) --> HomePose[Apply DEFAULT_HOME_PULSES]
   HomePose --> InputCheck{User input?}
 
-  InputCheck -->|Nudge buttons| NudgeTarget["Delta XYZ/pitch -> IK target<br/>tool or world frame"]
-  InputCheck -->|Path/joystick/slider updates| TargetUpdate["Update target XYZ + wrist_pitch + wrist_rotation + gripper"]
-  InputCheck -->|Servo motor rotation – FK jog| JointNudge["Jog joints directly<br/>base/shoulder/elbow/wrist_rotation/gripper"]
+  InputCheck -->|"Nudge buttons"| NudgeTarget["Delta XYZ/pitch -> IK target<br/>tool or world frame"]
+  InputCheck -->|"Path/joystick/slider updates"| TargetUpdate["Update target XYZ + wrist_pitch + wrist_rotation + gripper"]
+  InputCheck -->|"Servo motor rotation – FK jog"| JointNudge["Jog joints directly<br/>base/shoulder/elbow/wrist_rotation/gripper"]
 
   NudgeTarget --> TargetUpdate
   TargetUpdate --> FrameMode{Move frame mode?}
-  FrameMode -->|Tool-relative delta XYZ| Transform["Rotate delta by base yaw<br/>(_transform_move_delta)"]
-  FrameMode -->|Global/world axes| Transform
+  FrameMode -->|"Tool-relative delta XYZ"| Transform["Rotate delta by base yaw<br/>(_transform_move_delta)"]
+  FrameMode -->|"Global/world axes"| Transform
 
   Transform --> Clamp["Clamp to workspace &amp; hard servo limits<br/>(_apply_workspace_limits)"]
   Clamp --> WristComp["Compensate wrist pitch for extension<br/>(_apply_wrist_extension_compensation)"]
