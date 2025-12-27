@@ -605,7 +605,8 @@ flowchart LR
             <span class="tag">State diagram · InteractiveArm</span>
           </div>
           <div class="card-meta">
-            <span class="pill">Single active state at any time</span>
+            <span class="pill">Single active mode; Run gated by Arm + confirm</span>
+            <span class="pill">Teach auto-records virtually; Live drives teleop/playback</span>
           </div>
           <div class="diagram-wrapper">
             <button class="fullscreen-btn" type="button"
@@ -615,24 +616,51 @@ flowchart LR
             <div class="mermaid mermaid-inline" id="diagram-state"></div>
             <script type="text/plain" class="mermaid-src" id="src-diagram-state">
 stateDiagram-v2
-  [*] --> Home
+  direction LR
+  [*] --> Boot
+  Boot --> Home: Launch UI + load config
+  Home --> Live: Home move completes
+  Home --> Fault: init failure / controller missing
 
-  Home --> Idle: home move completes
+  state Live {
+    [*] --> LiveIdle
+    LiveIdle --> Teleop: Drag/scroll/slider input
+    Teleop --> LiveIdle: Input stops + queue empty
 
-  Idle --> Teleop: drag / scroll / slider input
-  Teleop --> Idle: no input and command queue empty
+    LiveIdle --> Timeline: Start waypoint/timeline playback
+    Timeline --> LiveIdle: Playback complete or stop pressed
 
-  Idle --> Teaching: Path panel opened
-  Teaching --> Idle: subroutine saved or cleared
+    LiveIdle --> Calibration: Calibration toggled ON
+    Calibration --> LiveIdle: Exit calibration + restore offsets
+  }
 
-  Idle --> Playback: waypoint playback or timeline start
-  Playback --> Idle: playback complete or stop pressed
+  Live --> Teach: Mode toggle → Teach (no hardware output)
+  state Teach {
+    [*] --> Prep
+    Prep --> Recording: Auto-start teach session
+    Recording --> Prep: Stop recording / auto-save chunk
+    Prep --> Review: Smooth/trim + name routine
+    Review --> Prep: Iterate edits
+  }
+  Teach --> Live: Exit Teach; reload routine list
 
-  Idle --> Calibration: calibration toggled ON
-  Calibration --> Idle: exit calibration and restore offsets
+  Live --> Run: Select Run + Arm + confirm
+  state Run {
+    [*] --> Disarmed
+    Disarmed --> Armed: Arm + confirm run
+    Armed --> Executing: Play routine on hardware
+    Executing --> Armed: Playback complete / stop pressed
+    Armed --> Disarmed: Disarm / abort
+  }
+  Run --> Live: Disarm or safety block
+  Run --> Fault: Serial drop / E-stop
+
+  Live --> Fault: Connection loss / E-stop
+  Teach --> Fault: Connection loss / E-stop
+  Fault --> Home: Clear fault + rehome
             </script>
           </div>
-          <div class="refs">Refs: <code>interactive.py</code> state transitions, <code>serial_comm.py:AL5ASerialController.AUTO_RELAX_ON_CALIBRATION</code></div>
+          <div class="refs">Refs: <code>interactive.py</code> mode transitions (<code>_set_operation_mode</code>, <code>_start_teach_session</code>, timeline/run workers), <code>serial_comm.py:AL5ASerialController.AUTO_RELAX_ON_CALIBRATION</code></div>
         </div>
       </section>
 
