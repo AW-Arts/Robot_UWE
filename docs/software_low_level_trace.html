@@ -1,0 +1,625 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Burger-Stacking Robot – Low-Level Software Trace</title>
+  <style>
+    :root {
+      --bg: #0b1222;
+      --panel: #0f172a;
+      --card: #111827;
+      --border: rgba(148, 163, 184, 0.35);
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --accent-2: #a78bfa;
+      --accent-soft: rgba(56, 189, 248, 0.14);
+      --radius: 16px;
+      --shadow: 0 22px 60px rgba(0, 0, 0, 0.55);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: radial-gradient(circle at 15% 20%, rgba(56,189,248,0.08), transparent 28%),
+                  radial-gradient(circle at 80% 0%, rgba(167,139,250,0.08), transparent 32%),
+                  var(--bg);
+      color: var(--text);
+      font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      padding: clamp(16px, 2vw, 30px);
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    header {
+      background: linear-gradient(120deg, rgba(56,189,248,0.16), rgba(167,139,250,0.2));
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: clamp(18px, 3vw, 28px);
+      box-shadow: var(--shadow);
+    }
+
+    h1 {
+      margin: 0 0 8px 0;
+      font-size: clamp(1.6rem, 3vw, 2.15rem);
+      letter-spacing: -0.02em;
+    }
+
+    .lede {
+      margin: 0;
+      color: var(--muted);
+      max-width: 1000px;
+      line-height: 1.6;
+    }
+
+    .badges {
+      margin-top: 10px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .badge {
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.04);
+      color: var(--text);
+      font-weight: 600;
+      font-size: 0.9rem;
+    }
+
+    nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    nav a {
+      text-decoration: none;
+      color: var(--text);
+      padding: 8px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.03);
+      transition: all 0.18s ease-out;
+      font-size: 0.94rem;
+    }
+
+    nav a:hover {
+      background: var(--accent-soft);
+      border-color: rgba(56,189,248,0.5);
+    }
+
+    main {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 14px;
+      align-items: start;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px 18px 18px;
+      box-shadow: var(--shadow);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .card h2 {
+      margin: 0 0 10px 0;
+      font-size: 1.2rem;
+      letter-spacing: -0.01em;
+    }
+
+    .card .meta {
+      color: var(--muted);
+      font-size: 0.9rem;
+      margin-bottom: 10px;
+    }
+
+    .chunks {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 8px;
+    }
+
+    .chunk {
+      display: inline-flex;
+      align-items: center;
+      padding: 6px 8px;
+      background: rgba(255,255,255,0.03);
+      border: 1px dashed rgba(148, 163, 184, 0.5);
+      border-radius: 10px;
+      cursor: help;
+      position: relative;
+      line-height: 1.4;
+      transition: border-color 0.12s ease-out, transform 0.12s ease-out;
+    }
+
+    .chunk:hover {
+      border-color: rgba(56, 189, 248, 0.8);
+      transform: translateY(-1px);
+    }
+
+    .tooltip {
+      position: fixed;
+      max-width: min(520px, 80vw);
+      background: #0b1222;
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 12px;
+      padding: 12px 14px;
+      box-shadow: var(--shadow);
+      font-size: 0.92rem;
+      line-height: 1.5;
+      pointer-events: none;
+      opacity: 0;
+      transform: translateY(4px);
+      transition: opacity 0.08s ease-out, transform 0.08s ease-out;
+      z-index: 9999;
+    }
+
+    .tooltip.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .tooltip .ref-item + .ref-item {
+      margin-top: 8px;
+    }
+
+    .ref-item strong {
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .ref-item .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: rgba(56,189,248,0.1);
+      border: 1px solid rgba(56,189,248,0.2);
+      color: var(--text);
+      font-size: 0.78rem;
+      margin-right: 6px;
+    }
+
+    .sources {
+      grid-column: 1 / -1;
+    }
+
+    .source-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 10px;
+      padding: 0;
+      margin: 10px 0 0;
+      list-style: none;
+    }
+
+    .source-list li {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px 12px;
+      line-height: 1.45;
+    }
+
+    .source-list a {
+      color: var(--accent);
+      text-decoration: none;
+      word-break: break-all;
+    }
+
+    .source-list a:hover { text-decoration: underline; }
+
+    @media (max-width: 680px) {
+      .chunks { gap: 6px; }
+      nav { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>1.1.1 Software – Low-level implementation trace</h1>
+    <p class="lede">
+      Every clause below is split into hoverable fragments. Each fragment emits a tooltip that cites
+      Sub-System Requirements (SSR) extracted from <em>Requirements Capture – Group 2D</em> and/or the
+      exact GitHub line spans backing the behaviour in the <code>AW-Arts/Robot_UWE</code> repository
+      (commit <code>1efa2d6</code>). The structure mirrors the layered UI → workflow → motion →
+      hardware/persistence stack described in the GDIP report.
+    </p>
+    <div class="badges">
+      <span class="badge">GDIP Report Group 2D_local_updated.docx</span>
+      <span class="badge">Burger-Stacking Robot – Software Design Implementation.docx</span>
+      <span class="badge">Requirements (SSR) + GitHub anchors per statement</span>
+    </div>
+    <nav>
+      <a href="#software-summary">1.1.1 Software overview</a>
+      <a href="#kinematics">1.1.1.1 Kinematics</a>
+      <a href="#calibration">1.1.1.2 Calibration &amp; config</a>
+      <a href="#teleop">1.1.1.3 Teleoperation commands</a>
+      <a href="#teach">1.1.1.4 Teach, routines &amp; timeline</a>
+      <a href="#robustness">1.1.1.5 Robustness &amp; limits</a>
+    </nav>
+  </header>
+
+  <main id="cards"></main>
+
+  <section class="card sources" id="anchors">
+    <h2>GitHub anchors (exact line spans)</h2>
+    <p class="meta">These match the anchors cited throughout the cards.</p>
+    <ul class="source-list" id="github-list"></ul>
+  </section>
+
+  <div class="tooltip" id="tooltip" aria-hidden="true"></div>
+
+  <script src="ssr_data.js"></script>
+  <script>
+    const githubRefs = {
+      "ik-forward": {
+        label: "al5a_kinematics.forward() – FK pose assembly",
+        lines: "L61–110",
+        file: "lynxmotion_control/al5a_kinematics.py",
+        url: "https://github.com/AW-Arts/Robot_UWE/blob/1efa2d6b1ccd46d0d3a14f46fabb3ccb4edff323/lynxmotion_control/al5a_kinematics.py#L61-L110"
+      },
+      "ik-inverse": {
+        label: "al5a_kinematics.inverse() – IK with workspace clamp",
+        lines: "L112–158",
+        file: "lynxmotion_control/al5a_kinematics.py",
+        url: "https://github.com/AW-Arts/Robot_UWE/blob/1efa2d6b1ccd46d0d3a14f46fabb3ccb4edff323/lynxmotion_control/al5a_kinematics.py#L112-L158"
+      },
+      "servo-limits": {
+        label: "DEFAULT_SERVO_CONFIGS – hard limits for each joint",
+        lines: "L160–179",
+        file: "lynxmotion_control/al5a_kinematics.py",
+        url: "https://github.com/AW-Arts/Robot_UWE/blob/1efa2d6b1ccd46d0d3a14f46fabb3ccb4edff323/lynxmotion_control/al5a_kinematics.py#L160-L179"
+      },
+      "workspace-init": {
+        label: "InteractiveArm workspace + smoothing defaults",
+        lines: "L270–349",
+        file: "lynxmotion_control/interactive.py",
+        url: "https://github.com/AW-Arts/Robot_UWE/blob/1efa2d6b1ccd46d0d3a14f46fabb3ccb4edff323/lynxmotion_control/interactive.py#L270-L349"
+      },
+      "command-queue": {
+        label: "Command queue worker setup",
+        lines: "L359–367",
+        file: "lynxmotion_control/interactive.py",
+        url: "https://github.com/AW-Arts/Robot_UWE/blob/1efa2d6b1ccd46d0d3a14f46fabb3ccb4edff323/lynxmotion_control/interactive.py#L359-L367"
+      },
+      "teleop-drag": {
+        label: "Drag-to-target + incremental updates",
+        lines: "L1180–1243",
+        file: "lynxmotion_control/interactive.py",
+        url: "https://github.com/AW-Arts/Robot_UWE/blob/1efa2d6b1ccd46d0d3a14f46fabb3ccb4edff323/lynxmotion_control/interactive.py#L1180-L1243"
+      },
+      "update-robot": {
+        label: "IK solve, workspace clamp, move command enqueue",
+        lines: "L981–1008",
+        file: "lynxmotion_control/interactive.py",
+        url: "https://github.com/AW-Arts/Robot_UWE/blob/1efa2d6b1ccd46d0d3a14f46fabb3ccb4edff323/lynxmotion_control/interactive.py#L981-L1008"
+      },
+      "clamp-target": {
+        label: "Workspace clamp + joint clamp helpers",
+        lines: "L4242–4278",
+        file: "lynxmotion_control/interactive.py",
+        url: "https://github.com/AW-Arts/Robot_UWE/blob/1efa2d6b1ccd46d0d3a14f46fabb3ccb4edff323/lynxmotion_control/interactive.py#L4242-L4278"
+      },
+      "smooth-traj": {
+        label: "Ease-in/out segment generator",
+        lines: "L6297–6346",
+        file: "lynxmotion_control/interactive.py",
+        url: "https://github.com/AW-Arts/Robot_UWE/blob/1efa2d6b1ccd46d0d3a14f46fabb3ccb4edff323/lynxmotion_control/interactive.py#L6297-L6346"
+      },
+      "teach-record": {
+        label: "Teach mode toggle + recording flow",
+        lines: "L1834–1934",
+        file: "lynxmotion_control/interactive.py",
+        url: "https://github.com/AW-Arts/Robot_UWE/blob/1efa2d6b1ccd46d0d3a14f46fabb3ccb4edff323/lynxmotion_control/interactive.py#L1834-L1934"
+      },
+      "teach-save": {
+        label: "Teach smoothing + save to subroutine",
+        lines: "L1935–2101",
+        file: "lynxmotion_control/interactive.py",
+        url: "https://github.com/AW-Arts/Robot_UWE/blob/1efa2d6b1ccd46d0d3a14f46fabb3ccb4edff323/lynxmotion_control/interactive.py#L1935-L2101"
+      },
+      "timeline-exec": {
+        label: "Timeline playback worker with stop/repeat handling",
+        lines: "L4957–5106",
+        file: "lynxmotion_control/interactive.py",
+        url: "https://github.com/AW-Arts/Robot_UWE/blob/1efa2d6b1ccd46d0d3a14f46fabb3ccb4edff323/lynxmotion_control/interactive.py#L4957-L5106"
+      },
+      "waypoint-exec": {
+        label: "Execute waypoint sequence (pitch, gripper, clamping)",
+        lines: "L5108–5164",
+        file: "lynxmotion_control/interactive.py",
+        url: "https://github.com/AW-Arts/Robot_UWE/blob/1efa2d6b1ccd46d0d3a14f46fabb3ccb4edff323/lynxmotion_control/interactive.py#L5108-L5164"
+      },
+      "status-leds": {
+        label: "Status LED state transitions",
+        lines: "L577–616",
+        file: "lynxmotion_control/interactive.py",
+        url: "https://github.com/AW-Arts/Robot_UWE/blob/1efa2d6b1ccd46d0d3a14f46fabb3ccb4edff323/lynxmotion_control/interactive.py#L577-L616"
+      },
+      "home-sequence": {
+        label: "Home command + safe pose update",
+        lines: "L940–973",
+        file: "lynxmotion_control/interactive.py",
+        url: "https://github.com/AW-Arts/Robot_UWE/blob/1efa2d6b1ccd46d0d3a14f46fabb3ccb4edff323/lynxmotion_control/interactive.py#L940-L973"
+      },
+      "config-paths": {
+        label: "Config folder resolution + seeding defaults",
+        lines: "L17–89",
+        file: "lynxmotion_control/config_paths.py",
+        url: "https://github.com/AW-Arts/Robot_UWE/blob/1efa2d6b1ccd46d0d3a14f46fabb3ccb4edff323/lynxmotion_control/config_paths.py#L17-L89"
+      },
+      "servo-guide": {
+        label: "Servo limit + clamping guide",
+        lines: "docs/servo_limit_clamping_guide.md L14–32",
+        file: "docs/servo_limit_clamping_guide.md",
+        url: "https://github.com/AW-Arts/Robot_UWE/blob/1efa2d6b1ccd46d0d3a14f46fabb3ccb4edff323/docs/servo_limit_clamping_guide.md#L14-L32"
+      },
+      "led-plan": {
+        label: "LED mapping + behaviours",
+        lines: "docs/status_led_plan.md L61–113",
+        file: "docs/status_led_plan.md",
+        url: "https://github.com/AW-Arts/Robot_UWE/blob/1efa2d6b1ccd46d0d3a14f46fabb3ccb4edff323/docs/status_led_plan.md#L61-L113"
+      },
+      "readme-config": {
+        label: "Config location + seeding behaviour",
+        lines: "README.md L95–106",
+        file: "README.md",
+        url: "https://github.com/AW-Arts/Robot_UWE/blob/1efa2d6b1ccd46d0d3a14f46fabb3ccb4edff323/README.md#L95-L106"
+      },
+      "readme-modes": {
+        label: "Mode overview + Arm + Run guard",
+        lines: "README.md L50–58",
+        file: "README.md",
+        url: "https://github.com/AW-Arts/Robot_UWE/blob/1efa2d6b1ccd46d0d3a14f46fabb3ccb4edff323/README.md#L50-L58"
+      }
+    };
+
+    const ssrMap = {};
+    (window.SSR_DATA || []).forEach(entry => {
+      ssrMap[entry.id] = entry;
+    });
+
+    function chunkSentence(text, refs, size = 6) {
+      const words = text.split(" ");
+      const chunks = [];
+      for (let i = 0; i < words.length; i += size) {
+        chunks.push({
+          text: words.slice(i, i + size).join(" "),
+          refs
+        });
+      }
+      return chunks;
+    }
+
+    const sections = [
+      {
+        id: "software-summary",
+        title: "1.1.1 Software overview",
+        meta: "Layered architecture: UI → state/workflow → motion → hardware/persistence",
+        sentences: [
+          {
+            text: "Low-level software implementation keeps repeatable motion possible on open-loop hardware by chaining FK/IK, calibration persistence, and guarded command streaming through a stateful UI pipeline.",
+            refs: ["1.1.1.1", "1.1.1.2", "1.1.2.3", "1.1.2.4", "1.1.2.5", "2.2.1.6", "ik-forward", "ik-inverse", "workspace-init", "update-robot"]
+          },
+          {
+            text: "Kinematics model, calibration mapping and persistence, command generation and execution, and teach or timeline data structures are organised to preserve traceability and support V&V against the burger-stacking workflow.",
+            refs: ["1.1.1.3", "2.1.1.6", "2.2.1.4", "1.1.3.3", "command-queue", "smooth-traj", "teach-save"]
+          },
+          {
+            text: "Config seeding lives outside the app folder, enabling quick recommissioning after servo swaps and reducing regression risk during iterative software updates.",
+            refs: ["2.2.1.5", "readme-config", "config-paths"]
+          }
+        ]
+      },
+      {
+        id: "kinematics",
+        title: "1.1.1.1 Kinematics model",
+        meta: "FK display + IK solve with workspace rejection",
+        sentences: [
+          {
+            text: "Forward kinematics updates the on-screen arm from commanded joints to keep pose visibility aligned with teleop feedback and fault checks.",
+            refs: ["1.1.2.3", "2.1.1.2", "2.2.1.6", "ik-forward", "update-robot"]
+          },
+          {
+            text: "Inverse kinematics solves XYZ plus wrist pitch, rejecting or clamping unreachable targets using workspace bounds and joint limits to protect the open-loop platform.",
+            refs: ["1.1.2.4", "1.1.2.5", "1.1.1.1", "1.1.1.2", "clamp-target", "ik-inverse", "servo-limits"]
+          },
+          {
+            text: "Servo mapping and clamping are documented with reproducible angle to pulse math for each channel to keep teleop, teach, and playback paths consistent.",
+            refs: ["servo-guide", "servo-limits", "2.1.1.7"]
+          }
+        ]
+      },
+      {
+        id: "calibration",
+        title: "1.1.1.2 Calibration and configuration",
+        meta: "Guided calibration + persisted offsets/limits",
+        sentences: [
+          {
+            text: "Calibration UI steps through each joint, validates direction, supports inversion, and returns to a known reference pose before exiting the workflow.",
+            refs: ["1.1.1.3", "2.1.2.2", "workspace-init", "clamp-target"]
+          },
+          {
+            text: "Offsets, hard limits, teach data, and LED mappings persist under the user config directory seeded on first launch to protect commissioning data from app updates.",
+            refs: ["2.2.1.5", "2.1.1.6", "config-paths", "readme-config"]
+          },
+          {
+            text: "Home and raw-angle utilities provide safety and commissioning clarity before live motion resumes.",
+            refs: ["home-sequence", "status-leds", "2.1.2.5"]
+          }
+        ]
+      },
+      {
+        id: "teleop",
+        title: "1.1.1.3 Teleoperation command generation",
+        meta: "Incremental targets, workspace clamp, smooth PWM streaming",
+        sentences: [
+          {
+            text: "XY drag or click-to-set updates the target marker, runs a fresh IK solve, and clamps requests inside the workspace before any commands leave the UI thread.",
+            refs: ["1.1.1.1", "1.1.1.2", "teleop-drag", "update-robot", "clamp-target"]
+          },
+          {
+            text: "Z jog via wheel or slider uses incremental deltas tied to configurable step size so vertical moves remain predictable for open-loop servos.",
+            refs: ["1.1.1.4", "2.1.1.7", "teleop-drag"]
+          },
+          {
+            text: "Motion enqueues into a background worker which subdivides each move with an ease-in or ease-out profile, producing smooth PWM trajectories instead of abrupt jumps.",
+            refs: ["1.1.1.5", "command-queue", "smooth-traj"]
+          },
+          {
+            text: "Tool-relative move frame keeps jog directions intuitive when the base is rotated for station-to-table manoeuvres.",
+            refs: ["2.2.1.8", "workspace-init"]
+          }
+        ]
+      },
+      {
+        id: "teach",
+        title: "1.1.1.4 Teach mode, routines, and timeline execution",
+        meta: "Virtual recording → subroutine JSON → timeline playback",
+        sentences: [
+          {
+            text: "Teach mode mirrors the live UI without commanding hardware, capturing timestamped joints, pose, wrist pitch or rotation, gripper state, and dwell metadata for each keyframe.",
+            refs: ["2.1.1.1", "2.1.1.2", "2.1.1.6", "teach-record", "update-robot"]
+          },
+          {
+            text: "Recordings can be smoothed then persisted as subroutine JSON with slugged filenames for reuse and editing as modular burger build actions.",
+            refs: ["2.2.1.1", "2.2.1.2", "2.2.1.3", "teach-save"]
+          },
+          {
+            text: "Timeline playback reorders routines, supports repeat or stop flags, synchronises move completion through the command queue, and drives wrist or gripper states per waypoint.",
+            refs: ["2.2.1.4", "2.2.1.7", "1.1.3.3", "timeline-exec", "waypoint-exec", "command-queue"]
+          },
+          {
+            text: "Arm plus Run gating prevents accidental motion when switching from teach to hardware execution.",
+            refs: ["readme-modes", "status-leds"]
+          }
+        ]
+      },
+      {
+        id: "robustness",
+        title: "1.1.1.5 Robustness and known limitations",
+        meta: "Safety indicators, home pose, and open-loop trade-offs",
+        sentences: [
+          {
+            text: "Open-loop accuracy depends on calibration stability and thermal behaviour; separating user config from app assets accelerates re-commissioning after servo changes.",
+            refs: ["2.2.1.5", "config-paths", "servo-limits"]
+          },
+          {
+            text: "Contextual warnings, home pose control, and raw angle readouts assist diagnosis without risking unsafe moves.",
+            refs: ["home-sequence", "status-leds", "servo-guide"]
+          },
+          {
+            text: "Status LEDs map software states to colour semantics using PWM channels, acknowledging prototype flicker trade-offs.",
+            refs: ["1.1.2.1", "1.1.2.2", "2.1.2.1", "2.1.2.3", "2.1.2.5", "led-plan", "status-leds"]
+          }
+        ]
+      }
+    ];
+
+    const cardsContainer = document.getElementById("cards");
+    const tooltip = document.getElementById("tooltip");
+
+    function describeRef(ref) {
+      const isSSR = /^\d/.test(ref);
+      if (isSSR) {
+        const entry = ssrMap[ref];
+        if (!entry) {
+          return `<div class="ref-item"><span class="tag">SSR</span><strong>${ref}</strong><br />Requirement not found in SSR dataset.</div>`;
+        }
+        return `<div class="ref-item"><span class="tag">SSR</span><strong>${entry.id}</strong> (row ${entry.sheet_row})<br />${entry.text}</div>`;
+      }
+      const gh = githubRefs[ref];
+      if (gh) {
+        return `<div class="ref-item"><span class="tag">GitHub</span><strong>${gh.label}</strong><br />${gh.file} ${gh.lines} · <a href="${gh.url}" target="_blank" rel="noreferrer">${gh.url}</a></div>`;
+      }
+      return `<div class="ref-item"><span class="tag">Note</span>${ref}</div>`;
+    }
+
+    function renderSections() {
+      sections.forEach(section => {
+        const card = document.createElement("article");
+        card.className = "card";
+        card.id = section.id;
+        const title = document.createElement("h2");
+        title.textContent = section.title;
+        card.appendChild(title);
+
+        const meta = document.createElement("div");
+        meta.className = "meta";
+        meta.textContent = section.meta;
+        card.appendChild(meta);
+
+        section.sentences.forEach(sentence => {
+          const wrapper = document.createElement("div");
+          wrapper.className = "chunks";
+          chunkSentence(sentence.text, sentence.refs).forEach(chunk => {
+            const span = document.createElement("span");
+            span.className = "chunk";
+            span.textContent = chunk.text;
+            span.dataset.refs = JSON.stringify(chunk.refs);
+            wrapper.appendChild(span);
+          });
+          card.appendChild(wrapper);
+        });
+
+        cardsContainer.appendChild(card);
+      });
+    }
+
+    function renderGithubList() {
+      const list = document.getElementById("github-list");
+      Object.entries(githubRefs).forEach(([key, ref]) => {
+        const li = document.createElement("li");
+        li.innerHTML = `<strong>${ref.label}</strong><br />${ref.file} ${ref.lines}<br /><a href="${ref.url}" target="_blank" rel="noreferrer">${ref.url}</a>`;
+        list.appendChild(li);
+      });
+    }
+
+    function showTooltip(target, event) {
+      const raw = target.dataset.refs;
+      if (!raw) return;
+      let refs;
+      try { refs = JSON.parse(raw); } catch { refs = []; }
+      if (!refs.length) return;
+      tooltip.innerHTML = refs.map(describeRef).join("");
+      tooltip.classList.add("visible");
+      tooltip.style.left = `${event.pageX + 12}px`;
+      tooltip.style.top = `${event.pageY + 12}px`;
+      tooltip.setAttribute("aria-hidden", "false");
+    }
+
+    function hideTooltip() {
+      tooltip.classList.remove("visible");
+      tooltip.setAttribute("aria-hidden", "true");
+    }
+
+    renderSections();
+    renderGithubList();
+
+    document.addEventListener("mousemove", event => {
+      const target = event.target.closest(".chunk");
+      if (target) {
+        showTooltip(target, event);
+      } else {
+        hideTooltip();
+      }
+    });
+  </script>
+</body>
+</html>
