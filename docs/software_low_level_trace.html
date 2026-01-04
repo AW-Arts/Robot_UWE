@@ -132,6 +132,11 @@
       transform: translateY(0);
     }
 
+    .tooltip.interactive {
+      pointer-events: auto;
+      cursor: default;
+    }
+
     .tooltip .ref-row + .ref-row { margin-top: 8px; }
 
     .ref-row strong { color: #cbd5e1; }
@@ -143,6 +148,13 @@
     }
 
     .ref-row a:hover { text-decoration: underline; }
+
+    .ref-details {
+      margin-top: 4px;
+      color: #cbd5e1;
+      font-size: 0.9em;
+      line-height: 1.35;
+    }
 
     .footnotes {
       margin-top: 30px;
@@ -234,7 +246,37 @@
         ids: [46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56],
         title: "docs/status_led_plan.md – LED mapping and behaviours",
         url: "https://github.com/AW-Arts/Robot_UWE/blob/1efa2d6b1ccd46d0d3a14f46fabb3ccb4edff323/docs/status_led_plan.md"
+      },
+      {
+        ids: [63, 64, 65, 66, 68, 69, 70, 71, 72, 73, 74, 76, 77, 78, 79, 81, 82, 84, 86, 88, 90, 92],
+        title: "v and v.htm – Stakeholder Needs V3 verification & validation evidence",
+        url: "v%20and%20v.htm"
       }
+    ];
+
+    const vvReferences = [
+      { id: 63, title: "V&V: Teleop XY target updates with clear feedback (1.1.1.1)", url: "v%20and%20v.htm", method: "Test", evidence: "Photographic/Video recorded evidence", ref: "V_MULTI_system-overview_v1_0_s01.mp4 [04:42–06:00]" },
+      { id: 64, title: "V&V: Incremental teleop target updates (1.1.1.2)", url: "v%20and%20v.htm", method: "Test", evidence: "Photographic/Video recorded evidence", ref: "V_MULTI_system-overview_v1_0_s01.mp4 [04:42–06:00]" },
+      { id: 65, title: "V&V: Calibration panel for servo offsets and limits (1.1.1.3)", url: "v%20and%20v.htm", method: "Test", evidence: "Photographic/Video recorded evidence", ref: "V_MULTI_system-overview_v1_0_s01.mp4 [04:42–06:00]" },
+      { id: 66, title: "V&V: Adjustable Z target controls with configurable step (1.1.1.4)", url: "v%20and%20v.htm", method: "Test", evidence: "Photographic/Video recorded evidence", ref: "V_MULTI_system-overview_v1_0_s01.mp4 [04:42–06:00]" },
+      { id: 68, title: "V&V: Diagnostics pane shows joint angles/PWM values (1.1.2.2)", url: "v%20and%20v.htm", method: "Test", evidence: "Photographic/Video recorded evidence", ref: "V_MULTI_system-overview_v1_0_s01.mp4 [14:00–16:00]" },
+      { id: 69, title: "V&V: Forward kinematics computes end-effector position (1.1.2.3)", url: "v%20and%20v.htm", method: "Test", evidence: "Photographic/Video recorded evidence", ref: "V_MULTI_system-overview_v1_0_s01.mp4 [14:00–16:00]" },
+      { id: 70, title: "V&V: Inverse kinematics returns joint angles or failure (1.1.2.4)", url: "v%20and%20v.htm", method: "Test", evidence: "Photographic/Video recorded evidence", ref: "V_MULTI_system-overview_v1_0_s01.mp4 [04:42–06:00]" },
+      { id: 71, title: "V&V: IK rejects solutions outside joint limits (1.1.2.5)", url: "v%20and%20v.htm", method: "Test", evidence: "Logged trace", ref: "V_MULTI_system-overview_v1_0_s01.mp4 [04:42–06:00]" },
+      { id: 72, title: "V&V: Planner drops intermediate teleop targets to avoid backlog (1.1.3.1)", url: "v%20and%20v.htm", method: "Test", evidence: "System log", ref: "V_MULTI_system-overview_v1_0_s01.mp4 [04:42–06:00]" },
+      { id: 73, title: "V&V: Waypoints capture gripper actions at each step (1.1.3.2)", url: "v%20and%20v.htm", method: "Test", evidence: "Playback evidence", ref: "V_MULTI_system-overview_v1_0_s01.mp4 [04:42–06:00]" },
+      { id: 74, title: "V&V: Timeline executes sequentially and halts on stop/fault (1.1.3.3)", url: "v%20and%20v.htm", method: "Test", evidence: "Playback evidence", ref: "V_MULTI_system-overview_v1_0_s01.mp4 [04:42–06:00]" },
+      { id: 76, title: "V&V: UI groups controls by mode and hides inactive panels (2.1.1.1)", url: "v%20and%20v.htm", method: "Test", evidence: "UI walkthrough", ref: "V_MULTI_system-overview_v1_0_s01.mp4 [08:00–08:15]" },
+      { id: 77, title: "V&V: Teach mode shows waypoint list with add/edit/remove (2.1.1.2)", url: "v%20and%20v.htm", method: "Test", evidence: "Teach mode demo", ref: "V_MULTI_system-overview_v1_0_s01.mp4 [29:55–35:10]" },
+      { id: 78, title: "V&V: Waypoint editor validates dwell/time fields (2.1.1.3)", url: "v%20and%20v.htm", method: "Test", evidence: "Teach mode demo", ref: "V_MULTI_system-overview_v1_0_s01.mp4 [29:55–35:10]" },
+      { id: 79, title: "V&V: Waypoint list supports reordering (2.1.1.4)", url: "v%20and%20v.htm", method: "Test", evidence: "Photographic/Video recorded evidence", ref: "V_MULTI_system-overview_v1_0_s01.mp4 [29:55–35:10]" },
+      { id: 81, title: "V&V: Waypoints can be grouped into named subroutines (2.1.1.6)", url: "v%20and%20v.htm", method: "Test", evidence: "Photographic/Video recorded evidence", ref: "V_MULTI_system-overview_v1_0_s01.mp4 [35:10–36:40]" },
+      { id: 82, title: "V&V: Per-joint jog buttons support configurable increments (2.1.1.7)", url: "v%20and%20v.htm", method: "Test", evidence: "Photographic/Video recorded evidence", ref: "V_MULTI_system-overview_v1_0_s01.mp4 [04:42–06:00]" },
+      { id: 84, title: "V&V: Controller exposes LED control channels/status byte (2.1.2.1)", url: "v%20and%20v.htm", method: "Inspection", evidence: "Photographic/Video recorded evidence", ref: "V_MULTI_system-overview_v1_0_s01.mp4 [00:00–06:00]" },
+      { id: 86, title: "V&V: LED control covers ready/running/teach/fault states (2.1.2.3)", url: "v%20and%20v.htm", method: "Test", evidence: "Snapshot", ref: "V_MULTI_system-overview_v1_0_s01.mp4 [00:00–04:00]" },
+      { id: 88, title: "V&V: Routine list supports create/rename/delete (2.2.1.1)", url: "v%20and%20v.htm", method: "Test", evidence: "Snapshot", ref: "V_MULTI_system-overview_v1_0_s01.mp4 [35:10–36:40]" },
+      { id: 90, title: "V&V: Timeline editor adds/reorders routines and stores JSON (2.2.1.3)", url: "v%20and%20v.htm", method: "Test", evidence: "Snapshot", ref: "V_MULTI_system-overview_v1_0_s01.mp4 [35:10–36:40]" },
+      { id: 92, title: "V&V: App stores configuration in dedicated config directory (2.2.1.5)", url: "v%20and%20v.htm", method: "Test", evidence: "Photographic/Video recorded evidence" }
     ];
 
     const referenceCatalog = {};
@@ -243,26 +285,29 @@
         referenceCatalog[id] = { title: group.title, url: group.url };
       });
     });
+    vvReferences.forEach(ref => {
+      referenceCatalog[ref.id] = ref;
+    });
 
     const docContent = [
       { type: "heading", text: "Kinematics (Forward & Inverse)" },
       {
         type: "paragraph",
-        text: "The robot’s software includes a kinematic model for the Lynxmotion AL5A arm implementing both forward and inverse kinematics. The forward kinematics (FK) function computes the end-effector’s 3D position given current joint angles, which is used to update the on-screen robot model for real-time feedback[1]. The inverse kinematics (IK) solver analytically computes joint angles needed to reach a target Cartesian point (x, y, z) with a desired wrist pitch orientation[2]. The IK code first determines the base rotation (yaw) via atan2(y, x) and uses planar geometry (shoulder + elbow) to solve for the arm’s reach in the vertical plane[2]. If the requested target is outside the reachable workspace, the solver gracefully scales back the target distance to the maximum reach to avoid invalid solutions[3]. This prevents impossible commands by clamping the target to the arm’s reachable radius. After computing angles for the base, shoulder, elbow, and wrist, each joint angle is bounded by its safe range using the calibrated limits. The software defines a ServoConfig for each joint that enforces min/max angles and maps angles to servo pulse widths. Every time an angle is set or a servo command generated, it is passed through ServoConfig.clamp_angle() to clip it to the calibrated hard limits[4]. This centralized clamping ensures IK solutions and manual jogs never exceed mechanical limits. Finally, the clamped angles are converted to pulse widths via a linear interpolation between the calibrated min/max pulses[4], producing safe servo commands. In summary, the kinematics module provides robust motion planning: FK for visualization and IK for target-reaching, with built-in checks that reject unreachable positions and respect joint constraints in software."
+        text: "The robot’s software includes a kinematic model for the Lynxmotion AL5A arm implementing both forward and inverse kinematics. The forward kinematics (FK) function computes the end-effector’s 3D position given current joint angles, which is used to update the on-screen robot model for real-time feedback[1][69]. The inverse kinematics (IK) solver analytically computes joint angles needed to reach a target Cartesian point (x, y, z) with a desired wrist pitch orientation[2][70]. The IK code first determines the base rotation (yaw) via atan2(y, x) and uses planar geometry (shoulder + elbow) to solve for the arm’s reach in the vertical plane[2]. If the requested target is outside the reachable workspace, the solver gracefully scales back the target distance to the maximum reach to avoid invalid solutions[3][71]. This prevents impossible commands by clamping the target to the arm’s reachable radius. After computing angles for the base, shoulder, elbow, and wrist, each joint angle is bounded by its safe range using the calibrated limits. The software defines a ServoConfig for each joint that enforces min/max angles and maps angles to servo pulse widths. Every time an angle is set or a servo command generated, it is passed through ServoConfig.clamp_angle() to clip it to the calibrated hard limits[4][71]. This centralized clamping ensures IK solutions and manual jogs never exceed mechanical limits. Finally, the clamped angles are converted to pulse widths via a linear interpolation between the calibrated min/max pulses[4], producing safe servo commands. In summary, the kinematics module provides robust motion planning: FK for visualization and IK for target-reaching, with built-in checks that reject unreachable positions and respect joint constraints in software."
       },
       { type: "heading", text: "Calibration and Configuration" },
       {
         type: "paragraph",
-        text: "To achieve consistent motion, each servo is calibrated so the software knows how input angles map to actual robot poses. The implementation provides an interactive, guided calibration workflow. On starting calibration, the UI steps through each servo motor one at a time and guides the operator to record four key reference positions per joint: “zero” (a known reference angle, e.g. vertical pose), mechanical minimum, maximum, and center[5]. Internally, the code generates a sequence of calibration steps for every servo index, e.g. for servo 0: (0, \"zero\"), (0, \"min\"), (0, \"max\"), (0, \"center\"), then repeats for servo 1, etc.[5]. At each step, the software moves the servo to the target position and lets the user adjust/confirm alignment. For example, at a “zero” step the arm is moved to a clearly identifiable vertical pose, establishing a zero reference offset for that joint[6]. At “min” and “max” steps the operator drives the joint to its physical end stops and the corresponding pulse widths are recorded. The UI indicates progress (e.g. “Step 3 of 4” for a given servo) and allows the user to input the measured angle if needed. When the guided tour completes, the software automatically returns the last servo to its zero position[7] and exits calibration mode with a confirmation message."
+        text: "To achieve consistent motion, each servo is calibrated so the software knows how input angles map to actual robot poses. The implementation provides an interactive, guided calibration workflow. On starting calibration, the UI steps through each servo motor one at a time and guides the operator to record four key reference positions per joint: “zero” (a known reference angle, e.g. vertical pose), mechanical minimum, maximum, and center[5][65]. Internally, the code generates a sequence of calibration steps for every servo index, e.g. for servo 0: (0, \"zero\"), (0, \"min\"), (0, \"max\"), (0, \"center\"), then repeats for servo 1, etc.[5]. At each step, the software moves the servo to the target position and lets the user adjust/confirm alignment. For example, at a “zero” step the arm is moved to a clearly identifiable vertical pose, establishing a zero reference offset for that joint[6]. At “min” and “max” steps the operator drives the joint to its physical end stops and the corresponding pulse widths are recorded. The UI indicates progress (e.g. “Step 3 of 4” for a given servo) and allows the user to input the measured angle if needed. When the guided tour completes, the software automatically returns the last servo to its zero position[7] and exits calibration mode with a confirmation message."
       },
       {
         type: "paragraph",
-        text: "All collected calibration data – each servo’s minimum and maximum pulse widths (and the corresponding angles), zero offsets, and any channel inversions – are saved to a JSON config file in the user’s app data directory (e.g. servo_offsets.json). The code packages all these values into the config: for each servo it stores the calibrated angle limits in degrees, the recorded pulse ranges, the offsets (difference between the physical zero and logical zero) and the vertical reference angles for the “zero” pose[8][9]. An example snippet of the saved config structure includes entries for \"offsets\" per servo and \"vertical_angles\" (the zero reference angles)[10]. By storing this file in a separate config directory, the implementation avoids losing calibration data during software updates. In fact, on first launch the application seeds the config folder with default servo limits and settings, and thereafter keeps user calibration persisted outside the main program so updates do not overwrite it[11]. The calibration process can be repeated as needed (for example, if a servo is replaced or drifts over time), and the UI provides controls to invert a servo’s direction or adjust its range which are immediately saved. This design ensures the arm’s open-loop control remains as accurate as possible: the servo angle→pulse mappings are tuned to the actual hardware, and a stable zero reference is defined for repeatable positioning."
+        text: "All collected calibration data – each servo’s minimum and maximum pulse widths (and the corresponding angles), zero offsets, and any channel inversions – are saved to a JSON config file in the user’s app data directory (e.g. servo_offsets.json). The code packages all these values into the config: for each servo it stores the calibrated angle limits in degrees, the recorded pulse ranges, the offsets (difference between the physical zero and logical zero) and the vertical reference angles for the “zero” pose[8][9]. An example snippet of the saved config structure includes entries for \"offsets\" per servo and \"vertical_angles\" (the zero reference angles)[10]. By storing this file in a separate config directory, the implementation avoids losing calibration data during software updates. In fact, on first launch the application seeds the config folder with default servo limits and settings, and thereafter keeps user calibration persisted outside the main program so updates do not overwrite it[11][92]. The calibration process can be repeated as needed (for example, if a servo is replaced or drifts over time), and the UI provides controls to invert a servo’s direction or adjust its range which are immediately saved. This design ensures the arm’s open-loop control remains as accurate as possible: the servo angle→pulse mappings are tuned to the actual hardware, and a stable zero reference is defined for repeatable positioning."
       },
       { type: "heading", text: "Teleoperation Command Generation" },
       {
         type: "paragraph",
-        text: "In teleoperation (manual control) mode, the operator can move the robot by dragging a target position marker or using nudge controls. The software updates the target position incrementally for each small user action, then solves IK and issues a new servo command in real-time. For every change to the target (for instance, the user drags the red target dot on the XY plane or scrolls the mouse to adjust Z height), the InteractiveArm.update_robot() function is called. This function clamps the requested target within allowed workspace bounds and computes a fresh IK solution for the new target[12]. The resulting joint angles are then combined with the current wrist rotation and gripper angles, and the full servo command is prepared. Instead of commanding the servos to jump immediately, the code breaks the motion into a smooth interpolation. Specifically, it enqueues a move command with a specified travel time (set by the user’s speed setting) and enables a smoothing flag[13]. In the background, a command worker thread takes this target and subdivides the motion into smaller segments using an ease-in/ease-out profile, generating intermediate joint positions between the current and target angles[14][15]. Each segment is sent to the servo controller with a short duration (e.g. 60 ms), which effectively creates a continuous trajectory over the total travel time rather than a single abrupt step. This implementation detail ensures fluid, non-jerky motion – as described in the design report, “joint targets are converted into smooth, time-stepped PWM commands… to avoid abrupt motion”[16]."
+        text: "In teleoperation (manual control) mode, the operator can move the robot by dragging a target position marker or using nudge controls[63][82]. The software updates the target position incrementally for each small user action, then solves IK and issues a new servo command in real-time[64]. For every change to the target (for instance, the user drags the red target dot on the XY plane or scrolls the mouse to adjust Z height), the InteractiveArm.update_robot() function is called. This function clamps the requested target within allowed workspace bounds and computes a fresh IK solution for the new target[12][66]. If a flurry of new target points arrives before the arm finishes its previous move, intermediate targets are dropped so the arm always heads toward the latest request without building up a backlog[72]. The resulting joint angles are then combined with the current wrist rotation and gripper angles, and the full servo command is prepared. Instead of commanding the servos to jump immediately, the code breaks the motion into a smooth interpolation. Specifically, it enqueues a move command with a specified travel time (set by the user’s speed setting) and enables a smoothing flag[13]. In the background, a command worker thread takes this target and subdivides the motion into smaller segments using an ease-in/ease-out profile, generating intermediate joint positions between the current and target angles[14][15]. Each segment is sent to the servo controller with a short duration (e.g. 60 ms), which effectively creates a continuous trajectory over the total travel time rather than a single abrupt step. This implementation detail ensures fluid, non-jerky motion – as described in the design report, “joint targets are converted into smooth, time-stepped PWM commands… to avoid abrupt motion”[16]."
       },
       {
         type: "paragraph",
@@ -271,11 +316,11 @@
       { type: "heading", text: "Teach Mode and Keyframe Sequences" },
       {
         type: "paragraph",
-        text: "The Teach Mode allows the operator to move the arm through a desired sequence of positions (waypoints) and record these motions as a routine for later playback. In teach mode, the software UI is identical for control (the user still drags the target or uses jog controls), but crucially, the system does not send commands to the physical robot in real time – it only drives the virtual model and logs the data. This is achieved with an internal mode flag: when _operation_mode == \"teach\", the command thread, instead of calling the controller, updates the current_joints state and calls a recorder function to log the sample[18]. Each recorded TeachSample typically stores the timestamp, the joint angles, the end-effector Cartesian coordinates, the wrist pitch/rotation, gripper state, and the move duration or any dwell time[19][20]. Essentially, every small motion in teach mode (which is still executed via IK on the digital twin) is captured as a time-stamped trajectory point. The UI indicates the recording status with a blinking REC indicator (yellow LED overlay and on-screen label) when teach mode is active, and the operator can pause or stop recording via on-screen buttons."
+        text: "The Teach Mode allows the operator to move the arm through a desired sequence of positions (waypoints) and record these motions as a routine for later playback. In teach mode, the software UI is identical for control (the user still drags the target or uses jog controls), but crucially, the system does not send commands to the physical robot in real time – it only drives the virtual model and logs the data. This is achieved with an internal mode flag: when _operation_mode == \"teach\", the command thread, instead of calling the controller, updates the current_joints state and calls a recorder function to log the sample[18][77]. Each recorded TeachSample typically stores the timestamp, the joint angles, the end-effector Cartesian coordinates, the wrist pitch/rotation, gripper state, and the move duration or any dwell time[19][20]. Essentially, every small motion in teach mode (which is still executed via IK on the digital twin) is captured as a time-stamped trajectory point. The UI indicates the recording status with a blinking REC indicator (yellow LED overlay and on-screen label) when teach mode is active, and the operator can pause or stop recording via on-screen buttons."
       },
       {
         type: "paragraph",
-        text: "Once a teaching session is stopped, the accumulated waypoints are processed and saved. The software automatically performs a smoothing pass on the raw recorded points (to merge very close points and create a cleaner path) and then prompts the user to save the taught routine. Under the hood, the list of waypoints (with positions, orientations, durations, etc.) is converted into a subroutine JSON file in a designated subroutines directory[21]. For example, if a teach session was recorded, the code will generate a name like “Teach session 20260103-1724” (timestamped) and create a slug for it (a filesystem-friendly name). It then serializes the data as:"
+        text: "Once a teaching session is stopped, the accumulated waypoints are processed and saved. The software automatically performs a smoothing pass on the raw recorded points (to merge very close points and create a cleaner path) and then prompts the user to save the taught routine. Under the hood, the list of waypoints (with positions, orientations, durations, etc.) is converted into a subroutine JSON file in a designated subroutines directory[21][81]. For example, if a teach session was recorded, the code will generate a name like “Teach session 20260103-1724” (timestamped) and create a slug for it (a filesystem-friendly name). It then serializes the data as:"
       },
       {
         type: "code",
@@ -287,25 +332,25 @@
       },
       {
         type: "paragraph",
-        text: "The teach mode interface provides a number of features to refine and manage these keyframes. All recorded waypoints are listed, and the operator can select any waypoint to edit it. The implementation allows one to insert or delete keyframes, modify the timing, and even adjust the pose after recording. For instance, if a certain waypoint’s position is slightly off, the user can move the arm to a better position and hit “Update” to replace that keyframe’s coordinates with the current ones. There are also Copy and Paste buttons that let the user duplicate a waypoint – the code simply deep-copies the selected Waypoint object and inserts it into the list (at either the end or right after the selected index)[24][25]. Each waypoint has a textual name (e.g. “Pick Bottom Bun” or “Move to Grill”) which can be edited via a text box; when the user confirms a new name, the code updates the Waypoint.name field and refreshes the display[26]. Similarly, an edit box next to each waypoint shows its travel duration, and any change there updates the waypoint’s duration property in the list[27]. A dedicated Delete button allows removing a selected waypoint from the sequence (with safety checks if none is selected)[28]. All these edits are persisted by an auto-save mechanism – e.g. after changing a duration or name, the _save_waypoints() function is called to write the updated list back to the subroutine file[29][30]. This rich teach interface (multiple edit operations, naming, copy/paste) significantly improves the ease of creating precise routines. The operator can fine-tune the sequence without needing to perfectly record it in one go, which aligns with the project’s goal of an adaptable and user-friendly teach pendant."
+        text: "The teach mode interface provides a number of features to refine and manage these keyframes. All recorded waypoints are listed, and the operator can select any waypoint to edit it. The implementation allows one to insert or delete keyframes, modify the timing, and even adjust the pose after recording[77][78]. For instance, if a certain waypoint’s position is slightly off, the user can move the arm to a better position and hit “Update” to replace that keyframe’s coordinates with the current ones. There are also Copy and Paste buttons that let the user duplicate a waypoint – the code simply deep-copies the selected Waypoint object and inserts it into the list (at either the end or right after the selected index)[24][25]. Each waypoint has a textual name (e.g. “Pick Bottom Bun” or “Move to Grill”) which can be edited via a text box; when the user confirms a new name, the code updates the Waypoint.name field and refreshes the display[26]. Similarly, an edit box next to each waypoint shows its travel duration, and any change there updates the waypoint’s duration property in the list[27]. A dedicated Delete button allows removing a selected waypoint from the sequence (with safety checks if none is selected)[28][79]. All these edits are persisted by an auto-save mechanism – e.g. after changing a duration or name, the _save_waypoints() function is called to write the updated list back to the subroutine file[29][30][88]. This rich teach interface (multiple edit operations, naming, copy/paste) significantly improves the ease of creating precise routines. The operator can fine-tune the sequence without needing to perfectly record it in one go, which aligns with the project’s goal of an adaptable and user-friendly teach pendant."
       },
       { type: "heading", text: "Timeline Orchestration and Execution" },
       {
         type: "paragraph",
-        text: "Beyond individual subroutines, the software supports a higher-level timeline that allows the user to assemble a full burger-building process from modular routines. In the UI, saved subroutines appear in a catalog and can be added to a timeline (which is essentially an ordered list of routine entries). For example, a “Build Burger” timeline might consist of subroutines like Pick and Place Bottom Bun, Add Patty, Add Top Bun, each of which is a taught sequence of moves. The timeline implementation lets the user reorder these entries via drag-and-drop and choose to loop the timeline continuously or run it just once. Internally, the timeline is represented as a list of TimelineEntry dataclasses (each holding a subroutine name, its slug, and cached duration)[31][32]. The timeline configuration is saved to timeline.json so that the overall sequence is preserved between sessions[33][34]."
+        text: "Beyond individual subroutines, the software supports a higher-level timeline that allows the user to assemble a full burger-building process from modular routines. In the UI, saved subroutines appear in a catalog and can be added to a timeline (which is essentially an ordered list of routine entries). For example, a “Build Burger” timeline might consist of subroutines like Pick and Place Bottom Bun, Add Patty, Add Top Bun, each of which is a taught sequence of moves[90]. The timeline implementation lets the user reorder these entries via drag-and-drop and choose to loop the timeline continuously or run it just once. Internally, the timeline is represented as a list of TimelineEntry dataclasses (each holding a subroutine name, its slug, and cached duration)[31][32]. The timeline configuration is saved to timeline.json so that the overall sequence is preserved between sessions[33][34][90]."
       },
       {
         type: "paragraph",
-        text: "When the operator hits “Play timeline”, the software first ensures the system is in the proper mode (the design enforces that only Run Mode can execute motions on hardware, requiring an explicit user confirmation for safety[35]). Then a timeline playback thread is started[36][37]. This thread iterates through the list of timeline entries in order and executes each one in turn[38]. For each entry, the corresponding subroutine file is loaded (JSON of waypoints) and the software calls the same execution function used for single routine playback. As it begins each routine, the code highlights the active step in the UI and updates the selected subroutine for clarity[38]. The execute_waypoint_sequence function then runs through all waypoints in that subroutine: for each waypoint, it takes the stored pose and duration, computes the IK solution for the pose (kin.inverse is invoked on the target position and desired wrist pitch) and clamps it to valid joint angles[39]. It then sets the gripper and wrist rotation to the recorded values and streams the joint command to the controller with the specified travel time[40]. The thread waits for all segments of that motion to complete (synchronizing via the command queue) before moving to the next waypoint[41][42]. In this way, the routine is replayed exactly as taught. After finishing one subroutine, the timeline thread proceeds to the next entry unless a stop is requested. There is also a Repeat toggle for the timeline – if enabled, once it reaches the end of the list, the thread will loop back to the first entry and continue indefinitely until stopped by the user[43]. If repeat is off, the loop breaks after the last routine is done[44]. Throughout execution, the software updates status indicators (discussed below) and monitors for any stop event (for example, if the user hits an emergency stop or the stop button, a flag is set and the thread breaks out of all loops promptly[37][44]). This timeline system allows rapid reconfiguration of the overall task: the user can reorder steps or swap out a routine (e.g. replace a patty-placement routine with a different version) without re-teaching everything from scratch. The design explicitly mentions that the timeline enables quick changes to the burger build sequence “without re-teaching fundamental motions”[45], which is fully realized by this modular playback approach."
+        text: "When the operator hits “Play timeline”, the software first ensures the system is in the proper mode (the design enforces that only Run Mode can execute motions on hardware, requiring an explicit user confirmation for safety[35]). Then a timeline playback thread is started[36][37]. This thread iterates through the list of timeline entries in order and executes each one in turn[38][74]. For each entry, the corresponding subroutine file is loaded (JSON of waypoints) and the software calls the same execution function used for single routine playback. As it begins each routine, the code highlights the active step in the UI and updates the selected subroutine for clarity[38]. The execute_waypoint_sequence function then runs through all waypoints in that subroutine: for each waypoint, it takes the stored pose and duration, computes the IK solution for the pose (kin.inverse is invoked on the target position and desired wrist pitch) and clamps it to valid joint angles[39][73]. It then sets the gripper and wrist rotation to the recorded values and streams the joint command to the controller with the specified travel time[40]. The thread waits for all segments of that motion to complete (synchronizing via the command queue) before moving to the next waypoint[41][42]. In this way, the routine is replayed exactly as taught. After finishing one subroutine, the timeline thread proceeds to the next entry unless a stop is requested. There is also a Repeat toggle for the timeline – if enabled, once it reaches the end of the list, the thread will loop back to the first entry and continue indefinitely until stopped by the user[43][74]. If repeat is off, the loop breaks after the last routine is done[44]. Throughout execution, the software updates status indicators (discussed below) and monitors for any stop event (for example, if the user hits an emergency stop or the stop button, a flag is set and the thread breaks out of all loops promptly[37][44]). This timeline system allows rapid reconfiguration of the overall task: the user can reorder steps or swap out a routine (e.g. replace a patty-placement routine with a different version) without re-teaching everything from scratch. The design explicitly mentions that the timeline enables quick changes to the burger build sequence “without re-teaching fundamental motions”[45], which is fully realized by this modular playback approach."
       },
       { type: "heading", text: "User Interface and Usability Improvements" },
       {
         type: "paragraph",
-        text: "The implementation includes several user-focused enhancements to improve usability and system feedback. One major addition is a set of status LEDs driven by the SSC-32U controller’s spare channels to indicate the robot’s state at a glance. The software maps six LED channels (red, amber, green, blue, yellow, white) to specific status semantics[46]. The controller is configured so that, for example, green represents the robot is enabled and ready (solid green) or currently moving (blinking green)[47]. Yellow is used as a mode indicator – it turns on in Teach mode or during calibration to show the robot is in a special manual or learning state[48]. Blue lights up when the robot is under remote control (i.e. the PC controller is connected and active)[49]. These LEDs follow an industrial traffic-light style plan with priority semantics (red for faults, amber for paused or needing attention, green for normal operation)[50][51]. The software updates the LED states in real time as modes change. For instance, when switching into Teach mode, the code sets the yellow LED state on (and when recording it might blink to indicate active recording)[52]. During Live/Run operation, the blue “automation” LED is solid, and the green LED toggles between solid and slow-blink depending on whether the arm is idle or executing a motion[47]. This feedback was implemented using a StatusLEDController class that translates high-level RobotISOState (Idle, Running, Fault, etc.) into LED pulse commands. Since the SSC-32 has no general-purpose I/O, the solution cleverly uses PWM signals on unused servo channels to drive LEDs[53][54]. The team acknowledged this is a prototype solution (some flicker can occur) but it provides invaluable immediate feedback to the operator about the robot’s status[55][56]. The design implementation specifically notes that green, yellow, and blue LEDs were reserved for mode and activity indication[57], which is achieved in the code as described."
+        text: "The implementation includes several user-focused enhancements to improve usability and system feedback. One major addition is a set of status LEDs driven by the SSC-32U controller’s spare channels to indicate the robot’s state at a glance[84]. The software maps six LED channels (red, amber, green, blue, yellow, white) to specific status semantics[46]. The controller is configured so that, for example, green represents the robot is enabled and ready (solid green) or currently moving (blinking green)[47][86]. Yellow is used as a mode indicator – it turns on in Teach mode or during calibration to show the robot is in a special manual or learning state[48][86]. Blue lights up when the robot is under remote control (i.e. the PC controller is connected and active)[49]. These LEDs follow an industrial traffic-light style plan with priority semantics (red for faults, amber for paused or needing attention, green for normal operation)[50][51]. The software updates the LED states in real time as modes change. For instance, when switching into Teach mode, the code sets the yellow LED state on (and when recording it might blink to indicate active recording)[52]. During Live/Run operation, the blue “automation” LED is solid, and the green LED toggles between solid and slow-blink depending on whether the arm is idle or executing a motion[47][86]. This feedback was implemented using a StatusLEDController class that translates high-level RobotISOState (Idle, Running, Fault, etc.) into LED pulse commands. Since the SSC-32 has no general-purpose I/O, the solution cleverly uses PWM signals on unused servo channels to drive LEDs[53][54]. The team acknowledged this is a prototype solution (some flicker can occur) but it provides invaluable immediate feedback to the operator about the robot’s status[55][56]. The design implementation specifically notes that green, yellow, and blue LEDs were reserved for mode and activity indication[57], which is achieved in the code as described."
       },
       {
         type: "paragraph",
-        text: "Other usability features in the UI include a home position command (to quickly return the arm to a known safe pose), a toggle to display raw servo angles vs. user-friendly angles (the “Show raw” button toggles the servo readout between pulse-based angles and normalized angles for clarity[58][59]), and contextual warnings. For example, if the user tries to paste a waypoint without copying one first or run the robot without calibration, the software logs an info message or warning instead of failing silently[60][28]. The interface is built with Matplotlib and is event-driven, so every button (Calibrate, Record, Save, etc.) is wired to a handler function in the code. These handlers not only perform the action but also update the button’s label/color to give visual feedback (e.g. the Calibrate button turns light blue and shows a checkmark when calibration is active[61]). In Run mode, the software implements a two-step arming mechanism: the “Arm + Run” sequence. The user must first press an “Arm” button which likely turns the amber LED on (signaling the system is enabled and waiting), and then confirm to actually start the automated routine (turning amber off and green blinking as the robot moves). This prevents accidental starts – a requirement highlighted in the safety considerations. Additionally, the entire configuration (including servo calibration, LED pin mappings, and saved routines/timeline) is stored in the user’s app data and reloaded on startup, meaning the controller comes up ready with the previous session’s data (no need to recalibrate or re-import routines each time)[62]."
+        text: "Other usability features in the UI include a home position command (to quickly return the arm to a known safe pose), a toggle to display raw servo angles vs. user-friendly angles (the “Show raw” button toggles the servo readout between pulse-based angles and normalized angles for clarity[58][59][68]), and contextual warnings. For example, if the user tries to paste a waypoint without copying one first or run the robot without calibration, the software logs an info message or warning instead of failing silently[60][28]. The interface is built with Matplotlib and is event-driven, so every button (Calibrate, Record, Save, etc.) is wired to a handler function in the code[76]. These handlers not only perform the action but also update the button’s label/color to give visual feedback (e.g. the Calibrate button turns light blue and shows a checkmark when calibration is active[61][65]). In Run mode, the software implements a two-step arming mechanism: the “Arm + Run” sequence. The user must first press an “Arm” button which likely turns the amber LED on (signaling the system is enabled and waiting), and then confirm to actually start the automated routine (turning amber off and green blinking as the robot moves). This prevents accidental starts – a requirement highlighted in the safety considerations. Additionally, the entire configuration (including servo calibration, LED pin mappings, and saved routines/timeline) is stored in the user’s app data and reloaded on startup, meaning the controller comes up ready with the previous session’s data (no need to recalibrate or re-import routines each time)[62][92]."
       },
       {
         type: "paragraph",
@@ -329,7 +374,9 @@
       "[35] [62] README.md",
       "https://github.com/AW-Arts/Robot_UWE/blob/1efa2d6b1ccd46d0d3a14f46fabb3ccb4edff323/README.md",
       "[46] [47] [48] [49] [50] [51] [52] [53] [54] [55] [56] status_led_plan.md",
-      "https://github.com/AW-Arts/Robot_UWE/blob/1efa2d6b1ccd46d0d3a14f46fabb3ccb4edff323/docs/status_led_plan.md"
+      "https://github.com/AW-Arts/Robot_UWE/blob/1efa2d6b1ccd46d0d3a14f46fabb3ccb4edff323/docs/status_led_plan.md",
+      "[63] [64] [65] [66] [68] [69] [70] [71] [72] [73] [74] [76] [77] [78] [79] [81] [82] [84] [86] [88] [90] [92] v and v.htm (Stakeholder Needs V3 – verification & validation evidence)",
+      "v and v.htm"
     ];
 
     const tooltip = document.getElementById("tooltip");
@@ -420,23 +467,36 @@
       const entry = referenceCatalog[id];
       if (!entry) return `<div class="ref-row"><strong>[${id}]</strong> No mapped reference.</div>`;
       const link = entry.url ? `<br /><a href="${entry.url}" target="_blank" rel="noreferrer">${entry.url}</a>` : "";
-      return `<div class="ref-row"><strong>[${id}]</strong> ${entry.title}${link}</div>`;
+      const details = [];
+      if (entry.method) details.push(`<strong>Method:</strong> ${entry.method}`);
+      if (entry.evidence) details.push(`<strong>Evidence:</strong> ${entry.evidence}`);
+      if (entry.ref) details.push(`<strong>Trace:</strong> ${entry.ref}`);
+      if (entry.details) details.push(entry.details);
+      const detailHtml = details.length ? `<div class="ref-details">${details.join("<br />")}</div>` : "";
+      return `<div class="ref-row"><strong>[${id}]</strong> ${entry.title}${link}${detailHtml}</div>`;
     }
 
-    function showTooltip(target, event) {
-      const raw = target.dataset.refs;
-      if (!raw) return;
-      let refs;
-      try { refs = JSON.parse(raw); } catch { refs = []; }
-      if (!refs.length) return;
-      tooltip.innerHTML = refs.map(describeRef).join("");
+    function parseRefs(raw) {
+      if (!raw) return [];
+      try { return JSON.parse(raw); } catch { return []; }
+    }
+
+    function positionTooltip(event) {
       tooltip.style.left = `${event.pageX + 12}px`;
       tooltip.style.top = `${event.pageY + 12}px`;
+    }
+
+    function showTooltip(refs, event, interactive = false) {
+      if (!refs || !refs.length) return;
+      tooltip.innerHTML = refs.map(describeRef).join("");
+      positionTooltip(event);
+      tooltip.classList.toggle("interactive", interactive);
       tooltip.classList.add("visible");
       tooltip.setAttribute("aria-hidden", "false");
     }
 
     function hideTooltip() {
+      if (isTooltipPinned) return;
       tooltip.classList.remove("visible");
       tooltip.setAttribute("aria-hidden", "true");
     }
@@ -445,13 +505,38 @@
     renderFootnotes();
     renderLegend();
 
+    let isTooltipPinned = false;
+    let activeRefs = [];
+
     document.addEventListener("mousemove", event => {
+      if (isTooltipPinned) {
+        if (activeRefs.length) {
+          showTooltip(activeRefs, event, true);
+        }
+        return;
+      }
       const target = event.target.closest(".clause");
-      if (target && target.dataset.refs) {
-        showTooltip(target, event);
+      const refs = target ? parseRefs(target.dataset.refs) : [];
+      if (refs.length) {
+        activeRefs = refs;
+        showTooltip(refs, event);
       } else {
         hideTooltip();
       }
+    });
+
+    document.addEventListener("mousedown", event => {
+      const target = event.target.closest(".clause");
+      const refs = target ? parseRefs(target.dataset.refs) : [];
+      if (!refs.length) return;
+      isTooltipPinned = true;
+      activeRefs = refs;
+      showTooltip(refs, event, true);
+    });
+
+    document.addEventListener("mouseup", () => {
+      isTooltipPinned = false;
+      tooltip.classList.remove("interactive");
     });
   </script>
 </body>
