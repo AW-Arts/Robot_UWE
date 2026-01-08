@@ -6,8 +6,7 @@ MATLAB utility for commanding a Lynxmotion AL5A manipulator.  The tools offer:
 - Basic forward and inverse kinematics for the Lynxmotion AL5A geometry.
 - Conversion between joint angles and servo pulses for SSC-32/SSC-32U controllers.
 - Serial communication helpers with both hardware and simulation backends.
-- A matplotlib-based UI that allows you to drag the end-effector target in the
-  XY plane while using the mouse wheel to adjust height.  Every interaction is
+- A matplotlib-based UI that displays target.  Every interaction is
   translated into servo commands for the AL5A.
 - A MATLAB `teach`-based interface that mirrors joint slider movements to an
   SSC-32/SSC-32U controller, letting you keep your workflow inside the
