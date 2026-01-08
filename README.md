@@ -56,27 +56,6 @@ Use the **Modes** panel to switch between:
 - **Teach Mode:** mirrors the Live UI but drives only the digital twin while auto-recording every move with timestamps, gripper states, and dwell metadata; recordings auto-save and can be smoothed before finalizing.
 - **Run Mode:** the only mode that replays routines on hardware, gated by an explicit **Arm + confirm run** step to prevent accidental motion.
 
-## Running the interactive controller (MATLAB)
-
-If you prefer to remain in MATLAB, use the `al5a_teach.m` helper which is built
-on Peter Corke's Robotics Toolbox (`rvctools`).  Ensure the toolbox is on your
-path, then launch the teach pendant:
-
-```matlab
-al5a_teach
-```
-
-Pass a serial port to stream the slider commands to an SSC-32/SSC-32U
-controller:
-
-```matlab
-al5a_teach("COM3", 'TravelTime', 1.0);
-```
-
-Use the slider controls to manipulate the arm.  Joint commands are converted to
-servo pulses with the same limits as the Python implementation, keeping the two
-workflows aligned.
-
 ## Notes
 
 - The kinematic model uses the standard Lynxmotion AL5B link lengths (4.75"
